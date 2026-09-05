@@ -15,7 +15,6 @@ import json
 import mimetypes
 import os
 import re
-import secrets
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +31,7 @@ from ..core import (
     Response,
     _credentials,
     _decode_body,
+    _encrypt_cas_password,
     _header_value,
     require_logged_in,
     parse_html,
@@ -51,7 +51,6 @@ VPN_LOGIN_PATH = "/api/users/auth/login"
 VPN_INFO_PATH = "/api/users/info"
 VPN_LOGOUT_PATH = "/api/users/auth/logout"
 VPN_REFRESH_PATH = "/api/v1/user/refreshToken"
-_CAS_AES_CHARS = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
 
 
 @dataclass(frozen=True)
@@ -948,27 +947,6 @@ def _encrypt_password(password: str, login_key: str) -> str:
     padded = padder.update(password.encode("utf-8")) + padder.finalize()
     cipher = Cipher(algorithms.AES(login_key.encode("utf-8")), modes.CBC(login_key[::-1].encode("utf-8")))
     encryptor = cipher.encryptor()
-    return base64.b64encode(encryptor.update(padded) + encryptor.finalize()).decode("ascii")
-
-
-def _encrypt_cas_password(password: str, salt: str) -> str:
-    """Match the CAS page's AES password obfuscation."""
-    salt = salt.strip()
-    if not salt:
-        return password
-    key = salt.encode("utf-8")
-    if len(key) not in {16, 24, 32}:
-        return password
-    try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cryptography.hazmat.primitives.padding import PKCS7
-    except ImportError as exc:
-        raise CsustError("VPN 统一认证需要 cryptography 依赖", code="dependency_missing", details={"package": "cryptography"}) from exc
-    prefix = "".join(secrets.choice(_CAS_AES_CHARS) for _ in range(64))
-    iv = "".join(secrets.choice(_CAS_AES_CHARS) for _ in range(16)).encode("utf-8")
-    padder = PKCS7(128).padder()
-    padded = padder.update((prefix + password).encode("utf-8")) + padder.finalize()
-    encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
     return base64.b64encode(encryptor.update(padded) + encryptor.finalize()).decode("ascii")
 
 

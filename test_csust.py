@@ -40,7 +40,7 @@ from csust import (
     submit_textbook_action,
 )
 from csust_cli.cli import _run_logout, main
-from csust_cli.core import Client, CsustError, HttpError, LoginRequired, MutationUnverified, NetworkError, _SafeRedirectHandler, _append_query, _credentials, _decode_body, _safe_terminal_text, _safe_url, _safe_urljoin, _save_cookie_refresh, ensure_session, internal_url, login, require_logged_in, same_origin_url, solve_captcha
+from csust_cli.core import Client, CsustError, HttpError, LOGIN_PROBE_PATH, LoginRequired, MutationUnverified, NetworkError, _SafeRedirectHandler, _append_query, _credentials, _decode_body, _login_sso, _safe_terminal_text, _safe_url, _safe_urljoin, _save_cookie_refresh, ensure_session, internal_url, login, require_logged_in, same_origin_url, solve_captcha
 from csust_cli.features.academic import _options, _response_message, _run_evaluation, _selected, render as render_academic
 from csust_cli.features.grades import render as render_grades, run_detail
 from csust_cli.features.schedule import render as render_schedule, selected_option
@@ -791,6 +791,13 @@ class CsustParserTests(unittest.TestCase):
             save.assert_called_once()
 
     def test_unsafe_cross_origin_redirect_is_rejected(self):
+        request = Request("https://authserver.csust.edu.cn/authserver/login", method="GET")
+        redirected = _SafeRedirectHandler({"xk.csust.edu.cn"}).redirect_request(
+            request, None, 302, "Found", {}, "http://xk.csust.edu.cn/sso.jsp"
+        )
+        assert redirected is not None
+        self.assertEqual(redirected.full_url, "http://xk.csust.edu.cn/sso.jsp")
+
         request = Request("http://example.test/save", data=b"token=secret", method="POST")
         with self.assertRaises(NetworkError):
             _SafeRedirectHandler().redirect_request(request, None, 307, "Temporary Redirect", {}, "http://evil.test/save")
@@ -2182,6 +2189,57 @@ class CsustParserTests(unittest.TestCase):
             textbook_result = json.loads(output.getvalue())
             self.assertTrue(textbook_result["confirmed"])
             self.assertTrue(AcademicHandler.subscribed)
+
+    def test_sso_login_uses_authserver_form_and_education_probe(self):
+        form = """
+        <form id="pwdFromId" action="/authserver/login" method="post">
+          <input type="hidden" name="execution" value="execution-token">
+          <input type="hidden" id="pwdEncryptSalt" value="1234567890abcdef">
+          <input type="hidden" name="hidden" value="keep-me">
+          <input name="username"><input name="password" type="password">
+        </form>
+        """
+
+        class FakeSsoClient:
+            base_url = "http://xk.csust.edu.cn"
+
+            def __init__(self, cookie_file: Path):
+                self.cookie_file = cookie_file
+                self.posts = []
+                self.saved = False
+
+            def url(self, path: str) -> str:
+                return path if path.startswith(("http://", "https://")) else self.base_url + "/" + path.lstrip("/")
+
+            def get(self, path: str) -> Response:
+                if path == "/sso.jsp":
+                    return Response(self.url(path), 200, {}, "handoff")
+                if "/authserver/login?" in path:
+                    return Response(path, 200, {}, form)
+                if "/authserver/checkNeedCaptcha.htl?" in path:
+                    return Response(path, 200, {"Content-Type": "application/json"}, '{"isNeed":false}')
+                if path == LOGIN_PROBE_PATH:
+                    return Response(self.url(path), 200, {}, "education page")
+                raise AssertionError(path)
+
+            def post(self, path: str, data, **kwargs):
+                self.posts.append((path, data, kwargs))
+                return Response("http://xk.csust.edu.cn/sso.jsp", 200, {}, "sso success")
+
+            def save(self):
+                self.saved = True
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch("csust_cli.core._encrypt_cas_password", return_value="encrypted"):
+            client = FakeSsoClient(Path(directory) / "cookies.txt")
+            result = _login_sso(client, "student", "password")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["auth"], "sso")
+        self.assertTrue(client.saved)
+        self.assertEqual(len(client.posts), 1)
+        self.assertIn(("username", "student"), client.posts[0][1])
+        self.assertIn(("password", "encrypted"), client.posts[0][1])
+        self.assertIn(("_eventId", "submit"), client.posts[0][1])
 
     def test_missing_credentials_and_confirmation_are_machine_readable(self):
         with tempfile.TemporaryDirectory() as directory:

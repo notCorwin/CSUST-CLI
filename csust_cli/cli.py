@@ -42,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     login_parser = subparsers.add_parser("login", help="登录并保存会话")
     login_parser.add_argument("--username", help="账号；密码从 CSUST_PASSWORD 读取")
+    login_parser.add_argument("--auth", choices=("auto", "sso", "local"), default="auto", help="认证方式；auto 在标准教务地址优先使用统一认证")
     login_parser.add_argument("--captcha", help="显式指定验证码，仅用于测试或应急")
     login_parser.add_argument("--captcha-image", help="验证码图片保存路径")
     login_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")

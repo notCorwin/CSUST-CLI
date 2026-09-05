@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import gzip
@@ -11,6 +12,7 @@ import secrets
 import shlex
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from http.client import HTTPException
@@ -18,13 +20,19 @@ from http.cookiejar import DefaultCookiePolicy, MozillaCookieJar
 from pathlib import Path
 from typing import Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlencode, urljoin, urlparse
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlparse, urlunsplit
 from urllib.request import HTTPRedirectHandler, HTTPCookieProcessor, Request, build_opener
 
 from . import __version__
 
 
 DEFAULT_BASE_URL = "http://xk.csust.edu.cn"
+AUTHSERVER_BASE_URL = "https://authserver.csust.edu.cn"
+AUTHSERVER_LOGIN_PATH = "/authserver/login"
+AUTHSERVER_CAPTCHA_CHECK_PATH = "/authserver/checkNeedCaptcha.htl"
+AUTHSERVER_CAPTCHA_PATH = "/authserver/getCaptcha.htl"
+EDUCATION_SSO_PATH = "/sso.jsp"
+EDUCATION_SSO_SERVICE = DEFAULT_BASE_URL + EDUCATION_SSO_PATH
 USER_AGENT = f"Mozilla/5.0 (Macintosh; Intel Mac OS X) csust-cli/{__version__}"
 LOGIN_PROBE_PATH = "/jsxsd/xskb/xskb_list.do"
 CAPTCHA_RETRIES = 3
@@ -162,6 +170,10 @@ class _SafeCookiePolicy(DefaultCookiePolicy):
 
 
 class _SafeRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, allowed_downgrade_hosts: set[str] | frozenset[str] = frozenset()):
+        super().__init__()
+        self.allowed_downgrade_hosts = {str(host).rstrip(".").lower() for host in allowed_downgrade_hosts if host}
+
     def http_error_308(self, req, fp, code, msg, headers):
         return self.http_error_302(req, fp, code, msg, headers)
 
@@ -181,7 +193,11 @@ class _SafeRedirectHandler(HTTPRedirectHandler):
             raise NetworkError("已拒绝非 HTTP(S) 重定向")
         old, old_origin = old_parts
         target, target_origin = target_parts
-        if old.scheme.lower() == "https" and target.scheme.lower() == "http":
+        if (
+            old.scheme.lower() == "https"
+            and target.scheme.lower() == "http"
+            and target_origin[1] not in self.allowed_downgrade_hosts
+        ):
             raise NetworkError("已拒绝 HTTPS 到 HTTP 的重定向降级")
         cross_origin = old_origin != target_origin
         method = req.get_method().upper()
@@ -571,7 +587,14 @@ class Client:
                 os.chmod(self.cookie_file, 0o600)
             except OSError:
                 pass
-        self.opener = build_opener(_SafeRedirectHandler(), HTTPCookieProcessor(self.cookies))
+        parsed_base = urlparse(self.base_url)
+        # The legacy education SSO returns to the configured HTTP host.
+        allowed_downgrade_hosts = (
+            {parsed_base.hostname.lower()}
+            if parsed_base.scheme.lower() == "http" and parsed_base.hostname
+            else frozenset()
+        )
+        self.opener = build_opener(_SafeRedirectHandler(allowed_downgrade_hosts), HTTPCookieProcessor(self.cookies))
         self._insecure_warning_shown = False
         self._saved_cookie_state = self._cookie_state()
 
@@ -586,7 +609,7 @@ class Client:
     def warn_if_insecure(self, target: str | None = None) -> None:
         target = target or self.base_url
         if urlparse(target).scheme.lower() == "http" and not self._insecure_warning_shown:
-            print("警告：当前教务系统使用 HTTP，账号密码可能未受传输层加密保护；可用 CSUST_BASE_URL 指向 HTTPS。", file=sys.stderr)
+            print("警告：当前教务系统使用 HTTP，会话和教务数据可能未受传输层加密保护；可用 CSUST_BASE_URL 指向 HTTPS。", file=sys.stderr)
             self._insecure_warning_shown = True
 
     def request(
@@ -1041,6 +1064,199 @@ def _login_failure(body: str) -> CsustError | None:
     return None
 
 
+_CAS_AES_CHARS = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
+
+
+def _encrypt_cas_password(password: str, salt: str) -> str:
+    """Match the unified-authentication page's AES password obfuscation."""
+    salt = salt.strip()
+    if not salt:
+        return password
+    key = salt.encode("utf-8")
+    if len(key) not in {16, 24, 32}:
+        return password
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.primitives.padding import PKCS7
+    except ImportError as exc:
+        raise CsustError("统一认证登录需要 cryptography 依赖", code="dependency_missing", details={"package": "cryptography"}) from exc
+    prefix = "".join(secrets.choice(_CAS_AES_CHARS) for _ in range(64))
+    iv = "".join(secrets.choice(_CAS_AES_CHARS) for _ in range(16)).encode("utf-8")
+    padder = PKCS7(128).padder()
+    padded = padder.update((prefix + password).encode("utf-8")) + padder.finalize()
+    encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+    return base64.b64encode(encryptor.update(padded) + encryptor.finalize()).decode("ascii")
+
+
+def _authserver_url(path: str) -> str:
+    return urljoin(AUTHSERVER_BASE_URL.rstrip("/") + "/", path.lstrip("/"))
+
+
+def _authserver_login_url(service: str) -> str:
+    return _authserver_url(f"{AUTHSERVER_LOGIN_PATH}?{urlencode({'service': service})}")
+
+
+def _authserver_need_captcha(client: Client, account: str) -> bool:
+    query = urlencode({"username": account, "_": str(int(time.time() * 1000))})
+    response = client.get(_authserver_url(f"{AUTHSERVER_CAPTCHA_CHECK_PATH}?{query}"))
+    try:
+        value = json.loads(_decode_body(response.body, response.headers))
+    except (TypeError, ValueError):
+        return False
+    if isinstance(value, dict):
+        direct = value.get("isNeed")
+        nested = value.get("data")
+        value = direct if direct is not None else nested.get("isNeed") if isinstance(nested, dict) else None
+    return value is True or str(value).strip().lower() == "true"
+
+
+def _authserver_form(response: Response, account: str, password: str, service: str) -> tuple[str, list[tuple[str, str]]]:
+    document = parse_html(_decode_body(response.body, response.headers))
+    forms = document.find_all("form")
+    form = document.first("form", element_id="pwdFromId") or next(
+        (
+            candidate
+            for candidate in forms
+            if any(field.attr("name").strip() == "execution" for field in candidate.find_all("input"))
+        ),
+        None,
+    )
+    if form is None:
+        raise AuthenticationFailed("统一认证登录页缺少账号密码表单", details={"url": response.url})
+    inputs = form.find_all("input")
+    execution = next((field for field in inputs if field.attr("id") == "execution" or field.attr("name") == "execution"), None)
+    if execution is None or not execution.attr("value"):
+        raise AuthenticationFailed("统一认证登录页缺少 execution 参数", details={"url": response.url})
+    salt = next((field.attr("value") for field in inputs if field.attr("id") == "pwdEncryptSalt"), "")
+    reserved = {"username", "password", "passwordText", "pwdEncryptSalt", "captcha", "_eventId", "cllt", "dllt", "lt"}
+    fields: list[tuple[str, str]] = []
+    for field in inputs:
+        name = field.attr("name").strip()
+        input_type = field.attr("type", "text").lower()
+        if not name or name in reserved or field.is_disabled() or input_type in {"button", "file", "reset", "submit"}:
+            continue
+        if input_type in {"checkbox", "radio"} and "checked" not in field.attrs:
+            continue
+        fields.append((name, field.attr("value")))
+    fields.extend(
+        (
+            ("username", account),
+            ("password", _encrypt_cas_password(password, salt)),
+            ("captcha", ""),
+            ("_eventId", "submit"),
+            ("cllt", "userNameLogin"),
+            ("dllt", "generalLogin"),
+            ("lt", ""),
+        )
+    )
+    action = urljoin(response.url, form.attr("action") or response.url)
+    if _url_origin(action) != _url_origin(response.url):
+        raise CsustError("统一认证表单地址不是认证服务器", code="invalid_path")
+    action_parts = urlparse(action)
+    action_query = parse_qsl(action_parts.query, keep_blank_values=True)
+    if not any(key == "service" for key, _value in action_query):
+        action_query.append(("service", service))
+        action = urlunsplit(
+            (
+                action_parts.scheme,
+                action_parts.netloc,
+                action_parts.path,
+                urlencode(action_query, doseq=True),
+                action_parts.fragment,
+            )
+    )
+    return action, fields
+
+
+def _fetch_authserver_captcha(client: Client, path: str | None = None) -> tuple[Path, bytes]:
+    try:
+        output = Path(path).expanduser() if path else client.cookie_file.parent / "authserver-captcha.png"
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise CsustError("验证码图片路径无效", code="captcha_write_failed") from exc
+    content = client.request(_authserver_url(AUTHSERVER_CAPTCHA_PATH), binary=True)
+    assert isinstance(content, bytes)
+    if not content:
+        raise CaptchaError("统一认证返回了空验证码", details={"captcha_image": str(output)})
+    _write_private_file(output, content, code="captcha_write_failed", label="验证码图片")
+    return output, content
+
+
+def _login_sso(
+    client: Client,
+    account: str,
+    password: str,
+    *,
+    captcha_override: str | None = None,
+    captcha_image: str | None = None,
+    ocr: Callable[[bytes], str] | None = None,
+    max_attempts: int = CAPTCHA_RETRIES,
+) -> dict[str, object]:
+    service = EDUCATION_SSO_SERVICE if (urlparse(client.base_url).hostname or "").lower() == "xk.csust.edu.cn" else client.url(EDUCATION_SSO_PATH)
+    try:
+        client.get(EDUCATION_SSO_PATH)
+    except NetworkError:
+        # The SSO handoff remains useful when the legacy landing page is flaky.
+        pass
+    override = captcha_override or env_value("CSUST_CAPTCHA")
+    attempts = 1 if override else max(1, max_attempts)
+    recognizer = ocr or solve_captcha
+    last_path: Path | None = None
+    for attempt in range(1, attempts + 1):
+        form_response = client.get(_authserver_login_url(service))
+        action, fields = _authserver_form(form_response, account, password, service)
+        captcha = override
+        if _authserver_need_captcha(client, account):
+            path, image = _fetch_authserver_captcha(client, captcha_image)
+            last_path = path
+            if not captcha:
+                try:
+                    captcha = str(recognizer(image)).strip()
+                except CaptchaError as exc:
+                    details = dict(exc.details)
+                    details.update({"captcha_image": str(path), "attempts": attempt})
+                    if attempt >= attempts:
+                        raise CaptchaError(str(exc), details=details) from exc
+                    continue
+                except Exception as exc:
+                    if attempt >= attempts:
+                        raise CaptchaError("OCR 识别失败", details={"captcha_image": str(path), "attempts": attempt}) from exc
+                if not captcha:
+                    if attempt < attempts:
+                        continue
+                    raise CaptchaError("OCR 未识别出验证码", details={"captcha_image": str(path), "attempts": attempt})
+        fields.append(("captcha", captcha or ""))
+        response = client.post(action, fields, headers={"Referer": form_response.url})
+        body = _decode_body(response.body, response.headers)
+        failure = _login_failure(body)
+        if failure is not None and not isinstance(failure, CaptchaError):
+            raise type(failure)(str(failure), details={"attempts": attempt}) from failure
+        if is_login_page(response):
+            if isinstance(failure, CaptchaError) and attempt < attempts and not override:
+                continue
+            if failure is not None:
+                details = {"attempts": attempt}
+                if last_path:
+                    details["captcha_image"] = str(last_path)
+                raise type(failure)(str(failure), details=details) from failure
+            if attempt < attempts and not override:
+                continue
+            raise AuthenticationFailed("统一认证登录失败，未建立有效会话", details={"attempts": attempt})
+        probe = client.get(LOGIN_PROBE_PATH)
+        if is_login_page(probe):
+            if attempt < attempts and not override:
+                continue
+            raise AuthenticationFailed("统一认证回跳成功，但教务系统未建立有效会话", details={"attempts": attempt})
+        client.save()
+        return {
+            "ok": True,
+            "username": account,
+            "auth": "sso",
+            "cookie_file": str(client.cookie_file),
+            "attempts": attempt,
+        }
+    raise AuthenticationFailed("统一认证登录失败", details={"attempts": attempts})
+
+
 def login(
     args: object | None = None,
     client: Client | None = None,
@@ -1056,6 +1272,24 @@ def login(
     client = client or Client(load_cookies=False)
     client.clear_cookies()
     client.warn_if_insecure()
+    auth = getattr(args, "auth", "auto") if args is not None else "auto"
+    if auth not in {"auto", "sso", "local"}:
+        raise CsustError("--auth 必须是 auto、sso 或 local", code="invalid_argument")
+    if auth == "sso" or (auth == "auto" and (urlparse(client.base_url).hostname or "").lower() == "xk.csust.edu.cn"):
+        try:
+            return _login_sso(
+                client,
+                account,
+                password,
+                captcha_override=captcha_override,
+                captcha_image=captcha_image,
+                ocr=ocr,
+                max_attempts=max_attempts,
+            )
+        except NetworkError:
+            if auth == "sso":
+                raise
+            client.clear_cookies()
     client.get("/")
 
     attempts = 1 if captcha_override or env_value("CSUST_CAPTCHA") else max(1, max_attempts)

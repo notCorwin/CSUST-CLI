@@ -1,9 +1,9 @@
 # csust-cli
 
-面向智能体的长沙理工大学教务系统与 VPN 门户 CLI。教务系统命令继续使用旧的 `xk.csust.edu.cn`；`vpn` 命令对应当前 `vpn.csust.edu.cn` 的 EnUES Vue SPA。
+面向智能体的长沙理工大学教务系统与 VPN 门户 CLI。教务系统命令仍访问旧的 `xk.csust.edu.cn`，登录默认优先通过 `authserver.csust.edu.cn` 统一身份认证；`vpn` 命令对应当前 `vpn.csust.edu.cn` 的 EnUES Vue SPA。
 
 ```bash
-CSUST_USERNAME=学号 CSUST_PASSWORD=密码 python3 csust.py login --json
+CSUST_USERNAME=学号 CSUST_PASSWORD=密码 python3 csust.py login --auth sso --json
 python3 csust.py schedule --json
 python3 csust.py grades --term 2025-2026-1 --json
 python3 csust.py profile --json
@@ -99,7 +99,7 @@ python3 csust.py quality request --path /jsxsd/... --method POST \
 
 当前清单按网站二级菜单归组：教学评价 1；我的申请 3；我的考试 5；成绩管理 3；培养方案 5；我的课表 8；选课管理 9；教材管理 2；辅修管理 1；实验教学 2；第二课堂学分 2；学科竞赛 1；创新创业 5；公告留言 3；个人信息 2；在线问答 1；教学周历 1；学籍管理 8；我的成绩 4；毕业管理 3，共 69 条。`routes --json` 还返回登录、忘记密码、验证码、APP 登录页切换和条件显示的毕业设计外部 SSO 入口。
 
-账号密码优先从 `CSUST_USERNAME`、`CSUST_PASSWORD` 读取；未设置时读取当前目录 `.env` 中的 `username`、`password`，不会交互询问或写入密码。`.env` 应保持 `600` 权限。验证码由 `ddddocr` 在本机识别；失败会自动重试 3 次，不会等待人工输入。可用 `--captcha CODE` 做测试覆盖。
+账号密码优先从 `CSUST_USERNAME`、`CSUST_PASSWORD` 读取；未设置时读取当前目录 `.env` 中的 `username`、`password`，不会交互询问或写入密码。`.env` 应保持 `600` 权限。`login` 的 `--auth auto` 在标准 `xk.csust.edu.cn` 地址优先走统一身份认证，网络层失败才回退旧的教务登录；可用 `--auth sso` 强制统一认证，或 `--auth local` 强制旧登录。统一认证需要验证码时由 `ddddocr` 在本机识别，失败会自动重试 3 次；可用 `--captcha CODE` 做测试覆盖。
 
 会话 Cookie 保存在 `~/.config/csust-cli/cookies.txt`，权限为 `600`；验证码图片保存在同目录，权限为 `600`。可用 `CSUST_BASE_URL` 和 `CSUST_COOKIE_FILE` 覆盖站点与会话文件路径。现站点使用 HTTP 时每个进程的首次请求会向 stderr 发出安全警告。
 
