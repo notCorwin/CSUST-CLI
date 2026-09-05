@@ -8,12 +8,11 @@ import re
 from ..core import (
     Client,
     CsustError,
+    result_status,
     Element,
-    MutationUnverified,
     ParseError,
     Response,
     _SENSITIVE_FIELD,
-    _has_failure_signal,
     _option_value,
     _safe_event,
     _safe_terminal_text,
@@ -562,12 +561,10 @@ def _run_evaluation(args: argparse.Namespace, client: Client) -> dict[str, objec
     require_logged_in(result)
     client.save()
     message = _response_message(result.body)
-    if _has_failure_signal(message) or not re.search(r"成功|完成|已保存|已提交|已评价", message):
-        raise MutationUnverified(
-            "评价已提交但未验证：未从响应中确认成功",
-            details={"submitted": True, "confirmed": False, "operation": command},
-        )
-    return {"ok": True, "operation": command, "submitted": True, "confirmed": True, "message": message}
+    from .web import inspect_page
+
+    status = result_status(inspect_page(result.body, result.url), mutating=True, details={"operation": command})
+    return {**status, "operation": command, "message": message}
 
 
 def _response_message(source: str) -> str:

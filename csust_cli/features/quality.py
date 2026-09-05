@@ -13,6 +13,8 @@ from ..core import (
     CAPTCHA_RETRIES,
     CaptchaError,
     CsustError,
+    business_state,
+    result_status,
     Response,
     _credentials,
     _decode_body,
@@ -170,6 +172,8 @@ class QualityClient(TeachingClient):
 
 
 def _entry(name: str | None, path: str | None) -> tuple[str, str]:
+    if name and path:
+        raise CsustError("--name 与 --path 不能同时使用", code="invalid_argument")
     if name:
         item = QUALITY_ROUTE_BY_NAME.get(name.strip())
         if item is None:
@@ -231,15 +235,15 @@ def run_form(args: argparse.Namespace, client: QualityClient) -> dict[str, objec
 
 def _run_request(args: argparse.Namespace, client: QualityClient) -> dict[str, object]:
     path, named_method = _entry(getattr(args, "name", None), getattr(args, "path", None))
-    method = (named_method if getattr(args, "name", None) else getattr(args, "method", "GET")).strip().upper()
+    method = (getattr(args, "method", None) or named_method).strip().upper()
     if method not in web.SUPPORTED_METHODS:
         raise CsustError("不支持的 HTTP 方法", code="invalid_argument")
     params = _parse_pairs(getattr(args, "param", []), "--param")
     data = _parse_pairs(getattr(args, "data", []), "--data")
     files = _parse_files(getattr(args, "file", []))
     data_json = getattr(args, "data_json", None)
-    if files and data_json is not None:
-        raise CsustError("--data-json 不能与 --file 同时使用", code="invalid_argument")
+    if (files or data) and data_json is not None:
+        raise CsustError("--data-json 不能与 --data/--file 同时使用", code="invalid_argument")
     if method in web.READ_ONLY_METHODS and (data or files or data_json is not None):
         raise CsustError("GET/HEAD/OPTIONS 只能使用 --param", code="invalid_argument")
     if method not in web.READ_ONLY_METHODS and not args.yes:
@@ -254,24 +258,26 @@ def _run_request(args: argparse.Namespace, client: QualityClient) -> dict[str, o
     if method in web.READ_ONLY_METHODS:
         pass
     elif files:
-        options["multipart"] = files
+        options["multipart"] = data + files
     elif data_json is not None:
         options["json_body"] = _json_argument(data_json)
     else:
         options["data"] = data
     response = client.request_web(path, **options)
     request = {"name": getattr(args, "name", None), "method": method, "path": urlparse(path).path, "fields": [name for name, _ in data], "service": QUALITY_SERVICE_NAME}
+    payload = _payload(response, raw=bool(args.raw))
+    mutating = method not in web.READ_ONLY_METHODS
+    if business_state(payload) is False:
+        result_status(payload, mutating=mutating, details={"request": request})
     if args.output:
         body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
         output = Path(args.output).expanduser()
         _write_private_file(output, body, code="quality_output_write_failed", label="教学质量保障响应")
-        return {"ok": response.status < 400, "downloaded": True, "status": response.status, "output": str(output), "bytes": len(body), "request": request}
-    payload = _payload(response, raw=bool(args.raw))
+        saved = {"downloaded": True, "status": response.status, "output": str(output), "bytes": len(body), "request": request}
+        return {**saved, **result_status(payload, mutating=mutating, details=saved)}
     return {
-        "ok": response.status < 400,
+        **result_status(payload, mutating=mutating, details={"request": request}),
         "status": response.status,
-        "submitted": method not in web.READ_ONLY_METHODS,
-        "confirmed": teaching._mutation_confirmed(payload) if method not in web.READ_ONLY_METHODS else True,
         "request": request,
         "response": payload,
     }

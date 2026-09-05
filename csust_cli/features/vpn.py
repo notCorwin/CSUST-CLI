@@ -27,9 +27,13 @@ from ..core import (
     Client,
     CredentialsRequired,
     CsustError,
+    business_state,
+    result_status,
     Response,
     _credentials,
     _decode_body,
+    _header_value,
+    require_logged_in,
     parse_html,
     _save_cookie_refresh,
     _safe_terminal_text,
@@ -835,13 +839,16 @@ class VpnClient(Client):
                 request_options["json_body"] = data
         response = self.request(target, **request_options)
         assert isinstance(response, Response)
-        value = None if binary else _response_json(response)
+        _save_cookie_refresh(self, response)
+        value = _response_json(response)
         if retry_refresh and not self.native and path.rstrip("/") != VPN_REFRESH_PATH.rstrip("/") and _response_code(value) == "3010":
             if self.refresh():
                 return self.request_api(path, method=method, data=data, multipart=multipart, params=(), path_args=(), binary=binary, retry_refresh=False)
-        _save_cookie_refresh(self, response)
         if isinstance(value, dict):
+            previous = dict(self.session)
             self._set_tokens(value.get("data"))
+            if self.session != previous:
+                self.save_session()
         return response, value
 
     def call_spec(
@@ -868,18 +875,28 @@ class VpnClient(Client):
             binary=bool(output) or spec.binary,
         )
         request_info = {"name": spec.name, "method": spec.method, "path": spec.path, "native": self.native}
+        from .web import _feedback
+
+        payload = _redact(value if value is not None else _feedback(response))
+        if business_state(payload, success_codes=("200",)) is False:
+            result_status(payload, mutating=spec.mutating, details={"request": request_info}, success_codes=("200",))
+        if value is None:
+            require_logged_in(response)
         if output:
             body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
             _write_private_file(Path(output).expanduser(), body, code="vpn_output_write_failed", label="VPN 响应")
-            return {"ok": True, "request": request_info, "status": response.status, "downloaded": True, "output": str(Path(output).expanduser()), "bytes": len(body)}
-        return {"ok": response.status == 200 and (_response_code(value) in {None, "200"}), "request": request_info, "status": response.status, "response": _redact(value if value is not None else _decode_body(response.body, response.headers))}
+            saved = {"request": request_info, "status": response.status, "downloaded": True, "output": str(Path(output).expanduser()), "bytes": len(body)}
+            return {**saved, **result_status(payload, mutating=spec.mutating, details=saved, success_codes=("200",))}
+        return {**result_status(payload, mutating=spec.mutating, details={"request": request_info}, success_codes=("200",)), "request": request_info, "status": response.status, "response": payload}
 
 
 def _response_json(response: Response) -> object | None:
     body = _decode_body(response.body, response.headers)
     try:
         return json.loads(body)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        if "json" in _header_value(response.headers, "Content-Type").lower():
+            raise CsustError("VPN 返回了无效 JSON", code="parse_error") from exc
         return None
 
 
@@ -896,21 +913,13 @@ def _resolve_path(path: str, params: Iterable[tuple[str, str]], path_args: Itera
         for placeholder, value in zip(placeholders, args):
             path = path.replace(placeholder, quote(value, safe=""), 1)
         args = args[len(placeholders):]
-    if args:
-        path = path.rstrip("/") + "/" + "/".join(quote(value, safe="") for value in args)
-    pairs = list(parse_qsl(urlsplit(path).query, keep_blank_values=True))
-    supplied = list(params)
-    for key, value in supplied:
-        found = False
-        for index, (existing_key, _existing_value) in enumerate(pairs):
-            if existing_key == key:
-                pairs[index] = (key, value)
-                found = True
-                break
-        if not found:
-            pairs.append((key, value))
     split = urlsplit(path)
-    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(pairs, doseq=True), split.fragment))
+    if args:
+        split = split._replace(path=split.path.rstrip("/") + "/" + "/".join(quote(value, safe="") for value in args))
+    supplied = list(params)
+    names = {key for key, _ in supplied}
+    pairs = [(key, value) for key, value in parse_qsl(split.query, keep_blank_values=True) if key not in names]
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(pairs + supplied, doseq=True), split.fragment))
 
 
 def _spec_by_name(name: str) -> VpnApiSpec:
@@ -1191,6 +1200,8 @@ def run_page(args: argparse.Namespace, _client: Client | None = None) -> dict[st
 
 def run_api(args: argparse.Namespace, client: Client | None = None) -> dict[str, object]:
     vpn = _client(client, native=bool(getattr(args, "native", False)))
+    if args.name and args.path:
+        raise CsustError("--name 与 --path 不能同时使用", code="invalid_argument")
     if args.name:
         spec = _spec_by_name(args.name)
         path = spec.path
@@ -1201,6 +1212,8 @@ def run_api(args: argparse.Namespace, client: Client | None = None) -> dict[str,
         spec = VpnApiSpec(_api_name(path), method, path, _api_group(path), _is_mutating(method, path), False)
     else:
         raise CsustError("--name 与 --path 至少指定一个", code="invalid_argument")
+    if method not in {"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}:
+        raise CsustError("不支持的 HTTP 方法", code="invalid_argument")
     multipart = [(name, value) for name, value in _parse_pairs(getattr(args, "form", ()), "--form")]
     multipart.extend(_parse_files(getattr(args, "file", ())))
     if multipart and args.data_json is not None:
@@ -1231,6 +1244,8 @@ def run_resource(args: argparse.Namespace, client: Client | None = None) -> dict
     response = vpn.request(vpn._api_path(path), method="GET", headers=vpn._headers(), binary=True, with_metadata=True)
     assert isinstance(response, Response)
     _save_cookie_refresh(vpn, response)
+    require_logged_in(response)
+    result_status(_response_json(response), mutating=False, success_codes=("200",))
     body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
     output = Path(args.output).expanduser()
     _write_private_file(output, body, code="vpn_output_write_failed", label="VPN 资源")

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 import time
 
 from .features import academic, grades, quality, schedule, teaching, textbooks, vpn, web
-from .core import Client, CsustError, _safe_terminal_text, login
+from .core import Client, CsustError, _safe_terminal_text, login, result_status
 
 
 class CliArgumentParser(argparse.ArgumentParser):
@@ -75,6 +76,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(argv_list)
         json_mode = bool(getattr(args, "json", False))
+        output = getattr(args, "output", None)
+        if output is not None:
+            if not output.strip():
+                raise CsustError("下载路径不能为空", code="invalid_argument")
+            try:
+                target = Path(output).expanduser()
+                if target.is_symlink() or (target.exists() and not target.is_file()):
+                    raise ValueError("输出路径必须是普通文件")
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise CsustError("下载路径无效", code="invalid_argument") from exc
         static_catalog = (args.command == "web" and args.web_command == "catalog") or (
             args.command == "vpn" and args.vpn_command in {"routes", "controls", "catalog", "page"}
         ) or (args.command == "teaching" and args.teaching_command == "catalog") or (
@@ -96,6 +107,15 @@ def main(argv: list[str] | None = None) -> int:
             client = None if static_catalog else Client(load_cookies=args.command != "login")
         runner = getattr(args, "command_runner", None) or getattr(args, "feature_runner")
         data = runner(args, client)
+        if isinstance(data, dict):
+            mutating = data.get("submitted") is True
+            if data.get("ok") is False:
+                raise CsustError("远端请求失败", code="mutation_rejected" if mutating else "business_rejected")
+            if mutating and data.get("confirmed") is not True:
+                result_status(None, mutating=True, details={key: data[key] for key in ("request", "downloaded", "output", "bytes") if key in data})
+            for key in ("page", "response"):
+                if key in data:
+                    result_status(data[key], mutating=False)
         if json_mode:
             print(json.dumps(data, ensure_ascii=False))
         else:

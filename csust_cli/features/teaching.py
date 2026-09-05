@@ -17,13 +17,15 @@ from urllib.parse import urlsplit
 from ..core import (
     Client,
     CsustError,
+    business_state,
+    result_status,
     Response,
     _decode_body,
-    _header_value,
     _save_cookie_refresh,
     _table_rows,
     _write_private_file,
     parse_html,
+    require_logged_in,
 )
 from . import web
 from .vpn import (
@@ -817,12 +819,22 @@ class TeachingClient(VpnClient):
 
     def ensure_service(self) -> dict[str, object]:
         if self.web_prefix:
-            return self.service or {"name": TEACHING_SERVICE_NAME, "urlPlus": self.web_prefix}
+            return self.service or {"name": self.service_name, "urlPlus": self.web_prefix}
         configured = os_environ("CSUST_TEACHING_PREFIX")
         if configured:
             self.web_prefix = configured.rstrip("/")
-            return {"name": TEACHING_SERVICE_NAME, "urlPlus": self.web_prefix}
-        _response, value = self.request_api(TEACHING_SERVICE_GROUP_API, method="GET")
+            return {"name": self.service_name, "urlPlus": self.web_prefix}
+        _response, value = self.request_api(TEACHING_SERVICE_GROUP_API, method="GET", retry_refresh=False)
+        if isinstance(value, dict) and str(value.get("code")) == "3010":
+            from .vpn import login
+
+            if self.session.get("refreshToken"):
+                if not self.refresh():
+                    raise CsustError("VPN 会话刷新失败，请重新登录", code="login_required")
+            else:
+                login(argparse.Namespace(auth="cas", username=None, password_stdin=False, captcha_info=None), self)
+            _response, value = self.request_api(TEACHING_SERVICE_GROUP_API, method="GET", retry_refresh=False)
+        result_status(value, mutating=False, success_codes=("200",))
         service = _find_teaching_service(value, self.service_name)
         if service is None:
             raise CsustError(f"VPN 当前没有可用服务：{self.service_name}", code="service_unavailable")
@@ -946,32 +958,27 @@ def _response_text(response: Response) -> str:
 
 
 def _response_payload(response: Response, *, raw: bool = False) -> object:
-    text = _response_text(response)
-    content_type = _header_value(response.headers, "Content-Type").lower()
-    if "json" in content_type or text.lstrip().startswith(("{", "[")):
-        try:
-            payload: object = _redact(json.loads(text))
-        except (TypeError, ValueError):
-            payload = text
-    elif "html" in content_type or "<html" in text[:1000].lower() or "<!doctype" in text[:1000].lower():
-        payload = web.inspect_page(text, response.url)
-    else:
-        payload = text
+    require_logged_in(response)
+    payload = _redact(web._feedback(response))
     if raw and isinstance(payload, dict):
-        payload = {**payload, "body": text}
+        payload = {**payload, "body": _response_text(response)}
     return payload
 
 
 def _entry(name: str | None, path: str | None, method: str | None) -> tuple[str, str, bool, str]:
+    if name and path:
+        raise CsustError("--name 与 --path 不能同时使用", code="invalid_argument")
     if name:
         key = name.strip()
         item = TEACHING_ACTION_BY_NAME.get(key) or TEACHING_API_BY_NAME.get(key) or TEACHING_ROUTE_BY_NAME.get(key)
         if item is None:
             raise CsustError(f"未知教学平台目录项：{name}；先运行 csust teaching catalog", code="unknown_route")
-        return str(item["path"]), str(item.get("method") or method or "GET").upper(), bool(item.get("mutating", False)), key
+        method = str(item.get("method") or method or "GET").strip().upper()
+        return str(item["path"]), method, bool(item.get("mutating", method not in web.READ_ONLY_METHODS)), key
     if not path:
         raise CsustError("--name 与 --path 至少指定一个", code="invalid_argument")
-    return path, (method or "GET").upper(), method not in web.READ_ONLY_METHODS, ""
+    method = (method or "GET").strip().upper()
+    return path, method, method not in web.READ_ONLY_METHODS, ""
 
 
 def _request_info(name: str, path: str, method: str, data: list[tuple[str, str]]) -> dict[str, object]:
@@ -979,29 +986,20 @@ def _request_info(name: str, path: str, method: str, data: list[tuple[str, str]]
 
 
 def _mutation_confirmed(payload: object) -> bool:
-    if isinstance(payload, dict):
-        response = payload.get("response")
-        if isinstance(response, dict) and (response.get("success") is True or str(response.get("code")) in {"200", "0"}):
-            return True
-        text = " ".join(str(value) for value in payload.values() if isinstance(value, (str, int, float)))
-    else:
-        text = str(payload)
-    if re.search(r"失败|错误|无效|拒绝|异常", text):
-        return False
-    return bool(re.search(r"成功|完成|已保存|已提交|已更新|已删除|已发布|已评价", text))
+    return business_state(payload) is True
 
 
 def _run_request(args: argparse.Namespace, client: TeachingClient) -> dict[str, object]:
     path, method, catalog_mutating, name = _entry(getattr(args, "name", None), getattr(args, "path", None), getattr(args, "method", None))
-    mutating = catalog_mutating or method not in web.READ_ONLY_METHODS
+    mutating = catalog_mutating if name else method not in web.READ_ONLY_METHODS
     if mutating and not args.yes:
         raise CsustError("教学平台请求可能改变远端状态，请加 --yes", code="confirmation_required")
     params = _parse_pairs(getattr(args, "param", []), "--param")
     data = _parse_pairs(getattr(args, "data", []), "--data")
     files = _parse_files(getattr(args, "file", []))
     data_json = getattr(args, "data_json", None)
-    if files and data_json is not None:
-        raise CsustError("--data-json 不能与 --file 同时使用", code="invalid_argument")
+    if (files or data) and data_json is not None:
+        raise CsustError("--data-json 不能与 --data/--file 同时使用", code="invalid_argument")
     if method in web.READ_ONLY_METHODS and (data or files or data_json is not None):
         raise CsustError("GET/HEAD/OPTIONS 只能使用 --param", code="invalid_argument")
     json_body = _UNSET if data_json is None else _json_argument(data_json)
@@ -1011,22 +1009,23 @@ def _run_request(args: argparse.Namespace, client: TeachingClient) -> dict[str, 
         params=params,
         data=None if json_body is not _UNSET or files else (data or None),
         json_body=json_body,
-        multipart=files or None,
+        multipart=(data + files) if files else None,
         output=bool(args.output),
         referer=getattr(args, "referer", ""),
     )
     request = _request_info(name, path, method, data)
+    payload = _response_payload(response, raw=bool(args.raw))
+    if business_state(payload) is False:
+        result_status(payload, mutating=mutating, details={"request": request})
     if args.output:
         body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
         output = Path(args.output).expanduser()
         _write_private_file(output, body, code="teaching_output_write_failed", label="教学平台响应")
-        return {"ok": response.status < 400, "downloaded": True, "output": str(output), "bytes": len(body), "status": response.status, "request": request}
-    payload = _response_payload(response, raw=bool(args.raw))
+        saved = {"downloaded": True, "output": str(output), "bytes": len(body), "status": response.status, "request": request}
+        return {**saved, **result_status(payload, mutating=mutating, details=saved)}
     return {
-        "ok": response.status < 400,
+        **result_status(payload, mutating=mutating, details={"request": request}),
         "status": response.status,
-        "submitted": mutating,
-        "confirmed": _mutation_confirmed(payload) if mutating else True,
         "request": request,
         "response": payload,
     }
@@ -1101,7 +1100,8 @@ def run_course_order(args: argparse.Namespace, client: TeachingClient) -> dict[s
         raise CsustError("调整课程顺序会改变远端状态，请加 --yes", code="confirmation_required")
     action = "LESSUP" if args.direction == "up" else "LESSDOWN"
     response = client.request_web("/meol/lesson/blen.student.lesson.list.jsp", params=[("ACTION", action), ("lid", args.course_id)])
-    return {"ok": response.status < 400, "submitted": True, "confirmed": _mutation_confirmed(_response_payload(response)), "page": _response_payload(response)}
+    payload = _response_payload(response)
+    return {**result_status(payload, mutating=True), "page": payload}
 
 
 def run_service(_args: argparse.Namespace, client: TeachingClient) -> dict[str, object]:

@@ -229,6 +229,50 @@ class MutationUnverified(CsustError):
     code = "mutation_unverified"
 
 
+def business_state(payload: object, *, success_codes: tuple[str, ...] = ("0", "200")) -> bool | None:
+    """Interpret feedback only; None means the response proves neither outcome."""
+    states: list[bool | None] = []
+    if isinstance(payload, dict):
+        if "text" in payload and ("forms" in payload or set(payload) <= {"text", "messages"}):
+            messages = payload.get("messages") or []
+            states.extend(business_state(message) for message in messages)
+            if not any(payload.get(key) for key in ("forms", "links", "tables", "actions")):
+                states.append(business_state(payload.get("text", "")))
+        else:
+            if isinstance(payload.get("success"), bool):
+                states.append(payload["success"])
+            code = payload.get("code")
+            if isinstance(code, (str, int)) and not isinstance(code, bool) and str(code):
+                states.append(str(code) in success_codes)
+            for key in ("message", "messages", "msg", "error", "response"):
+                if key in payload:
+                    values = payload[key] if isinstance(payload[key], list) else [payload[key]]
+                    states.extend(business_state(value, success_codes=success_codes) for value in values)
+    elif isinstance(payload, str):
+        text = payload.strip()
+        if _has_failure_signal(text) or re.search(r"无效|拒绝|异常|\b(?:failed|failure|error|denied|invalid|unauthorized|forbidden)\b", text, re.I):
+            return False
+        # ponytail: short acknowledgements only; add endpoint-specific evidence for richer responses.
+        if re.fullmatch(r"(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序)?(?:成功|完成)[！!。.]?", text) or re.fullmatch(
+            r"已(?:保存|提交|更新|删除|发布|评价|报名|选课|缴费|撤销)[！!。.]?", text
+        ):
+            return True
+    if False in states:
+        return False
+    return True if True in states else None
+
+
+def result_status(payload: object, *, mutating: bool, details: dict[str, object] | None = None,
+                  success_codes: tuple[str, ...] = ("0", "200")) -> dict[str, object]:
+    state = business_state(payload, success_codes=success_codes)
+    context = {**(details or {}), "submitted": mutating, "confirmed": False, "evidence": "rejected" if state is False else "unknown"}
+    if state is False:
+        raise CsustError("远端明确报告操作失败", code="mutation_rejected" if mutating else "business_rejected", details=context)
+    if mutating and state is not True:
+        raise MutationUnverified("请求已提交但未验证，请查询状态后再决定是否重试", details=context)
+    return {"ok": True, "submitted": mutating, "confirmed": True}
+
+
 class Element:
     def __init__(self, tag: str = "#document", attrs: dict[str, str] | None = None, parent: "Element | None" = None):
         self.tag = tag
@@ -849,6 +893,13 @@ def is_login_page(response: Response) -> bool:
     document = parse_html(body)
     if document.first("form", element_id="loginForm") is not None:
         return True
+    for form in document.find_all("form"):
+        inputs = form.find_all("input")
+        login_form = form.attr("id") == "pwdFromId" or bool(re.search(r"login|logon|auth", form.attr("action"), re.I))
+        if login_form and any(node.attr("type").lower() == "password" for node in inputs) and any(
+            node.attr("name").lower() in {"username", "useraccount", "account", "loginid", "j_username"} for node in inputs
+        ):
+            return True
     visible_text = document.text(include_scripts=False)
     return "请输入账号" in visible_text and "用户登录" in visible_text
 

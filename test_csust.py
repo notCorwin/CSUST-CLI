@@ -1491,7 +1491,7 @@ class CsustParserTests(unittest.TestCase):
             _request(login_client, "GET", "https://example.test/jsxsd/page", output="ignored.bin", require_session=True)
         self.assertEqual(login_client.saves, 0)
 
-    def test_successful_mutation_download_saves_once(self):
+    def test_unverified_mutation_download_saves_once(self):
         with tempfile.TemporaryDirectory() as directory:
             client = Client(base_url="https://example.test", cookie_file=Path(directory) / "cookies.txt", load_cookies=False)
             output = Path(directory) / "data.bin"
@@ -1500,8 +1500,10 @@ class CsustParserTests(unittest.TestCase):
             with mock.patch.object(client, "request", return_value=response), mock.patch(
                 "csust_cli.features.web.ensure_session"
             ), mock.patch.object(client, "save") as save:
-                result = _run_post(args, client)
-            self.assertTrue(result["downloaded"])
+                with self.assertRaises(MutationUnverified) as raised:
+                    _run_post(args, client)
+            self.assertTrue(raised.exception.details["downloaded"])
+            self.assertEqual(output.read_bytes(), b"data")
             save.assert_called_once()
 
     def test_web_inspection_redacts_sensitive_events(self):
@@ -1846,19 +1848,15 @@ class CsustParserTests(unittest.TestCase):
             with mock.patch("csust_cli.features.web._get_page", return_value=(response, {})), mock.patch(
                 "csust_cli.features.web._request", return_value=(response, saved)
             ), mock.patch.object(client, "save") as save:
-                form_result = _run_form(
-                    SimpleNamespace(param=[], data=[], form=1, button=None, yes=True, output="export.bin"),
-                    client,
-                    "/jsxsd/page",
-                )
-                action_result = _run_action_common(
-                    SimpleNamespace(param=[], data=[], index=1, yes=True, output="export.bin"),
-                    client,
-                    "/jsxsd/page",
-                )
-        self.assertEqual(save.call_count, 2)
-        self.assertTrue(form_result["submitted"])
-        self.assertTrue(action_result["submitted"])
+                for runner, args in (
+                    (_run_form, SimpleNamespace(param=[], data=[], form=1, button=None, yes=True, output="export.bin")),
+                    (_run_action_common, SimpleNamespace(param=[], data=[], index=1, yes=True, output="export.bin")),
+                ):
+                    with self.assertRaises(MutationUnverified) as raised:
+                        runner(args, client, "/jsxsd/page")
+                    self.assertTrue(raised.exception.details["downloaded"])
+                    self.assertTrue(raised.exception.details["submitted"])
+                self.assertEqual(save.call_count, 2)
 
     def test_public_post_requires_success_signal(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1870,8 +1868,9 @@ class CsustParserTests(unittest.TestCase):
             save.assert_called_once()
             failure = Response("https://example.test/findmm.jsp", 200, {"Set-Cookie": "PUBLIC=2"}, "<script>alert('发送失败')</script>")
             with mock.patch("csust_cli.features.web._request", return_value=(failure, None)), mock.patch.object(client, "save") as save:
-                with self.assertRaises(MutationUnverified):
+                with self.assertRaises(CsustError) as raised:
                     _run_public_post(args, client)
+                self.assertEqual(raised.exception.code, "mutation_rejected")
             save.assert_called_once()
 
     def test_graduation_design_requires_https_sso_target(self):
