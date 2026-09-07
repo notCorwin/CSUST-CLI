@@ -53,41 +53,61 @@ SITE_COOKIE_DIR = Path.home() / ".config" / "csust-cli" / "sites"
 # This is a useful starting map, not a hard limit. `site discover` is the
 # live source of truth and the generic commands accept newly added subdomains.
 SITE_CATALOG = (
-    ("www.csust.edu.cn", "学校主页", "https://www.csust.edu.cn/"),
-    ("ehall.csust.edu.cn", "统一门户", "https://ehall.csust.edu.cn/"),
-    ("authserver.csust.edu.cn", "统一身份认证", "https://authserver.csust.edu.cn/authserver/login"),
-    ("app.csust.edu.cn", "掌上长理", "http://app.csust.edu.cn:8087/magus/appapi/downloadpage"),
-    ("xk.csust.edu.cn", "教务系统", "http://xk.csust.edu.cn/"),
-    ("vpn.csust.edu.cn", "VPN 门户", "https://vpn.csust.edu.cn/enclient/start.html"),
-    ("fuwu.csust.edu.cn", "教育阳光服务网", "https://fuwu.csust.edu.cn/"),
-    ("gis.csust.edu.cn", "校园地图", "https://gis.csust.edu.cn/"),
-    ("mail.csust.edu.cn", "校园邮箱", "https://mail.csust.edu.cn/"),
-    ("lib.csust.edu.cn", "图书馆", "https://lib.csust.edu.cn/"),
-    ("tsgvpn2.csust.edu.cn", "图书馆远程访问", "https://tsgvpn2.csust.edu.cn/"),
-    ("rczpw.csust.edu.cn", "人才招聘", "https://rczpw.csust.edu.cn/zp.html"),
-    ("jxjy.csust.edu.cn", "继续教育", "https://jxjy.csust.edu.cn/"),
-    ("zyjx.csust.edu.cn", "专业技术人员继续教育", "https://zyjx.csust.edu.cn/"),
-    ("cslgdygx.csust.edu.cn", "校友服务", "https://cslgdygx.csust.edu.cn/"),
-    ("highwayexperiment.csust.edu.cn", "公路工程实验中心", "https://highwayexperiment.csust.edu.cn/"),
-    ("gcxljxgl.csust.edu.cn", "工程训练教学管理系统", "http://gcxljxgl.csust.edu.cn/"),
-    ("ky.csust.edu.cn", "科研管理系统", "http://ky.csust.edu.cn/"),
-    ("mooc.csust.edu.cn", "慕课教学平台", "http://mooc.csust.edu.cn/portal"),
-    ("my.csust.edu.cn", "统一身份认证旧入口", "http://my.csust.edu.cn/"),
-    ("pt.csust.edu.cn", "网络教学综合平台", "http://pt.csust.edu.cn/meol/homepage/common/"),
-    ("cslgqk.csust.edu.cn", "期刊社", "https://cslgqk.csust.edu.cn/"),
-    ("cslgxbsk.csust.edu.cn", "学报社科版", "https://cslgxbsk.csust.edu.cn/"),
-    ("cslgxbzk.csust.edu.cn", "学报自然科学版", "https://cslgxbzk.csust.edu.cn/"),
-    ("syjx.csust.edu.cn", "实验教学与仪器", "https://syjx.csust.edu.cn/"),
-    ("zbxt.csust.edu.cn", "教学评价系统", "https://zbxt.csust.edu.cn/login"),
-    ("zslq.csust.edu.cn", "招生录取查询", "https://zslq.csust.edu.cn/"),
-    ("zwgl.csust.edu.cn", "中外公路", "https://zwgl.csust.edu.cn/"),
-    ("zwgl1980.csust.edu.cn", "中外公路旧入口", "https://zwgl1980.csust.edu.cn/"),
+    ("official", "www.csust.edu.cn", "学校主页", "https://www.csust.edu.cn/"),
+    ("ehall", "ehall.csust.edu.cn", "统一门户", "https://ehall.csust.edu.cn/"),
+    ("auth", "authserver.csust.edu.cn", "统一身份认证", "https://authserver.csust.edu.cn/authserver/login"),
+    ("app", "app.csust.edu.cn", "掌上长理", "http://app.csust.edu.cn:8087/magus/appapi/downloadpage"),
+    ("academic", "xk.csust.edu.cn", "教务系统", "http://xk.csust.edu.cn/"),
+    ("vpn", "vpn.csust.edu.cn", "VPN 门户", "https://vpn.csust.edu.cn/enclient/start.html"),
+    ("sunshine", "fuwu.csust.edu.cn", "教育阳光服务网", "https://fuwu.csust.edu.cn/"),
+    ("map", "gis.csust.edu.cn", "校园地图", "https://gis.csust.edu.cn/"),
+    ("mail", "mail.csust.edu.cn", "校园邮箱", "https://mail.csust.edu.cn/"),
+    ("library", "lib.csust.edu.cn", "图书馆", "https://lib.csust.edu.cn/"),
+    ("library-remote", "tsgvpn2.csust.edu.cn", "图书馆远程访问", "https://tsgvpn2.csust.edu.cn/"),
+    ("recruitment", "rczpw.csust.edu.cn", "人才招聘", "https://rczpw.csust.edu.cn/zp.html"),
+    ("jxjy", "jxjy.csust.edu.cn", "继续教育", "https://jxjy.csust.edu.cn/"),
+    ("zyjx", "zyjx.csust.edu.cn", "专业技术人员继续教育", "https://zyjx.csust.edu.cn/"),
+    ("equipment", "cslgdygx.csust.edu.cn", "校友服务", "https://cslgdygx.csust.edu.cn/"),
+    ("highway", "highwayexperiment.csust.edu.cn", "公路工程实验中心", "https://highwayexperiment.csust.edu.cn/"),
+    ("training", "gcxljxgl.csust.edu.cn", "工程训练教学管理系统", "http://gcxljxgl.csust.edu.cn/"),
+    ("research", "ky.csust.edu.cn", "科研管理系统", "http://ky.csust.edu.cn/"),
+    ("mooc", "mooc.csust.edu.cn", "慕课教学平台", "http://mooc.csust.edu.cn/portal"),
+    ("legacy-portal", "my.csust.edu.cn", "统一身份认证旧入口", "http://my.csust.edu.cn/"),
+    ("theol", "pt.csust.edu.cn", "网络教学综合平台", "http://pt.csust.edu.cn/meol/homepage/common/"),
+    ("journal", "cslgqk.csust.edu.cn", "期刊社", "https://cslgqk.csust.edu.cn/"),
+    ("journal-social", "cslgxbsk.csust.edu.cn", "学报社科版", "https://cslgxbsk.csust.edu.cn/"),
+    ("journal-science", "cslgxbzk.csust.edu.cn", "学报自然科学版", "https://cslgxbzk.csust.edu.cn/"),
+    ("journal-experiment", "syjx.csust.edu.cn", "实验教学与仪器", "https://syjx.csust.edu.cn/"),
+    ("quality", "zbxt.csust.edu.cn", "教学评价系统", "https://zbxt.csust.edu.cn/login"),
+    ("admissions", "zslq.csust.edu.cn", "招生录取查询", "https://zslq.csust.edu.cn/"),
+    ("journal-highway", "zwgl.csust.edu.cn", "中外公路", "https://zwgl.csust.edu.cn/"),
+    ("journal-highway-legacy", "zwgl1980.csust.edu.cn", "中外公路旧入口", "https://zwgl1980.csust.edu.cn/"),
 )
+
+SITE_SERVICES = {service: {"service": service, "host": host, "name": name, "url": url} for service, host, name, url in SITE_CATALOG}
 
 
 def _official_host(host: str) -> bool:
     value = host.rstrip(".").lower()
     return value == CSUST_ROOT_DOMAIN or value.endswith("." + CSUST_ROOT_DOMAIN)
+
+
+def _service_info(value: str) -> dict[str, str]:
+    key = str(value or "").strip().casefold()
+    if key in SITE_SERVICES:
+        return SITE_SERVICES[key].copy()
+    if not key or "/" in key or "?" in key or "#" in key:
+        raise CsustError("服务必须是目录名或官方主机名，不是 URL", code="invalid_argument")
+    try:
+        parsed = urlparse("//" + key)
+        parsed.port
+    except (TypeError, ValueError) as exc:
+        raise CsustError("服务主机名格式无效", code="invalid_argument") from exc
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not _official_host(host) or parsed.username is not None or parsed.password is not None:
+        raise CsustError("服务必须是 csust.edu.cn 及其子域名", code="invalid_argument")
+    netloc = host + (f":{parsed.port}" if parsed.port else "")
+    return {"service": host, "host": host, "name": host, "url": f"https://{netloc}/"}
 
 
 def _normalize_url(value: str, *, base_url: str | None = None) -> str:
@@ -184,13 +204,26 @@ class SiteClient(Client):
         return
 
 
-def _client(args: argparse.Namespace, url: str, *, load_cookies: bool = True) -> SiteClient:
+def _service_path(args: argparse.Namespace) -> tuple[dict[str, str], str]:
+    info = _service_info(args.service)
+    path = str(getattr(args, "path", "") or "")
+    if not path:
+        path = urlparse(info["url"]).path or "/"
+    if path.lower().startswith(("http://", "https://")):
+        raise CsustError("--path 只能是服务内路径，不能填写 URL", code="invalid_argument")
+    if not path.startswith("/"):
+        path = "/" + path
+    return info, path
+
+
+def _client(args: argparse.Namespace, service: str, *, load_cookies: bool = True) -> SiteClient:
+    info = _service_info(service)
     cookie_file = getattr(args, "cookie_file", None)
     try:
         path = Path(cookie_file).expanduser() if cookie_file else None
     except (OSError, RuntimeError, ValueError) as exc:
         raise CsustError("site 会话文件路径无效", code="cookie_read_failed") from exc
-    return SiteClient(url, path, load_cookies=load_cookies, allow_external=bool(getattr(args, "allow_external", False)))
+    return SiteClient(info["url"], path, load_cookies=load_cookies, allow_external=bool(getattr(args, "allow_external", False)))
 
 
 def _target(client: SiteClient, value: str, params: list[tuple[str, str]] = ()) -> str:
@@ -223,15 +256,16 @@ def _headers(values: list[str]) -> dict[str, str]:
 def run_catalog(_args: argparse.Namespace, _client: Client | None = None) -> dict[str, object]:
     return {
         "source": "https://www.csust.edu.cn/",
-        "catalog": [{"host": host, "name": name, "url": url} for host, name, url in SITE_CATALOG],
+        "catalog": [{"service": service, "host": host, "name": name, "url": url} for service, host, name, url in SITE_CATALOG],
         "domain": CSUST_ROOT_DOMAIN,
         "note": "清单是已观察到的入口；site discover 才是实时发现，site 命令接受新子域名。",
     }
 
 
 def run_get(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
-    client = client or _client(args, args.url)
-    target = _target(client, args.url, _pairs(args.param, "--param"))
+    _info, path = _service_path(args)
+    client = client or _client(args, args.service)
+    target = _target(client, path, _pairs(args.param, "--param"))
     response, saved = _request(
         client,
         "GET",
@@ -259,8 +293,9 @@ def run_request(args: argparse.Namespace, client: SiteClient | None = None) -> d
         raise CsustError("--data-json 不能与 --data/--file 同时使用", code="invalid_argument")
     if method in READ_ONLY_METHODS and (body is not _BODY_UNSET or files or data):
         raise CsustError("GET/HEAD/OPTIONS 请使用 --param", code="invalid_argument")
-    client = client or _client(args, args.url)
-    target = _target(client, args.url, _pairs(args.param, "--param"))
+    _info, path = _service_path(args)
+    client = client or _client(args, args.service)
+    target = _target(client, path, _pairs(args.param, "--param"))
     mutating = method not in READ_ONLY_METHODS or _is_side_effect_get(target)
     if mutating and not args.yes:
         raise CsustError("site 请求可能修改远端数据，请加 --yes", code="confirmation_required")
@@ -310,13 +345,15 @@ def _mutation_response(response: Response, request: dict[str, object]) -> dict[s
 
 
 def run_form(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
-    client = client or _client(args, args.url)
-    return _run_form(args, client, args.url)
+    _info, path = _service_path(args)
+    client = client or _client(args, args.service)
+    return _run_form(args, client, path)
 
 
 def run_action(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
-    client = client or _client(args, args.url)
-    return _run_action_common(args, client, args.url)
+    _info, path = _service_path(args)
+    client = client or _client(args, args.service)
+    return _run_action_common(args, client, path)
 
 
 def _script_endpoints(source: str, page_url: str) -> list[str]:
@@ -342,8 +379,9 @@ def _script_endpoints(source: str, page_url: str) -> list[str]:
 def run_scripts(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
     if args.max_scripts < 1 or args.max_scripts > 100:
         raise CsustError("--max-scripts 必须在 1 到 100 之间", code="invalid_argument")
-    client = client or _client(args, args.url)
-    root = _target(client, args.url)
+    _info, path = _service_path(args)
+    client = client or _client(args, args.service)
+    root = _target(client, path)
     page_response = _retry_read("GET", root, lambda: client.get(root))
     _save_cookie_refresh(client, page_response)
     page = inspect_page(_decode_body(page_response.body, page_response.headers), page_response.url)
@@ -392,8 +430,9 @@ def run_discover(args: argparse.Namespace, client: SiteClient | None = None) -> 
         raise CsustError("--depth 必须在 0 到 3 之间", code="invalid_argument")
     if args.max_pages < 1 or args.max_pages > 200:
         raise CsustError("--max-pages 必须在 1 到 200 之间", code="invalid_argument")
-    client = client or _client(args, args.url)
-    root = _target(client, args.url)
+    _info, path = _service_path(args)
+    client = client or _client(args, args.service)
+    root = _target(client, path)
     queue = deque([(root, 0)])
     queued = {root}
     pages: list[dict[str, object]] = []
@@ -441,12 +480,14 @@ def run_discover(args: argparse.Namespace, client: SiteClient | None = None) -> 
 def run_login(args: argparse.Namespace, _client: SiteClient | None = None) -> dict[str, object]:
     if args.auth not in {"auto", "sso"}:
         raise CsustError("site login 只支持 auto 或 sso", code="invalid_argument")
-    client = _client(args, args.url, load_cookies=False)
-    return login_sso_service(client, _target(client, args.url), args)
+    _info, path = _service_path(args)
+    client = _client(args, args.service, load_cookies=False)
+    return login_sso_service(client, _target(client, path), args)
 
 
 def run_logout(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
-    client = client or _client(args, args.url)
+    _service_info(args.service)
+    client = client or _client(args, args.service)
     client.clear_cookies()
     client.save()
     return {"ok": True, "site": client.base_url, "cookie_file": str(client.cookie_file), "logged_out": True}
@@ -457,7 +498,8 @@ def _session_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _common_page_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--url", required=True, help="完整的 csust.edu.cn 页面 URL")
+    parser.add_argument("--service", required=True, help="服务目录名或官方主机名")
+    parser.add_argument("--path", help="服务内路径；默认使用目录入口")
     _session_args(parser)
     parser.add_argument("--output", help="原样保存响应文件")
     parser.add_argument("--require-login", action="store_true", help="把登录页视为会话失效")
@@ -516,14 +558,16 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     action.set_defaults(feature_runner=run_action, feature_renderer=render)
 
     scripts = children.add_parser("scripts", help="读取同源脚本并提取常见 API/页面端点")
-    scripts.add_argument("--url", required=True, help="脚本所在页面 URL")
+    scripts.add_argument("--service", required=True, help="服务目录名或官方主机名")
+    scripts.add_argument("--path", help="脚本所在服务内路径；默认使用目录入口")
     _session_args(scripts)
     scripts.add_argument("--max-scripts", type=int, default=30)
     scripts.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     scripts.set_defaults(feature_runner=run_scripts, feature_renderer=render)
 
     discover = children.add_parser("discover", help="实时抓取页面并发现同站链接和官方子域名")
-    discover.add_argument("--url", required=True, help="起始页面 URL")
+    discover.add_argument("--service", required=True, help="服务目录名或官方主机名")
+    discover.add_argument("--path", help="起始服务内路径；默认使用目录入口")
     _session_args(discover)
     discover.add_argument("--depth", type=int, default=1)
     discover.add_argument("--max-pages", type=int, default=30)
@@ -531,7 +575,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     discover.set_defaults(feature_runner=run_discover, feature_renderer=render)
 
     login = children.add_parser("login", help="通过统一身份认证登录指定子域名")
-    login.add_argument("--url", required=True, help="需要登录的同源页面 URL")
+    login.add_argument("--service", required=True, help="服务目录名或官方主机名")
+    login.add_argument("--path", help="需要登录的服务内路径；默认使用目录入口")
     _session_args(login)
     login.add_argument("--username")
     login.add_argument("--auth", choices=("auto", "sso"), default="auto")
@@ -541,7 +586,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     login.set_defaults(feature_runner=run_login, feature_renderer=render)
 
     logout = children.add_parser("logout", help="清除指定子域名的本机会话")
-    logout.add_argument("--url", required=True)
+    logout.add_argument("--service", required=True, help="服务目录名或官方主机名")
     _session_args(logout)
     logout.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     logout.set_defaults(feature_runner=run_logout, feature_renderer=render)
@@ -551,7 +596,7 @@ def render(data: dict[str, object]) -> None:
     if "catalog" in data:
         for item in data["catalog"]:
             if isinstance(item, dict):
-                print("\t".join(str(item.get(key, "")) for key in ("host", "name", "url")))
+                print("\t".join(str(item.get(key, "")) for key in ("service", "host", "name", "url")))
         return
     if data.get("downloaded"):
         print(f"已保存：{data.get('output')}（{data.get('bytes', 0)} bytes）")

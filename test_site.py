@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from csust_cli.core import CsustError, Response
-from csust_cli.features.site import SiteClient, _normalize_url, _script_endpoints, run_discover, run_get, run_request
+from csust_cli.features.site import SiteClient, _normalize_url, _script_endpoints, _service_path, run_discover, run_get, run_request
 
 
 class SiteTests(unittest.TestCase):
@@ -20,6 +20,10 @@ class SiteTests(unittest.TestCase):
             client = SiteClient("https://mail.csust.edu.cn/", Path(directory) / "mail-cookies.txt", load_cookies=False, allow_external=True)
             self.assertEqual(client.web_url("https://entry.qiye.163.com/domain/domainEntLogin"), "https://entry.qiye.163.com/domain/domainEntLogin")
 
+    def test_site_service_path_rejects_url_arguments(self):
+        with self.assertRaises(CsustError):
+            _service_path(SimpleNamespace(service="official", path="https://ehall.csust.edu.cn/"))
+
     def test_site_get_returns_the_same_structured_page_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             client = SiteClient("https://www.csust.edu.cn/", Path(directory) / "cookies.txt", load_cookies=False)
@@ -29,7 +33,7 @@ class SiteTests(unittest.TestCase):
                 {"Content-Type": "text/html; charset=utf-8"},
                 "<title>主页</title><form action='/search'><input name='q'></form>",
             )
-            args = SimpleNamespace(url="https://www.csust.edu.cn/", param=[], output=None, require_login=False)
+            args = SimpleNamespace(service="official", path="/", param=[], output=None, require_login=False)
             with mock.patch.object(client, "request", return_value=response):
                 result = run_get(args, client)
         self.assertEqual(result["response"]["title"], "主页")
@@ -40,7 +44,8 @@ class SiteTests(unittest.TestCase):
             client = SiteClient("https://fuwu.csust.edu.cn/", Path(directory) / "cookies.txt", load_cookies=False)
             response = Response("https://fuwu.csust.edu.cn/api", 200, {}, "操作成功")
             args = SimpleNamespace(
-                url="https://fuwu.csust.edu.cn/api",
+                service="sunshine",
+                path="/api",
                 method="POST",
                 param=[],
                 data=[],
@@ -66,7 +71,7 @@ class SiteTests(unittest.TestCase):
                 {"Content-Type": "text/html"},
                 "<a href='https://ehall.csust.edu.cn/'>门户</a><a href='/info'>信息</a>",
             )
-            args = SimpleNamespace(url="https://www.csust.edu.cn/", depth=0, max_pages=1, cookie_file=None)
+            args = SimpleNamespace(service="official", path="/", depth=0, max_pages=1, cookie_file=None)
             with mock.patch.object(client, "get", return_value=response):
                 result = run_discover(args, client)
         self.assertEqual(result["page_count"], 1)
