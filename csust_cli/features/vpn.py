@@ -19,13 +19,19 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.request import Request
 
 from ..core import (
+    AUTHSERVER_BASE_URL,
     AuthenticationFailed,
     Client,
     CredentialsRequired,
     CsustError,
+    HttpError,
+    LoginRequired,
+    MutationUnverified,
+    NetworkError,
     business_state,
     result_status,
     Response,
@@ -37,7 +43,14 @@ from ..core import (
     parse_html,
     _save_cookie_refresh,
     _safe_terminal_text,
+    _safe_url,
+    _SENSITIVE_FIELD,
+    _url_origin,
+    _file_lock,
+    same_origin_url,
     _write_private_file,
+    _commit_stream,
+    _discard_stream,
     env_value,
 )
 
@@ -95,17 +108,32 @@ def _api_group(path: str) -> str:
 
 
 _READ_POST_LEAF = re.compile(
-    r"(?:^|/)(?:get|find|list|page|count|info|detail|query|result|flow|check|supported|current|latest|baseinfoGet|get[A-Z])",
+    r"(?:^|/)(?:get|find|list|page|count|info|detail|query|result|flow|check|supported|current|latest|baseinfo|download|applydetail|flowimage|get[A-Z]|groupCount|applyPage|waitingHandle|myHandle|canApplyTypes|applyFormConf|approveUserInfos|validBeforeApplication|fileCirculateDownload|downloadShareFile|newDownloadShareFile)",
     re.I,
+)
+
+_READONLY_GET_ACTIONS = frozenset(
+    {
+        "/api/users/service/visit/add/{id}",
+        "/api/v1/desktop/startProcess",
+        "/api/v1/safetyAssess/continueTask",
+        "/api/v1/safetyAssess/pauseTask",
+        "/api/v1/safetyAssess/stopTask",
+    }
 )
 
 
 def _is_mutating(method: str, path: str) -> bool:
+    method = method.upper()
+    normalized = path.split("?", 1)[0].rstrip("/") or "/"
+    readonly_get = {item.rstrip("/") for item in _READONLY_GET_ACTIONS if "{" not in item}
+    if method == "GET" and (normalized in readonly_get or re.fullmatch(r"/api/users/service/visit/add/[^/]+", normalized)):
+        return True
     if "/delete" in path.lower() or "/logout" in path.lower():
         return True
     if method in {"GET", "HEAD", "OPTIONS"}:
         return False
-    leaf = path.split("?", 1)[0].rstrip("/")
+    leaf = normalized
     if _READ_POST_LEAF.search(leaf):
         return False
     return True
@@ -662,12 +690,13 @@ def _parse_pairs(values: Iterable[str], option: str) -> list[tuple[str, str]]:
 def _parse_files(values: Iterable[str]) -> list[tuple[str, object]]:
     parts: list[tuple[str, object]] = []
     for name, value in _parse_pairs(values, "--file"):
-        path = Path(value).expanduser()
+        path = value
         try:
+            path = Path(value).expanduser()
             if path.is_symlink() or not path.is_file():
                 raise OSError("必须是普通文件且不能是符号链接")
             content = path.read_bytes()
-        except (OSError, UnicodeError) as exc:
+        except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
             raise CsustError(f"无法读取上传文件 {path}: {exc}", code="invalid_argument") from exc
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         parts.append((name, (path.name, content, content_type)))
@@ -681,8 +710,8 @@ def _json_argument(value: str | None) -> object:
         value = sys.stdin.read()
     elif value.startswith("@"):
         try:
-            value = Path(value[1:]).read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
+            value = Path(value[1:]).expanduser().read_text(encoding="utf-8")
+        except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
             raise CsustError(f"无法读取 JSON 参数文件：{exc}", code="invalid_argument") from exc
     try:
         parsed = json.loads(value)
@@ -694,11 +723,12 @@ def _json_argument(value: str | None) -> object:
 
 
 def _redact(value: object) -> object:
-    sensitive = re.compile(r"pass|password|passwd|token|secret|cookie|session|captcha|sign|ticket|nonce|csrf", re.I)
     if isinstance(value, dict):
-        return {str(key): ("<redacted>" if sensitive.search(str(key)) else _redact(item)) for key, item in value.items()}
+        return {str(key): ("<redacted>" if _SENSITIVE_FIELD.search(str(key)) else _redact(item)) for key, item in value.items()}
     if isinstance(value, list):
         return [_redact(item) for item in value]
+    if isinstance(value, str) and ("?" in value or ";" in value or value.startswith(("http://", "https://"))):
+        return _safe_url(value)
     return value
 
 
@@ -713,24 +743,46 @@ class VpnClient(Client):
         *,
         native: bool = False,
         load_cookies: bool = True,
+        load_session: bool | None = None,
     ) -> None:
         self.native = native
         configured = base_url or env_value("CSUST_VPN_NATIVE_URL" if native else "CSUST_VPN_BASE_URL", VPN_NATIVE_URL if native else VPN_BASE_URL)
-        cookie = cookie_file or Path(env_value("CSUST_VPN_COOKIE_FILE", str(Path.home() / ".config" / "csust-cli" / "vpn-cookies.txt"))).expanduser()
-        self.session_file = Path(session_file or env_value("CSUST_VPN_SESSION_FILE", str(Path.home() / ".config" / "csust-cli" / "vpn-session.json"))).expanduser()
+        default_root = Path.home() / ".config" / "csust-cli"
+        if native:
+            cookie_default = str(default_root / "vpn-native-cookies.txt")
+            session_default = str(default_root / "vpn-native-session.json")
+            cookie_name, session_name = "CSUST_VPN_NATIVE_COOKIE_FILE", "CSUST_VPN_NATIVE_SESSION_FILE"
+        else:
+            cookie_default = str(default_root / "vpn-cookies.txt")
+            session_default = str(default_root / "vpn-session.json")
+            cookie_name, session_name = "CSUST_VPN_COOKIE_FILE", "CSUST_VPN_SESSION_FILE"
+        cookie = cookie_file or Path(env_value(cookie_name, cookie_default)).expanduser()
+        self.session_file = Path(session_file or env_value(session_name, session_default)).expanduser()
         super().__init__(configured, cookie, load_cookies=load_cookies)
-        self.session = _read_json_file(self.session_file, code="vpn_session_read_failed", label="VPN 会话文件") if self.session_file.exists() else {}
-        self.pending_token = ""
+        should_load_session = load_cookies if load_session is None else load_session
+        self.session = _read_json_file(self.session_file, code="vpn_session_read_failed", label="VPN 会话文件") if should_load_session and self.session_file.exists() else {}
+        self.pending_token = str(self.session.get("pendingToken") or "")
+        self._initial_session_snapshot = dict(self.session)
 
     def _api_path(self, path: str) -> str:
         if not isinstance(path, str) or not path.strip():
             raise CsustError("VPN API 路径不能为空", code="invalid_path")
         path = path.strip()
         if path.lower().startswith(("http://", "https://")):
-            target = self.url(path)
-            if urlsplit(target).netloc.lower() != urlsplit(self.base_url).netloc.lower():
-                raise CsustError("VPN API 只允许访问当前站点", code="invalid_path")
+            target = same_origin_url(self, path)
+            try:
+                request_path = unquote(unquote(urlsplit(target).path))
+            except (TypeError, ValueError) as exc:
+                raise CsustError("VPN API 路径格式无效", code="invalid_path") from exc
+            if "\\" in request_path or any(part in {".", ".."} for part in request_path.split("/")):
+                raise CsustError("VPN API 路径不能包含目录跳转", code="invalid_path")
             return target
+        try:
+            request_path = unquote(unquote(urlsplit(path).path))
+        except (TypeError, ValueError) as exc:
+            raise CsustError("VPN API 路径格式无效", code="invalid_path") from exc
+        if "\\" in request_path or any(part in {".", ".."} for part in request_path.split("/")):
+            raise CsustError("VPN API 路径不能包含目录跳转", code="invalid_path")
         if self.native:
             if path.startswith("/enclient/"):
                 path = path[len("/enclient"):]
@@ -739,19 +791,24 @@ class VpnClient(Client):
             return path
         return "/enclient/" + path.lstrip("/")
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, target: str | None = None) -> dict[str, str]:
         language = env_value("CSUST_VPN_LANGUAGE", "zh")
         accept_language = {
             "en": "en,zh-CN;q=0.9,zh;q=0.8",
             "th": "th-TH,en;q=0.8;q=0.9,en-GB;q=0.7;q=0.8,en-US;q=0.6;q=0.7",
         }.get(language, "zh-CN,zh;q=0.9,en;q=0.8")
         use_mode = "1" if env_value("CSUST_VPN_REGISTERED", "false").lower() == "true" else "0"
+        cookie_target = target or self.base_url
+        if isinstance(cookie_target, str) and not cookie_target.lower().startswith(("http://", "https://")):
+            cookie_target = self.url(cookie_target)
+        cookie_request = Request(cookie_target)
+        try:
+            self.cookies.add_cookie_header(cookie_request)
+        except (AttributeError, TypeError, ValueError):
+            pass
         cookie_values = ["BROWSER_LOGIN=1", f"UseMode={use_mode}"]
-        cookie_values.extend(
-            f"{cookie.name}={cookie.value}"
-            for cookie in self.cookies
-            if cookie.name not in {"BROWSER_LOGIN", "UseMode"}
-        )
+        actual_cookie = cookie_request.get_header("Cookie") or ""
+        cookie_values.extend(item.strip() for item in actual_cookie.split(";") if item.strip() and not item.lower().startswith(("browser_login=", "usemode=")))
         headers = {
             "Accept": "application/json,text/plain,*/*",
             "Content-Type": "application/json",
@@ -770,21 +827,75 @@ class VpnClient(Client):
         if device_info:
             headers["Device-Info"] = device_info
         token = self.session.get("token") or self.pending_token
-        if isinstance(token, str) and token:
+        if not self.native and isinstance(token, str) and token:
             headers["Authorization"] = "Bearer " + token
         return headers
 
-    def save_session(self) -> None:
-        _write_private_file(
-            self.session_file,
-            (json.dumps(self.session, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-            code="vpn_session_write_failed",
-            label="VPN 会话文件",
-        )
+    def save_session(self, *, force: bool = False) -> None:
+        path = self.session_file
+        try:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if path.is_symlink() or (path.exists() and not path.is_file()):
+                raise OSError("会话文件必须是普通文件且不能是符号链接")
+            with _file_lock(path):
+                latest: dict[str, object] = {}
+                if path.exists():
+                    try:
+                        value = json.loads(path.read_text(encoding="utf-8"))
+                        if isinstance(value, dict):
+                            latest = value
+                    except (OSError, UnicodeError, ValueError):
+                        pass
+                initial = getattr(self, "_initial_session_snapshot", {})
+                changed = {
+                    key
+                    for key in set(initial) | set(self.session)
+                    if initial.get(key) != self.session.get(key)
+                }
+                merged = dict(latest)
+                auth_keys = {"token", "refreshToken", "pendingToken", "account", "username", "name", "userId", "id", "auth"}
+                auth_changes = changed & auth_keys
+                if auth_changes and not force:
+                    conflicts = {
+                        key
+                        for key in auth_changes
+                        if latest.get(key) != initial.get(key) and self.session.get(key) != latest.get(key)
+                    }
+                    if conflicts:
+                        raise CsustError(
+                            "VPN 会话文件已被其他进程更新，请重试",
+                            code="vpn_session_conflict",
+                            details={"fields": sorted(conflicts)},
+                        )
+                if force:
+                    auth_changes = auth_keys & (set(initial) | set(latest) | set(self.session))
+                for key in auth_changes:
+                    if key in self.session:
+                        merged[key] = self.session[key]
+                    else:
+                        merged.pop(key, None)
+                changed -= auth_changes
+                for key in changed:
+                    if key in self.session:
+                        merged[key] = self.session[key]
+                    else:
+                        merged.pop(key, None)
+                _write_private_file(
+                    path,
+                    (json.dumps(merged, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                    code="vpn_session_write_failed",
+                    label="VPN 会话文件",
+                )
+                self.session = merged
+                self.pending_token = str(merged.get("pendingToken") or "")
+                self._initial_session_snapshot = dict(merged)
+        except (OSError, ValueError) as exc:
+            raise CsustError(f"无法保存 VPN 会话文件 {path}: {exc}", code="vpn_session_write_failed") from exc
 
     def clear_session(self) -> None:
         self.session = {}
-        self.save_session()
+        self.pending_token = ""
+        self.save_session(force=True)
 
     def _set_tokens(self, data: object) -> None:
         if not isinstance(data, dict):
@@ -802,7 +913,8 @@ class VpnClient(Client):
     def refresh(self) -> bool:
         if not self.session.get("refreshToken"):
             return False
-        response = self.request(self._api_path(VPN_REFRESH_PATH), method="GET", headers=self._headers())
+        target = self._api_path(VPN_REFRESH_PATH)
+        response = self.request(target, method="GET", headers=self._headers(target))
         _save_cookie_refresh(self, response)
         value = _response_json(response)
         if not isinstance(value, dict) or str(value.get("code")) != "200":
@@ -822,32 +934,60 @@ class VpnClient(Client):
         path_args: Iterable[str] = (),
         binary: bool = False,
         retry_refresh: bool = True,
+        update_session: bool = False,
+        stream_to: str | Path | None = None,
     ) -> tuple[Response, object | None]:
         path = _resolve_path(path, params, path_args)
         target = self._api_path(path)
         request_options: dict[str, object] = {
             "method": method,
-            "headers": self._headers(),
+            "headers": self._headers(target),
             "binary": binary,
             "with_metadata": True,
         }
+        if stream_to is not None:
+            request_options["stream_to"] = stream_to
+            request_options["defer_stream_commit"] = True
         if method not in {"GET", "HEAD", "OPTIONS"}:
             if multipart is not None:
                 request_options["multipart"] = multipart
             else:
                 request_options["json_body"] = data
-        response = self.request(target, **request_options)
+        mutating = _is_mutating(method, path)
+        try:
+            response = self.request(target, **request_options)
+        except (HttpError, NetworkError) as exc:
+            if mutating:
+                raise MutationUnverified(
+                    "VPN 写请求已发送但结果未知",
+                    details={"submitted": True, "confirmed": False, "request": {"method": method, "path": _safe_url(target)}, "cause": exc.code},
+                ) from exc
+            raise
         assert isinstance(response, Response)
-        _save_cookie_refresh(self, response)
+        try:
+            _save_cookie_refresh(self, response)
+        except CsustError as exc:
+            _discard_stream(response)
+            if mutating:
+                raise MutationUnverified(
+                    "VPN 写请求已完成但会话保存失败，结果未知",
+                    details={"submitted": True, "confirmed": False, "request": {"method": method, "path": _safe_url(target)}, "save_error": exc.code},
+                ) from exc
+            raise
         value = _response_json(response)
-        if retry_refresh and not self.native and path.rstrip("/") != VPN_REFRESH_PATH.rstrip("/") and _response_code(value) == "3010":
+        if retry_refresh and not self.native and not _is_mutating(method, path) and path.rstrip("/") != VPN_REFRESH_PATH.rstrip("/") and _response_code(value) == "3010":
+            _discard_stream(response)
             if self.refresh():
-                return self.request_api(path, method=method, data=data, multipart=multipart, params=(), path_args=(), binary=binary, retry_refresh=False)
-        if isinstance(value, dict):
+                return self.request_api(path, method=method, data=data, multipart=multipart, params=(), path_args=(), binary=binary, retry_refresh=False, update_session=update_session, stream_to=stream_to)
+        if update_session and isinstance(value, dict):
             previous = dict(self.session)
             self._set_tokens(value.get("data"))
             if self.session != previous:
-                self.save_session()
+                try:
+                    self.save_session()
+                except BaseException:
+                    _discard_stream(response)
+                    raise
         return response, value
 
     def call_spec(
@@ -864,6 +1004,8 @@ class VpnClient(Client):
     ) -> dict[str, object]:
         if require_confirmation and spec.mutating and not yes:
             raise CsustError(f"{spec.name} 可能改变远端状态，请加 --yes", code="confirmation_required")
+        if spec.binary and not output:
+            raise CsustError(f"{spec.name} 返回二进制内容时必须提供 --output", code="invalid_argument")
         response, value = self.request_api(
             spec.path,
             method=spec.method,
@@ -872,25 +1014,49 @@ class VpnClient(Client):
             params=params,
             path_args=path_args,
             binary=bool(output) or spec.binary,
+            stream_to=output,
         )
         request_info = {"name": spec.name, "method": spec.method, "path": spec.path, "native": self.native}
         from .web import _feedback
 
-        payload = _redact(value if value is not None else _feedback(response))
-        if business_state(payload, success_codes=("200",)) is False:
-            result_status(payload, mutating=spec.mutating, details={"request": request_info}, success_codes=("200",))
-        if value is None:
-            require_logged_in(response)
-        if output:
-            body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
-            _write_private_file(Path(output).expanduser(), body, code="vpn_output_write_failed", label="VPN 响应")
-            saved = {"request": request_info, "status": response.status, "downloaded": True, "output": str(Path(output).expanduser()), "bytes": len(body)}
-            return {**saved, **result_status(payload, mutating=spec.mutating, details=saved, success_codes=("200",))}
-        return {**result_status(payload, mutating=spec.mutating, details={"request": request_info}, success_codes=("200",)), "request": request_info, "status": response.status, "response": payload}
+        try:
+            payload = _redact(value if value is not None else _feedback(response))
+            if business_state(payload, success_codes=("200",)) is False:
+                result_status(payload, mutating=spec.mutating, details={"request": request_info}, success_codes=("200",))
+            if value is None:
+                try:
+                    require_logged_in(response)
+                except LoginRequired as exc:
+                    if spec.mutating:
+                        raise MutationUnverified(
+                            "VPN 写请求已发送但返回登录页，结果未知",
+                            details={"submitted": True, "confirmed": False, "request": request_info, "cause": exc.code},
+                        ) from exc
+                    raise
+            if output:
+                body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
+                output_path = Path(output).expanduser()
+                streamed = response.stream_temp_path is not None or response.stream_path == str(output_path)
+                if streamed:
+                    _commit_stream(response, code="vpn_output_write_failed", label="VPN 响应")
+                else:
+                    _write_private_file(output_path, body, code="vpn_output_write_failed", label="VPN 响应")
+                byte_count = output_path.stat().st_size if streamed else len(body)
+                saved = {"request": request_info, "status": response.status, "downloaded": True, "output": str(output_path), "bytes": byte_count}
+                return {**saved, **result_status(payload, mutating=spec.mutating, details=saved, success_codes=("200",))}
+            return {**result_status(payload, mutating=spec.mutating, details={"request": request_info}, success_codes=("200",)), "request": request_info, "status": response.status, "response": payload}
+        except BaseException:
+            _discard_stream(response)
+            raise
 
 
 def _response_json(response: Response) -> object | None:
     body = _decode_body(response.body, response.headers)
+    if not body.strip():
+        return None
+    content_type = _header_value(response.headers, "Content-Type").lower()
+    if isinstance(response.body, bytes) and "json" not in content_type and not any(kind in content_type for kind in ("text/", "xml")) and content_type:
+        return None
     try:
         return json.loads(body)
     except (TypeError, ValueError) as exc:
@@ -904,6 +1070,8 @@ def _response_code(value: object) -> str | None:
 
 
 def _resolve_path(path: str, params: Iterable[tuple[str, str]], path_args: Iterable[str]) -> str:
+    if not isinstance(path, str) or not path.strip() or any(ord(char) < 0x20 for char in path):
+        raise CsustError("VPN API 路径格式无效", code="invalid_path")
     args = list(path_args)
     placeholders = re.findall(r"\{[^}]+\}", path)
     if placeholders:
@@ -912,7 +1080,10 @@ def _resolve_path(path: str, params: Iterable[tuple[str, str]], path_args: Itera
         for placeholder, value in zip(placeholders, args):
             path = path.replace(placeholder, quote(value, safe=""), 1)
         args = args[len(placeholders):]
-    split = urlsplit(path)
+    try:
+        split = urlsplit(path)
+    except (TypeError, ValueError) as exc:
+        raise CsustError("VPN API 路径格式无效", code="invalid_path") from exc
     if args:
         split = split._replace(path=split.path.rstrip("/") + "/" + "/".join(quote(value, safe="") for value in args))
     supplied = list(params)
@@ -933,6 +1104,21 @@ def _client(client: Client | None, *, native: bool = False) -> VpnClient:
     if isinstance(client, VpnClient) and client.native == native:
         return client
     return VpnClient(native=native)
+
+
+def _restore_file(path: Path, content: bytes | None) -> None:
+    try:
+        if content is None:
+            if path.exists() or path.is_symlink():
+                path.unlink()
+            return
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.restore")
+        temporary.write_bytes(content)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except OSError:
+        pass
 
 
 def _encrypt_password(password: str, login_key: str) -> str:
@@ -965,12 +1151,19 @@ def _cas_enabled(config: object) -> bool:
     )
 
 
-def _cas_form(response: Response, account: str, password: str, captcha_info: str | None) -> tuple[str, list[tuple[str, str]]]:
+def _cas_form(
+    response: Response,
+    account: str,
+    password: str,
+    captcha_info: str | None,
+    allowed_origins: set[tuple[str, str, int | None]] | None = None,
+) -> tuple[str, list[tuple[str, str]]]:
     document = parse_html(_decode_body(response.body, response.headers))
     form = document.first("form", element_id="pwdFromId")
     if form is None:
         raise AuthenticationFailed("统一认证登录页缺少账号密码表单", details={"url": response.url})
     fields: list[tuple[str, str]] = []
+    page_captcha = ""
     for element in form.find_all("input"):
         name = element.attr("name").strip()
         input_type = element.attr("type", "text").lower()
@@ -978,19 +1171,29 @@ def _cas_form(response: Response, account: str, password: str, captcha_info: str
             continue
         if input_type in {"checkbox", "radio"} and "checked" not in element.attrs:
             continue
+        if name == "captcha":
+            page_captcha = element.attr("value")
+            continue
         if name not in {"username", "password", "passwordText"}:
             fields.append((name, element.attr("value")))
     salt_input = form.first("input", element_id="pwdEncryptSalt")
     salt = salt_input.attr("value") if salt_input is not None else ""
     fields.extend((("username", account), ("password", _encrypt_cas_password(password, salt))))
+    captcha = page_captcha
     if captcha_info:
         parsed = _json_argument(captcha_info)
         if not isinstance(parsed, dict):
             raise CsustError("--captcha-info 必须是 JSON 对象", code="invalid_argument")
-        captcha = parsed.get("captcha") or parsed.get("code") or parsed.get("value")
-        if captcha:
-            fields.append(("captcha", str(captcha)))
-    action = urljoin(response.url, form.attr("action") or response.url)
+        captcha = parsed.get("captcha") or parsed.get("code") or parsed.get("value") or ""
+    fields.append(("captcha", str(captcha)))
+    try:
+        action = urljoin(response.url, form.attr("action") or response.url)
+        action_origin = _url_origin(action)
+        response_origin = _url_origin(response.url)
+    except (TypeError, ValueError) as exc:
+        raise CsustError("统一认证表单地址格式无效", code="invalid_path") from exc
+    if action_origin != response_origin or (allowed_origins is not None and response_origin not in allowed_origins):
+        raise CsustError("统一认证表单地址不是当前 VPN 站点", code="invalid_path")
     service = next((value for key, value in parse_qsl(urlsplit(response.url).query, keep_blank_values=True) if key == "service"), "")
     action_parts = urlsplit(action)
     action_query = parse_qsl(action_parts.query, keep_blank_values=True)
@@ -1003,17 +1206,27 @@ def _cas_form(response: Response, account: str, password: str, captcha_info: str
 def _cas_login(vpn: VpnClient, account: str, password: str, config: object, captcha_info: str | None) -> dict[str, object]:
     data = config.get("data") if isinstance(config, dict) else None
     configured = data.get("casLoginUrl") if isinstance(data, dict) else None
-    cas_url = vpn.url(str(configured or "/enclient/api/users/admin/custom/page/login/sso/cas"))
-    target_parts = urlsplit(cas_url)
-    base_parts = urlsplit(vpn.base_url)
-    if (target_parts.scheme, target_parts.hostname) != (base_parts.scheme, base_parts.hostname):
+    cas_url = vpn.url(str(configured)) if configured else vpn.url(vpn._api_path("/enclient/api/users/admin/custom/page/login/sso/cas"))
+    try:
+        target_origin = _url_origin(vpn.url(cas_url))
+        base_origin = _url_origin(vpn.base_url)
+    except (TypeError, ValueError) as exc:
+        raise CsustError("统一认证地址格式无效", code="invalid_path") from exc
+    if target_origin != base_origin:
         raise CsustError("统一认证地址不是当前 VPN 站点", code="invalid_path")
-    cas_headers = vpn._headers()
+    redirect_origins = {base_origin, _url_origin(AUTHSERVER_BASE_URL)}
+    cas_headers = vpn._headers(cas_url)
     cas_headers.pop("Cookie", None)
-    first = vpn.request(cas_url, method="GET", headers={**cas_headers, "Accept": "text/html,application/xhtml+xml"}, with_metadata=True)
+    first = vpn.request(
+        cas_url,
+        method="GET",
+        headers={**cas_headers, "Accept": "text/html,application/xhtml+xml"},
+        with_metadata=True,
+        allowed_redirect_origins=redirect_origins,
+    )
     assert isinstance(first, Response)
     _save_cookie_refresh(vpn, first)
-    action, fields = _cas_form(first, account, password, captcha_info)
+    action, fields = _cas_form(first, account, password, captcha_info, redirect_origins)
     headers = dict(cas_headers)
     headers.update(
         {
@@ -1023,7 +1236,14 @@ def _cas_login(vpn: VpnClient, account: str, password: str, config: object, capt
             "Origin": vpn.base_url,
         }
     )
-    response = vpn.request(action, method="POST", data=fields, headers=headers, with_metadata=True)
+    response = vpn.request(
+        action,
+        method="POST",
+        data=fields,
+        headers=headers,
+        with_metadata=True,
+        allowed_redirect_origins=redirect_origins,
+    )
     assert isinstance(response, Response)
     _save_cookie_refresh(vpn, response)
     value = _response_json(response)
@@ -1043,7 +1263,7 @@ def _cas_login(vpn: VpnClient, account: str, password: str, config: object, capt
         raise AuthenticationFailed("统一认证回调成功，但 VPN 会话未建立", details={"response": _redact(info)})
     vpn.session["account"] = account
     vpn.session["auth"] = "cas"
-    vpn.save_session()
+    vpn.save_session(force=True)
     return {"ok": True, "username": account, "auth": "cas", "session_file": str(vpn.session_file), "user": _redact(info.get("data"))}
 
 
@@ -1054,7 +1274,38 @@ def _login_password(args: argparse.Namespace) -> str:
 
 
 def login(args: argparse.Namespace, client: Client | None = None) -> dict[str, object]:
-    vpn = _client(client)
+    vpn = client if isinstance(client, VpnClient) else VpnClient(load_cookies=False, load_session=False)
+    old_session = dict(vpn.session)
+    old_pending = vpn.pending_token
+    old_cookies = list(vpn.cookies)
+    cookie_bytes = None
+    session_bytes = None
+    try:
+        cookie_bytes = vpn.cookie_file.read_bytes() if vpn.cookie_file.is_file() else None
+        session_bytes = vpn.session_file.read_bytes() if vpn.session_file.is_file() else None
+    except OSError:
+        pass
+
+    def restore() -> None:
+        vpn.cookies.clear()
+        for cookie in old_cookies:
+            vpn.cookies.set_cookie(cookie)
+        vpn.session = old_session
+        vpn.pending_token = old_pending
+        _restore_file(vpn.cookie_file, cookie_bytes)
+        _restore_file(vpn.session_file, session_bytes)
+
+    try:
+        result = _login_impl(args, vpn)
+        if isinstance(result, dict) and result.get("ok") is False and not result.get("pending"):
+            restore()
+        return result
+    except Exception:
+        restore()
+        raise
+
+
+def _login_impl(args: argparse.Namespace, vpn: VpnClient) -> dict[str, object]:
     account = (getattr(args, "username", None) or env_value("CSUST_USERNAME", env_value("username"))).strip()
     password = _login_password(args)
     if not account or not password:
@@ -1093,25 +1344,58 @@ def login(args: argparse.Namespace, client: Client | None = None) -> dict[str, o
         raise AuthenticationFailed("VPN 登录返回格式无效")
     code = _response_code(result)
     if code != "200":
-        return {"ok": False, "username": account, "code": code, "message": result.get("messages") or result.get("message"), "next": "second-auth" if code in {"2050", "2051", "2060", "2080", "4010", "4020", "4030", "4040"} else None, "response": _redact(result.get("data"))}
+        pending = code in {"2050", "2051", "2060", "2080", "4010", "4020", "4030", "4040"}
+        if pending and vpn.pending_token:
+            vpn.session.update({"pendingToken": vpn.pending_token, "account": account, "auth": "local"})
+            vpn.save_session(force=True)
+        return {"ok": False, "username": account, "code": code, "message": result.get("messages") or result.get("message"), "next": "second-auth" if pending else None, "pending": pending, "session_file": str(vpn.session_file), "response": _redact(result.get("data"))}
     vpn._set_tokens(result.get("data"))
+    vpn.pending_token = ""
+    vpn.session.pop("pendingToken", None)
     vpn.session["account"] = account
-    vpn.save_session()
+    vpn.session["auth"] = "local"
+    vpn.save_session(force=True)
     info_spec = _spec_by_name(_api_name(VPN_INFO_PATH))
     _response, info = vpn.request_api(info_spec.path, method=info_spec.method, retry_refresh=False)
-    return {"ok": True, "username": account, "session_file": str(vpn.session_file), "user": _redact(info.get("data") if isinstance(info, dict) else info)}
+    if (
+        not isinstance(info, dict)
+        or _response_code(info) not in {None, "200"}
+        or not isinstance(info.get("data"), dict)
+        or not info.get("data")
+        or (not vpn.session.get("token") and not _has_session_cookie(vpn))
+    ):
+        raise AuthenticationFailed("VPN 登录后未建立有效用户会话", details={"response": _redact(info)})
+    return {"ok": True, "username": account, "session_file": str(vpn.session_file), "user": _redact(info.get("data"))}
 
 
 def logout(args: argparse.Namespace, client: Client | None = None) -> dict[str, object]:
     vpn = _client(client, native=bool(getattr(args, "native", False)))
+    result = None
+    primary: BaseException | None = None
+    cleanup_error: BaseException | None = None
     try:
         spec = _spec_by_name(_api_name(VPN_LOGOUT_PATH))
         result = vpn.call_spec(spec, data={}, params=(), path_args=(), require_confirmation=False, yes=True)
+    except BaseException as exc:
+        primary = exc
     finally:
-        vpn.clear_cookies()
-        vpn.save()
-        vpn.clear_session()
-    return {"ok": True, "logged_out": True, "session_file": str(vpn.session_file), "remote": result if "result" in locals() else None}
+        try:
+            vpn.clear_cookies()
+        except BaseException as exc:
+            cleanup_error = exc
+        try:
+            vpn.save()
+        except BaseException as exc:
+            cleanup_error = cleanup_error or exc
+        try:
+            vpn.clear_session()
+        except BaseException as exc:
+            cleanup_error = cleanup_error or exc
+    if primary is not None:
+        raise primary
+    if cleanup_error is not None:
+        raise cleanup_error
+    return {"ok": True, "logged_out": True, "session_file": str(vpn.session_file), "remote": result}
 
 
 def _has_session_cookie(vpn: VpnClient) -> bool:
@@ -1123,8 +1407,26 @@ def run_status(args: argparse.Namespace, client: Client | None = None) -> dict[s
     if not vpn.session.get("token") and not _has_session_cookie(vpn):
         return {"ok": True, "logged_in": False, "native": vpn.native, "session_file": str(vpn.session_file)}
     spec = _spec_by_name(_api_name(VPN_INFO_PATH))
-    result = vpn.call_spec(spec, data=None, params=(), path_args=(), require_confirmation=False, yes=True)
-    return {"ok": bool(result.get("ok")), "logged_in": bool(result.get("ok")), "native": vpn.native, "session_file": str(vpn.session_file), "user": result.get("response")}
+    try:
+        _response, value = vpn.request_api(spec.path, method=spec.method, retry_refresh=False)
+    except (LoginRequired, HttpError) as exc:
+        if isinstance(exc, HttpError) and exc.status != 401:
+            raise
+        return {"ok": True, "logged_in": False, "native": vpn.native, "session_file": str(vpn.session_file)}
+    if _response_code(value) == "3010":
+        return {"ok": True, "logged_in": False, "native": vpn.native, "session_file": str(vpn.session_file)}
+    if not isinstance(value, dict):
+        return {"ok": True, "logged_in": False, "native": vpn.native, "session_file": str(vpn.session_file)}
+    if business_state(value, success_codes=("200",)) is False:
+        result_status(_redact(value), mutating=False, success_codes=("200",))
+    response = _redact(value)
+    data = value.get("data")
+    identity_keys = {"id", "userid", "useraccount", "username", "account", "name", "realname", "nickname"}
+    logged_in = isinstance(data, dict) and any(
+        re.sub(r"[^a-z0-9]", "", str(key).casefold()) in identity_keys and str(item).strip()
+        for key, item in data.items()
+    )
+    return {"ok": True, "logged_in": logged_in, "native": vpn.native, "session_file": str(vpn.session_file), "user": response if logged_in else None}
 
 
 def run_routes(_args: argparse.Namespace, _client: Client | None = None) -> dict[str, object]:
@@ -1154,11 +1456,15 @@ def _route_key(value: str) -> str:
 def run_page(args: argparse.Namespace, _client: Client | None = None) -> dict[str, object]:
     wanted = str(args.route).strip()
     wanted_key = _route_key(wanted)
-    matches = [
+    exact_matches = [
         item
         for item in VPN_ROUTE_CATALOG
-        if item["name"].casefold() == wanted.casefold()
-        or _route_key(str(item["path"])) == wanted_key
+        if item["name"] == wanted or str(item["path"]) == wanted
+    ]
+    matches = exact_matches or [
+        item
+        for item in VPN_ROUTE_CATALOG
+        if _route_key(str(item["path"])) == wanted_key
         or wanted.casefold() in {str(alias).casefold() for alias in item["aliases"]}
     ]
     if len(matches) > 1:
@@ -1167,11 +1473,11 @@ def run_page(args: argparse.Namespace, _client: Client | None = None) -> dict[st
         raise CsustError(f"未知 VPN 路由：{wanted}；先运行 csust vpn routes", code="unknown_route")
     match = matches[0]
     route_names = {match["name"]}
-    base_path = urlsplit(str(match["path"])).path.lower().rstrip("/") or "/"
+    base_path = urlsplit(str(match["path"])).path.rstrip("/") or "/"
     route_names.update(
         item["name"]
         for item in VPN_ROUTE_CATALOG
-        if urlsplit(str(item["path"])).path.lower().rstrip("/") == base_path
+        if urlsplit(str(item["path"])).path.rstrip("/") == base_path
     )
     return {"route": match, "controls": [item for item in VPN_CONTROL_CATALOG if route_names.intersection(item["routes"])]}
 
@@ -1187,13 +1493,14 @@ def run_api(args: argparse.Namespace, client: Client | None = None) -> dict[str,
     elif args.path:
         path = args.path
         method = (args.method or "GET").upper()
-        spec = VpnApiSpec(_api_name(path), method, path, _api_group(path), _is_mutating(method, path), False)
+        spec = VpnApiSpec(_api_name(path), method, path, _api_group(path), _is_mutating(method, path), "/download" in path.lower())
     else:
         raise CsustError("--name 与 --path 至少指定一个", code="invalid_argument")
     if method not in {"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}:
         raise CsustError("不支持的 HTTP 方法", code="invalid_argument")
     multipart = [(name, value) for name, value in _parse_pairs(getattr(args, "form", ()), "--form")]
     multipart.extend(_parse_files(getattr(args, "file", ())))
+    multipart = multipart or None
     if multipart and args.data_json is not None:
         raise CsustError("--data-json 不能与 --form/--file 同时使用", code="invalid_argument")
     if method in {"GET", "HEAD", "OPTIONS"}:
@@ -1203,6 +1510,8 @@ def run_api(args: argparse.Namespace, client: Client | None = None) -> dict[str,
         multipart = None
     else:
         data = None if multipart else _json_argument(args.data_json)
+    if spec.binary and not args.output:
+        raise CsustError("二进制 VPN API 响应必须提供 --output", code="invalid_argument")
     return vpn.call_spec(spec, data=data, multipart=multipart, params=_parse_pairs(args.param, "--param"), path_args=args.path_arg, output=args.output, yes=args.yes)
 
 
@@ -1218,24 +1527,38 @@ def run_resource(args: argparse.Namespace, client: Client | None = None) -> dict
     template = resource["native_path"] if vpn.native else resource["web_path"]
     if not template:
         raise CsustError(f"资源 {resource['name']} 不支持 native 下载", code="unsupported")
-    path = str(template).replace("{path}", args.path.lstrip("/"))
-    response = vpn.request(vpn._api_path(path), method="GET", headers=vpn._headers(), binary=True, with_metadata=True)
+    resource_path = args.path.lstrip("/")
+    if "\\" in resource_path or any(part in {".", ".."} for part in unquote(unquote(resource_path)).split("/")):
+        raise CsustError("VPN 资源路径不能包含目录跳转", code="invalid_path")
+    path = str(template).replace("{path}", quote(resource_path, safe="/"))
+    target = vpn._api_path(path)
+    response = vpn.request(target, method="GET", headers=vpn._headers(target), binary=True, with_metadata=True, stream_to=args.output, defer_stream_commit=True)
     assert isinstance(response, Response)
-    _save_cookie_refresh(vpn, response)
-    require_logged_in(response)
-    result_status(_response_json(response), mutating=False, success_codes=("200",))
-    body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
-    output = Path(args.output).expanduser()
-    _write_private_file(output, body, code="vpn_output_write_failed", label="VPN 资源")
-    return {"ok": True, "resource": resource["name"], "output": str(output), "bytes": len(body)}
+    try:
+        _save_cookie_refresh(vpn, response)
+        from .web import _write_download
+
+        download = _write_download(response, args.output, require_session=True)
+    except BaseException:
+        from ..core import _discard_stream
+
+        _discard_stream(response)
+        raise
+    return {"ok": True, "resource": resource["name"], "output": download["output"], "bytes": download["bytes"]}
 
 
 def run_sso_url(args: argparse.Namespace, client: Client | None = None) -> dict[str, object]:
     vpn = _client(client)
     response, config = vpn.request_api(VPN_CONFIG_PATH, method="POST", data={}, retry_refresh=False)
+    if response.status >= 400 or not isinstance(config, dict) or _response_code(config) not in {None, "200"}:
+        raise CsustError("VPN 登录配置获取失败", code="business_rejected", details={"response": _redact(config)})
     configured = config.get("data", {}).get("casLoginUrl") if isinstance(config, dict) and isinstance(config.get("data"), dict) else None
     configured = configured or "/enclient/api/users/admin/custom/page/login/sso/cas"
-    return {"ok": True, "url": vpn.url(str(configured)), "config": _redact(config)}
+    try:
+        url = vpn._api_path(str(configured))
+    except CsustError:
+        raise
+    return {"ok": True, "url": _safe_url(vpn.url(url)), "config": _redact(config)}
 
 
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:

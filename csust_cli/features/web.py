@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -13,11 +14,16 @@ from ..core import (
     Client,
     CsustError,
     business_state,
+    HttpError,
+    MutationUnverified,
+    NetworkError,
     result_status,
     Element,
     Response,
     _append_query,
+    _commit_stream,
     _decode_body,
+    _discard_stream,
     _header_value,
     _image_fields,
     _is_inert_event,
@@ -156,6 +162,15 @@ SECOND_LEVEL_CATALOG = (
 
 READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SUPPORTED_METHODS = READ_ONLY_METHODS | {"POST", "PUT", "PATCH", "DELETE"}
+EVENT_ATTRIBUTES = ("onclick", "onchange", "onsubmit", "ondblclick")
+_REPORT_TARGETS = {
+    ("192.168.3.125", "/FineReport"),
+    ("192.168.253.164", "/ReportServer"),
+}
+_SIDE_EFFECT_GET = re.compile(
+    r"(?:/(?:logout|delete|remove|add|join|bind|ignore|favorite|recommend|subscribe|unsubscribe|cancel|submit|save|update|sort)(?:[/?._]|$)|[?&](?:action|op|ACTION|operation)=)",
+    re.I,
+)
 
 # Compatibility for callers that used the old tuple.
 KNOWN_ROUTES = tuple((command, label, path) for command, _group, label, path in ROUTE_CATALOG)
@@ -166,6 +181,29 @@ def _supported_method(value: str) -> str:
     if method not in SUPPORTED_METHODS:
         raise CsustError("不支持的 HTTP 方法", code="invalid_argument")
     return method
+
+
+def _is_side_effect_get(target: str) -> bool:
+    try:
+        parsed = urlparse(target)
+    except ValueError:
+        return False
+    return bool(_SIDE_EFFECT_GET.search(parsed.path + ("?" + parsed.query if parsed.query else "")))
+
+
+def _is_report_target(target: str) -> bool:
+    try:
+        parsed = urlparse(target)
+        return (
+            parsed.scheme.lower() == "https"
+            and parsed.hostname is not None
+            and (parsed.hostname.lower(), parsed.path) in _REPORT_TARGETS
+            and parsed.port in (None, 443)
+            and parsed.username is None
+            and parsed.password is None
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def _pairs(values: list[str], flag: str) -> list[tuple[str, str]]:
@@ -208,10 +246,7 @@ def _allowed_target(client: Client, target: str) -> str:
             parsed = urlparse(target)
         except ValueError as exc:
             raise CsustError("页面地址格式无效", code="invalid_path") from exc
-        if parsed.scheme.lower() in {"http", "https"} and (parsed.netloc, parsed.path) in {
-            ("192.168.3.125", "/FineReport"),
-            ("192.168.253.164", "/ReportServer"),
-        }:
+        if _is_report_target(target):
             return target
         raise
 
@@ -310,7 +345,8 @@ def _display_text(node: Element) -> str:
 def _control(node: Element) -> dict[str, object]:
     name = node.attr("name")
     sensitive = _sensitive_control(node)
-    value = "" if sensitive else _safe_event(node.attr("value"))
+    placeholder = "<redacted>" if re.search(r"execution|flowexecutionkey|\b(?:state|lt)\b", name, re.I) else ""
+    value = placeholder if sensitive else _safe_event(node.attr("value"))
     data: dict[str, object] = {
         "tag": node.tag,
         "type": node.attr("type") or node.tag,
@@ -322,7 +358,7 @@ def _control(node: Element) -> dict[str, object]:
         "disabled": node.is_disabled(),
         "checked": "checked" in node.attrs,
     }
-    events = {name: value for name, value in node.attrs.items() if name.startswith("on")}
+    events = {name: value for name, value in node.attrs.items() if name in EVENT_ATTRIBUTES}
     if events:
         data["events"] = {name: _safe_event(value) for name, value in events.items()}
     if node.tag == "select":
@@ -330,7 +366,7 @@ def _control(node: Element) -> dict[str, object]:
         data["options"] = [
             {
                 "text": "" if sensitive else _display_text(option),
-                "value": "" if _SENSITIVE_FIELD.search(name) else _safe_event(_option_value(option)),
+                "value": placeholder if _SENSITIVE_FIELD.search(name) else _safe_event(_option_value(option)),
                 "selected": "selected" in option.attrs,
                 "disabled": option.is_disabled(),
             }
@@ -348,7 +384,29 @@ def _nearest_form(node: Element) -> Element | None:
     return None
 
 
+def _build_form_index(document: Element) -> tuple[list[Element], dict[int, list[Element]]]:
+    forms = document.find_all("form")
+    form_by_id = {form.attr("id"): form for form in forms if form.attr("id")}
+    controls: dict[int, list[Element]] = {id(form): [] for form in forms}
+    owners: dict[int, Element | None] = {}
+    for node in document.find_all():
+        if node.tag not in {"input", "select", "textarea", "button"}:
+            continue
+        owner = form_by_id.get(node.attr("form")) if node.attr("form") else _nearest_form(node)
+        owners[id(node)] = owner
+        if owner is not None:
+            controls.setdefault(id(owner), []).append(node)
+    setattr(document, "_form_index", (forms, controls, owners))
+    return forms, controls
+
+
 def _form_owner(node: Element, document: Element | None = None) -> Element | None:
+    if document is not None:
+        indexed = getattr(document, "_form_index", None)
+        if indexed is not None:
+            owners = indexed[2]
+            if id(node) in owners:
+                return owners[id(node)]
     if node.tag in {"input", "select", "textarea", "button"} and "form" in node.attrs:
         form_id = node.attr("form").strip()
         return document.first("form", element_id=form_id) if document is not None and form_id else None
@@ -384,7 +442,7 @@ def _action_nodes(document: Element) -> list[Element]:
         form = _form_owner(node, document)
         if form is not None and _is_inert_event(form.attr("onsubmit")):
             continue
-        event = any(name.startswith("on") for name in node.attrs)
+        event = any(name in EVENT_ATTRIBUTES for name in node.attrs)
         if node.tag == "a" and (event or node.attr("href") not in inert):
             nodes.append(node)
         elif node.tag in {"input", "button"} and node.attr("type").lower() != "reset" and (
@@ -398,7 +456,7 @@ def _action_nodes(document: Element) -> list[Element]:
 
 
 def _event_source(node: Element) -> str:
-    return node.attr("onclick") or node.attr("onchange") or node.attr("onsubmit") or node.attr("ondblclick")
+    return next((node.attr(name) for name in EVENT_ATTRIBUTES if node.attr(name)), "")
 
 
 def _split_js(value: str, separator: str = ",") -> list[str]:
@@ -589,35 +647,33 @@ def _resolve_js_action(
         if value or name not in variables:
             variables[name] = value
 
-    expressions: list[str] = []
-    for pattern in (
-        r"(?:\.action|window\.location(?:\.href)?|location(?:\.href)?)\s*=\s*([^;]+)",
-        r"(?:window\.)?open\s*\(\s*([^,;)]+)",
-        r"(?:openWindow|showWindow|openView)\s*\(\s*([^,;)]+)",
-        r"(?:v?JsMod|JsMod)\s*\(\s*([^,;)]+)",
-        r"\burl\s*:\s*([^,;}]+)",
-        r"\.(?:load|get|post)\s*\(\s*([^,;)]+)",
-        r"\.attr\s*\(\s*[\"']action[\"']\s*,\s*([^,;)]+)",
+    expressions: list[tuple[int, str, bool]] = []
+    for pattern, navigation in (
+        (r"\.action\s*=\s*([^;]+)", False),
+        (r"(?:window\.location(?:\.href)?|location(?:\.href)?)\s*=\s*([^;]+)", True),
+        (r"(?:window\.)?open\s*\(\s*([^,;)]+)", False),
+        (r"(?:openWindow|showWindow|openView)\s*\(\s*([^,;)]+)", False),
+        (r"(?:v?JsMod|JsMod)\s*\(\s*([^,;)]+)", False),
+        (r"\burl\s*:\s*([^,;}]+)", False),
+        (r"\.(?:load|get|post|put|patch|delete)\s*\(\s*([^,;)]+)", False),
+        (r"\bfetch\s*\(\s*([^,;)]+)", False),
+        (r"\.attr\s*\(\s*[\"']action[\"']\s*,\s*([^,;)]+)", False),
     ):
-        expressions.extend(match.group(1).strip() for match in re.finditer(pattern, body, re.I))
-    if not expressions:
-        literal = re.search(r"[\"']((?:/jsxsd|https?://)[^\"']*)[\"']", body)
-        if literal:
-            expressions.append(literal.group(0))
-    if not expressions:
-        literal = re.search(r"[\"']((?:/meol|/moocresource)[^\"']*)", body)
-        if literal:
-            expressions.append(literal.group(0))
-    for expression in expressions:
+        expressions.extend((match.start(1), match.group(1).strip(), navigation) for match in re.finditer(pattern, body, re.I))
+    expressions.sort(key=lambda item: item[0])
+    candidates = expressions
+    method_match = re.search(
+        r"(?:type|method)\s*:\s*[\"'](GET|POST|PUT|PATCH|DELETE)[\"']|\.(get|post|put|patch|delete)\s*\(|\bfetch\s*\(",
+        body,
+        re.I,
+    )
+    method = next((group.upper() for group in (method_match.groups() if method_match else ()) if group), "")
+    if not method:
+        method = "POST" if re.search(r"\.action\s*=|\.submit\s*\(|type\s*:\s*[\"']post", body, re.I) else "GET"
+    for _position, expression, _navigation in candidates:
         target = _js_value(expression, variables)
         if not target.startswith(("/", "http://", "https://")) or target.startswith("javascript:"):
             continue
-        if re.search(r"type\s*:\s*[\"']post|\.(?:post)\s*\(|\.action\s*=|\.submit\s*\(", body, re.I) and not re.search(
-            r"(?:window\.)?open|(?:v?JsMod|JsMod)|location", body, re.I
-        ):
-            method = "POST"
-        else:
-            method = "GET"
         return method, _safe_urljoin(page_url, target)
     return None
 
@@ -655,18 +711,44 @@ def _js_state_fields(
         for match in re.finditer(r"\$\([\"']#([^\"']+)[\"']\)\.val\(\s*([^)]*)\)", body)
         if match.group(2).strip()
     )
+    for data_match in re.finditer(r"\bdata\s*:\s*\{([^{}]*)\}", body, re.I | re.S):
+        for item in _split_js(data_match.group(1)):
+            if ":" not in item:
+                continue
+            name, expression = item.split(":", 1)
+            name = name.strip().strip("'\"")
+            if not name:
+                continue
+            try:
+                fields.append((name, _js_value(expression, variables)))
+            except CsustError:
+                continue
     return [(name, value) for name, value in fields if name]
 
 
 def _quoted_action(node: Element, page_url: str) -> tuple[str, str] | None:
-    source = (node.attr("href") or "") + " " + " ".join(
-        value for name, value in node.attrs.items() if name.startswith("on")
-    )
+    source = (node.attr("href") or "") + " " + " ".join(value for name, value in node.attrs.items() if name in EVENT_ATTRIBUTES)
     if re.search(r"['\"]\s*\+|\+\s*['\"]|\$\{", source):
-        raise CsustError("内联脚本地址包含动态表达式；请显式提供请求路径", code="parse_error")
-    for value in re.findall(r"['\"]([^'\"]+)['\"]", source):
+        if re.search(r"location|window\.open|openWindow|v?JsMod|fetch|ajax|\.(?:load|get|post|put|patch|delete)\s*\(|\.action", source, re.I):
+            raise CsustError("内联脚本地址包含动态表达式；请显式提供请求路径", code="parse_error")
+    candidates: list[tuple[int, str, str]] = []
+    patterns = (
+        (r"(?:window\.)?location(?:\.href)?\s*=\s*['\"](?P<target>[^'\"]+)['\"]", "GET"),
+        (r"(?:window\.)?(?:open|openWindow|showWindow|openView|v?JsMod)\s*\(\s*['\"](?P<target>[^'\"]+)['\"]", "GET"),
+        (r"fetch\s*\(\s*['\"](?P<target>[^'\"]+)['\"]", "GET"),
+        (r"url\s*:\s*['\"](?P<target>[^'\"]+)['\"]", ""),
+        (r"\.(?P<method>load|get|post|put|patch|delete)\s*\(\s*['\"](?P<target>[^'\"]+)['\"]", ""),
+        (r"(?:\.attr\s*\(\s*['\"]action['\"]\s*,|\b[A-Za-z_$][\w$]*\s*\.action\s*=)\s*['\"](?P<target>[^'\"]+)['\"]", "POST"),
+    )
+    for pattern, default_method in patterns:
+        for match in re.finditer(pattern, source, re.I):
+            method = str(match.groupdict().get("method") or default_method).upper()
+            if not method:
+                method_match = re.search(r"\b(?:method|type)\s*[:=]\s*['\"]?(GET|POST|PUT|PATCH|DELETE)", source, re.I)
+                method = method_match.group(1).upper() if method_match else "GET"
+            candidates.append((match.start(), method, match.group("target")))
+    for _position, method, value in sorted(candidates):
         if value.startswith(("/", "http://", "https://")) and not value.startswith("//"):
-            method = "GET" if re.search(r"location|window\.open|openWindow|(?:v?JsMod|JsMod)", source, re.I) else "POST"
             return method, _safe_urljoin(page_url, value)
     return None
 
@@ -680,6 +762,12 @@ def _action_target(
 ) -> tuple[str, str]:
     formaction = node.attr("formaction")
     formmethod = node.attr("formmethod")
+    if document is not None and _event_source(node) and not _is_inert_event(_event_source(node)):
+        variables = dict(_form_fields(form, node, document)) if form is not None else {}
+        variables.update(overrides or {})
+        resolved = _resolve_js_action(node, document, page_url, variables)
+        if resolved:
+            return resolved
     if formaction and _action_submits_form(node, document):
         method = formmethod or (form.attr("method", "GET") if form is not None else "GET")
         return method.upper(), _safe_urljoin(page_url, formaction)
@@ -708,7 +796,11 @@ def _form_fields(
     if form is None:
         return []
     fields: list[tuple[str, str]] = []
-    nodes = document.find_all() if document is not None else form.find_all()
+    if document is not None:
+        indexed = getattr(document, "_form_index", None)
+        nodes = indexed[1].get(id(form), []) if indexed is not None else document.find_all()
+    else:
+        nodes = form.find_all()
     for node in nodes:
         if node.tag not in {"input", "select", "textarea", "button"}:
             continue
@@ -750,6 +842,20 @@ def _form_fields(
     return fields
 
 
+def _form_file_names(form: Element | None, document: Element | None = None) -> set[str]:
+    if form is None:
+        return set()
+    indexed = getattr(document, "_form_index", None) if document is not None else None
+    nodes = indexed[1].get(id(form), []) if indexed is not None else form.find_all()
+    return {node.attr("name") for node in nodes if node.tag == "input" and node.attr("type").lower() == "file" and node.attr("name") and not node.is_disabled()}
+
+
+def _parse_upload_files(values: list[str]) -> list[tuple[str, object]]:
+    from .vpn import _parse_files
+
+    return _parse_files(values)
+
+
 def _safe_arguments(source: str) -> list[str]:
     call = _onclick_call(source)
     if not call:
@@ -773,7 +879,7 @@ def _describe_action(
         method, target = _action_target(node, form, page_url, document, overrides)
         state = (
             _js_state_fields(node, form, document, {**dict(_form_fields(form, node, document)), **(overrides or {})})
-            if document is not None and submits_form else []
+            if document is not None else []
         )
     except CsustError as exc:
         if exc.code != "parse_error":
@@ -782,7 +888,7 @@ def _describe_action(
         parse_error = str(exc)
     form_index = 0
     if document is not None and form is not None:
-        forms = document.find_all("form")
+        forms = getattr(document, "_form_index", (document.find_all("form"), {}, {}))[0]
         form_index = forms.index(form) + 1 if form in forms else 0
     return {
         **({"parse_error": parse_error} if parse_error else {}),
@@ -800,7 +906,7 @@ def _describe_action(
         "state_fields": [name for name, _ in state],
         "href": _safe_url(node.attr("href"), page_url),
         "onclick": _safe_event(node.attr("onclick")),
-        "events": {name: _safe_event(value) for name, value in node.attrs.items() if name.startswith("on")},
+        "events": {name: _safe_event(value) for name, value in node.attrs.items() if name in EVENT_ATTRIBUTES},
         "arguments": _safe_arguments(_event_source(node) or node.attr("href")),
     }
 
@@ -817,16 +923,13 @@ def _script_messages(document: Element) -> list[str]:
 
 def inspect_page(source: str, page_url: str) -> dict[str, object]:
     document = parse_html(source)
+    forms_index, controls_index = _build_form_index(document)
     messages = _script_messages(document)
     title = document.first("title")
     links = [_link(node, page_url) for node in document.find_all("a") if node.attr("href") or node.attr("onclick")]
     forms: list[dict[str, object]] = []
-    for index, form in enumerate(document.find_all("form"), start=1):
-        controls = [
-            node
-            for node in document.find_all()
-            if node.tag in {"input", "select", "textarea", "button"} and _form_owner(node, document) is form
-        ]
+    for index, form in enumerate(forms_index, start=1):
+        controls = controls_index.get(id(form), [])
         forms.append(
             {
                 "index": index,
@@ -866,6 +969,7 @@ def inspect_page(source: str, page_url: str) -> dict[str, object]:
         )
     return {
         "url": _safe_url(page_url),
+        "fingerprint": hashlib.sha256(source.encode("utf-8", errors="replace")).hexdigest(),
         "title": _display_text(title) if title else "",
         "text": _display_text(document)[:12000],
         "messages": messages,
@@ -886,20 +990,29 @@ def _write_download(response: Response, output: str, *, require_session: bool, m
     body = response.body
     if isinstance(body, str):
         body = body.encode("utf-8")
-    if require_session and is_login_page(Response(response.url, response.status, response.headers, _response_text(response))):
-        raise CsustError("下载响应是登录页，会话可能已失效", code="login_required")
-    if not output or not output.strip():
-        raise CsustError("下载路径不能为空", code="invalid_argument")
     try:
-        target = Path(output).expanduser()
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise CsustError("下载路径无效", code="file_write_failed") from exc
-    payload = _feedback(response)
-    if business_state(payload) is False:
-        result_status(payload, mutating=mutating)
-    _write_private_file(target, body, code="file_write_failed", label="下载文件")
-    content_type = _header_value(response.headers, "Content-Type")
-    return {"ok": True, "downloaded": True, "output": str(target), "bytes": len(body), "content_type": content_type, "url": _safe_url(response.url)}
+        if require_session and is_login_page(Response(response.url, response.status, response.headers, _response_text(response))):
+            raise CsustError("下载响应是登录页，会话可能已失效", code="login_required")
+        if not output or not output.strip():
+            raise CsustError("下载路径不能为空", code="invalid_argument")
+        try:
+            target = Path(output).expanduser()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise CsustError("下载路径无效", code="file_write_failed") from exc
+        payload = _feedback(response)
+        if business_state(payload) is False:
+            result_status(payload, mutating=mutating)
+        streamed = response.stream_temp_path is not None or response.stream_path == str(target)
+        if streamed:
+            _commit_stream(response)
+        else:
+            _write_private_file(target, body, code="file_write_failed", label="下载文件")
+        byte_count = target.stat().st_size if streamed else len(body)
+        content_type = _header_value(response.headers, "Content-Type")
+        return {"ok": True, "downloaded": True, "output": str(target), "bytes": byte_count, "content_type": content_type, "url": _safe_url(response.url)}
+    except BaseException:
+        _discard_stream(response)
+        raise
 
 
 def _request(
@@ -911,8 +1024,14 @@ def _request(
     referer: str = "",
     output: str | None = None,
     require_session: bool = True,
+    multipart: list[tuple[str, object]] | None = None,
+    mutating: bool | None = None,
+    _retry_auth: bool = True,
 ) -> tuple[Response, dict[str, object] | None]:
     method = _supported_method(method)
+    if multipart is not None and method not in READ_ONLY_METHODS:
+        multipart = [*(data or []), *multipart]
+        data = None
     headers = None
     if referer:
         try:
@@ -922,51 +1041,104 @@ def _request(
         if same_origin:
             headers = {"Referer": referer}
     request_target = target
-    if data and method in READ_ONLY_METHODS:
+    if (data or multipart) and method in READ_ONLY_METHODS:
         request_target = _append_query(request_target, data)
+    effective_mutating = method not in READ_ONLY_METHODS if mutating is None else mutating
     quality_request = getattr(client, "request_web", None)
     if callable(quality_request):
-        result = quality_request(
-            request_target,
-            method=method,
-            data=data if method not in READ_ONLY_METHODS else None,
-            output=output is not None,
-            referer=referer if headers else "",
-        )
-        assert isinstance(result, Response)
-        if require_session:
-            require_logged_in(result)
-        if method in READ_ONLY_METHODS:
-            result_status(_feedback(result), mutating=False)
-        if output is not None:
-            return result, _write_download(result, output, require_session=False, mutating=method not in READ_ONLY_METHODS)
-        return result, None
-    if output is not None:
-        result = client.request(
-            request_target,
-            method=method,
-            data=data if method not in READ_ONLY_METHODS else None,
-            headers=headers,
-            binary=True,
-            with_metadata=True,
-        )
-        assert isinstance(result, Response)
-        if require_session:
-            require_logged_in(result)
-        if method in READ_ONLY_METHODS:
-            _save_cookie_refresh(client, result)
         try:
-            saved = _write_download(result, output, require_session=False, mutating=method not in READ_ONLY_METHODS)
-        except CsustError:
-            if method not in READ_ONLY_METHODS:
-                _save_cookie_refresh(client, result)
+            result = quality_request(
+                request_target,
+                method=method,
+                data=data if method not in READ_ONLY_METHODS else None,
+                multipart=multipart if method not in READ_ONLY_METHODS else None,
+                output=output or False,
+                referer=referer if headers else "",
+                mutating=effective_mutating,
+            )
+        except (HttpError, NetworkError) as exc:
+            if require_session and _retry_auth and not effective_mutating and method in READ_ONLY_METHODS and isinstance(exc, HttpError) and exc.status == 401:
+                ensure_session(client)
+                return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, _retry_auth=False)
+            if not effective_mutating:
+                raise
+            raise _mutation_transport_error(exc, {"method": method, "path": urlparse(target).path}) from exc
+        assert isinstance(result, Response)
+        try:
+            if require_session:
+                if effective_mutating and is_login_page(result):
+                    raise MutationUnverified(
+                        "网页写请求已发送但返回登录页，结果未知",
+                        details={"submitted": True, "confirmed": False, "request": {"method": method, "path": urlparse(target).path}, "cause": "login_required"},
+                    )
+                require_logged_in(result)
+            if not effective_mutating:
+                result_status(_feedback(result), mutating=False)
+            if output is not None:
+                return result, _write_download(result, output, require_session=False, mutating=effective_mutating)
+            return result, None
+        except BaseException:
+            _discard_stream(result)
             raise
-        return result, saved
-    result = client.request(request_target, method=method, data=data if method not in READ_ONLY_METHODS else None, headers=headers)
+    if output is not None:
+        try:
+            result = client.request(
+                request_target,
+                method=method,
+                data=data if method not in READ_ONLY_METHODS else None,
+                multipart=multipart if method not in READ_ONLY_METHODS else None,
+                headers=headers,
+                binary=True,
+                with_metadata=True,
+                stream_to=output,
+                defer_stream_commit=True,
+            )
+        except (HttpError, NetworkError) as exc:
+            if require_session and _retry_auth and not effective_mutating and method in READ_ONLY_METHODS and isinstance(exc, HttpError) and exc.status == 401:
+                ensure_session(client)
+                return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, _retry_auth=False)
+            if not effective_mutating:
+                raise
+            raise _mutation_transport_error(exc, {"method": method, "path": urlparse(target).path}) from exc
+        assert isinstance(result, Response)
+        try:
+            if require_session:
+                if effective_mutating and is_login_page(result):
+                    raise MutationUnverified(
+                        "网页写请求已发送但返回登录页，结果未知",
+                        details={"submitted": True, "confirmed": False, "request": {"method": method, "path": urlparse(target).path}, "cause": "login_required"},
+                    )
+                require_logged_in(result)
+            if not effective_mutating:
+                _save_cookie_refresh(client, result)
+            try:
+                saved = _write_download(result, output, require_session=False, mutating=effective_mutating)
+            except CsustError:
+                if effective_mutating:
+                    _save_cookie_refresh(client, result)
+                raise
+            return result, saved
+        except BaseException:
+            _discard_stream(result)
+            raise
+    try:
+        result = client.request(request_target, method=method, data=data if method not in READ_ONLY_METHODS and multipart is None else None, multipart=multipart if method not in READ_ONLY_METHODS else None, headers=headers)
+    except (HttpError, NetworkError) as exc:
+        if require_session and _retry_auth and not effective_mutating and method in READ_ONLY_METHODS and isinstance(exc, HttpError) and exc.status == 401:
+            ensure_session(client)
+            return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, _retry_auth=False)
+        if not effective_mutating:
+            raise
+        raise _mutation_transport_error(exc, {"method": method, "path": urlparse(target).path}) from exc
     assert isinstance(result, Response)
     if require_session:
+        if effective_mutating and is_login_page(result):
+            raise MutationUnverified(
+                "网页写请求已发送但返回登录页，结果未知",
+                details={"submitted": True, "confirmed": False, "request": {"method": method, "path": urlparse(target).path}, "cause": "login_required"},
+            )
         require_logged_in(result)
-    if method in READ_ONLY_METHODS:
+    if not effective_mutating:
         _save_cookie_refresh(client, result)
         result_status(_feedback(result), mutating=False)
     return result, None
@@ -986,7 +1158,10 @@ def _get_page(client: Client, path: str, params: list[tuple[str, str]], *, publi
         require_logged_in(response)
     _save_cookie_refresh(client, response)
     result_status(_feedback(response), mutating=False)
-    return response, inspect_page(_response_text(response), response.url)
+    page = _page_payload(response)
+    if not isinstance(page, dict):
+        raise CsustError("页面响应不是可操作的 HTML 页面", code="parse_error")
+    return response, page
 
 
 def _get(client: Client, path: str, params: list[tuple[str, str]], *, public: bool = False) -> dict[str, object]:
@@ -996,17 +1171,56 @@ def _get(client: Client, path: str, params: list[tuple[str, str]], *, public: bo
 
 def _feedback(response: Response) -> object:
     text = _response_text(response)
+    if not text.strip():
+        return None
     content_type = _header_value(response.headers, "Content-Type").lower()
-    if isinstance(response.body, bytes) and not any(kind in content_type for kind in ("text/", "json", "xml")) and not text.lstrip().startswith(("<", "{", "[")):
+    if isinstance(response.body, bytes) and content_type and not any(kind in content_type for kind in ("text/", "json", "xml")):
         return None
     if "json" in content_type or text.lstrip().startswith(("{", "[")):
         try:
-            return json.loads(text)
+            return _redact_payload(json.loads(text))
         except ValueError as exc:
             raise CsustError("远端返回了无效 JSON", code="parse_error") from exc
     if "html" in content_type or text.lstrip().startswith("<"):
         return inspect_page(text, response.url)
     return text
+
+
+def _logout_result(response: Response) -> dict[str, object]:
+    """Require a business or HTML signal before claiming remote logout."""
+    details = {"status": response.status}
+    if response.status == 204:
+        return {"ok": True, "logged_out": True, **details, "response": None}
+    if response.status >= 400:
+        raise CsustError("远端退出请求失败", code="business_rejected", details=details)
+    if is_login_page(response):
+        return {"ok": True, "logged_out": True, **details, "response": {"logged_out": True, "evidence": "login_page"}}
+    payload = _feedback(response)
+    state = business_state(payload)
+    if state is None and re.search(r"(?:退出|注销|登出).*(?:成功|完成)|(?:成功|完成).*(?:退出|注销|登出)|logged\s*out|logout\s+(?:success|ok)", _response_text(response), re.I | re.S):
+        payload = {"ok": True, "logged_out": True, "evidence": "html_message"}
+    status = result_status(payload, mutating=True, details=details)
+    return {**status, "logged_out": True, **details, "response": payload}
+
+
+def _redact_payload(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): "<redacted>" if _SENSITIVE_FIELD.search(str(key)) else _redact_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_payload(item) for item in value]
+    if isinstance(value, str) and ("?" in value or ";" in value or value.startswith(("http://", "https://"))):
+        return _safe_url(value)
+    return value
+
+
+def _page_payload(response: Response) -> object:
+    text = _response_text(response)
+    if not text.strip():
+        raise CsustError("页面响应为空", code="parse_error")
+    content_type = _header_value(response.headers, "Content-Type").lower()
+    if "json" in content_type or text.lstrip().startswith(("{", "[")):
+        return _feedback(response)
+    return inspect_page(text, response.url)
 
 
 def _mutation_verified(page: dict[str, object]) -> bool:
@@ -1016,6 +1230,31 @@ def _mutation_verified(page: dict[str, object]) -> bool:
 def _mutation_result(response: Response, page: dict[str, object], request: dict[str, object], *, action: dict[str, object] | None = None) -> dict[str, object]:
     details = {"request": request, **({"action": action} if action else {})}
     return {**result_status(_feedback(response), mutating=True, details=details), **details, "page": page}
+
+
+def _save_mutation(client: Client, result: dict[str, object]) -> None:
+    try:
+        client.save()
+    except CsustError as exc:
+        raise MutationUnverified(
+            "远端写请求已完成但本地会话保存失败，结果未知",
+            details={
+                "submitted": True,
+                "confirmed": False,
+                "request": result,
+                **result,
+                "ok": False,
+                "save_error": exc.code,
+                "verification": "unknown",
+            },
+        ) from exc
+
+
+def _mutation_transport_error(exc: CsustError, request: dict[str, object]) -> MutationUnverified:
+    return MutationUnverified(
+        "网页写请求已发送但结果未知",
+        details={"submitted": True, "confirmed": False, "request": request, "cause": exc.code},
+    )
 
 
 def _download_result(response: Response, saved: dict[str, object], mutating: bool) -> dict[str, object]:
@@ -1056,21 +1295,23 @@ def _run_get(args: argparse.Namespace, client: Client) -> dict[str, object]:
     response, saved = _request(client, "GET", target, require_session=True, output=args.output)
     if saved:
         return saved
-    return inspect_page(_response_text(response), response.url)
+    return _page_payload(response)
 
 
 def _run_post(args: argparse.Namespace, client: Client) -> dict[str, object]:
     if not args.yes:
         raise CsustError("通用 POST 可能修改账号数据，请加 --yes", code="confirmation_required")
     data = _pairs(args.data, "--data")
+    files = _parse_upload_files(getattr(args, "file", []))
     target = _target(client, args.path, _pairs(args.param, "--param"))
     ensure_session(client)
-    response, saved = _request(client, "POST", target, data, require_session=True, output=args.output)
-    client.save()
+    response, saved = _request(client, "POST", target, data, require_session=True, output=args.output, multipart=files or None, mutating=True)
+    request = {"method": "POST", "path": urlparse(response.url).path, "fields": [name for name, _ in data]}
+    _save_mutation(client, request)
     if saved:
-        return _download_result(response, {**saved, "request": {"method": "POST", "path": urlparse(response.url).path}}, True)
-    page = inspect_page(_response_text(response), response.url)
-    return _mutation_result(response, page, {"method": "POST", "path": urlparse(response.url).path, "fields": [name for name, _ in data]})
+        return _download_result(response, {**saved, "request": request}, True)
+    page = _page_payload(response)
+    return _mutation_result(response, page, request)
 
 
 def _select_form(document: Element, index: int) -> Element:
@@ -1092,7 +1333,7 @@ def _form_button(form: Element, index: int | None, document: Element | None = No
         and not _is_inert_event(node.attr("onclick"))
         and (
             _is_form_submitter(node)
-            or any(name.startswith("on") for name in node.attrs)
+            or any(name in EVENT_ATTRIBUTES for name in node.attrs)
         )
     ]
     if index is None:
@@ -1108,8 +1349,12 @@ def _run_form(args: argparse.Namespace, client: Client, path: str, *, public: bo
         raise CsustError("表单序号必须是正整数", code="form_not_found")
     if args.button is not None and args.button < 1:
         raise CsustError("表单按钮序号必须是正整数", code="button_not_found")
-    response, _page = _get_page(client, path, _pairs(args.param, "--param"), public=public)
+    response, discovery_page = _get_page(client, path, _pairs(args.param, "--param"), public=public)
+    expected_fingerprint = getattr(args, "fingerprint", None)
+    if expected_fingerprint and expected_fingerprint != discovery_page.get("fingerprint"):
+        raise CsustError("页面已变化，操作序号已失效；请重新执行 web get", code="stale_page")
     document = parse_html(_response_text(response))
+    _build_form_index(document)
     form = _select_form(document, args.form)
     if _is_inert_event(form.attr("onsubmit")):
         raise CsustError("表单提交被页面脚本禁用", code="action_blocked")
@@ -1130,26 +1375,37 @@ def _run_form(args: argparse.Namespace, client: Client, path: str, *, public: bo
         data = [(name, value) for name, value in data if name not in state_names] + state
     override_names = {name for name, _ in overrides}
     data = [(name, value) for name, value in data if name not in override_names] + overrides
-    if method not in READ_ONLY_METHODS and not args.yes:
+    files = _parse_upload_files(getattr(args, "file", []))
+    required_files = _form_file_names(form, document)
+    if required_files - {name for name, _value in files}:
+        raise CsustError("表单包含文件字段，请使用 --file NAME=PATH 提供文件", code="invalid_argument")
+    mutating = method not in READ_ONLY_METHODS or _is_side_effect_get(target)
+    if mutating and not args.yes:
         raise CsustError("提交网页表单可能修改账号数据，请加 --yes", code="confirmation_required")
-    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public)
+    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public, multipart=files or None, mutating=mutating)
+    mutation_request = {"method": method, "path": urlparse(result.url).path, "fields": [name for name, _ in data]}
+    if mutating:
+        _save_mutation(client, mutation_request)
     if saved:
-        if method not in READ_ONLY_METHODS:
-            client.save()
-        return _download_result(result, saved, method not in READ_ONLY_METHODS)
-    page = inspect_page(_response_text(result), result.url)
-    if method in READ_ONLY_METHODS:
+        return _download_result(result, saved, mutating)
+    page = _page_payload(result)
+    if not mutating:
         return {"ok": True, "submitted": False, "confirmed": True, "form": args.form, "page": page}
-    client.save()
-    return _mutation_result(result, page, {"method": method, "path": urlparse(result.url).path, "fields": [name for name, _ in data]})
+    return _mutation_result(result, page, mutation_request)
 
 
 def _run_action_common(args: argparse.Namespace, client: Client, path: str, *, public: bool = False) -> dict[str, object]:
     overrides = _pairs(args.data, "--data")
     if args.index < 1:
         raise CsustError("操作序号必须是正整数", code="action_not_found")
-    response, _page = _get_page(client, path, _pairs(args.param, "--param"), public=public)
+    response, discovery_page = _get_page(client, path, _pairs(args.param, "--param"), public=public)
+    expected_fingerprint = getattr(args, "fingerprint", None)
+    if not expected_fingerprint:
+        raise CsustError("执行页面动作必须提供页面快照 --fingerprint", code="fingerprint_required")
+    if expected_fingerprint != discovery_page.get("fingerprint"):
+        raise CsustError("页面已变化，操作序号已失效；请重新执行 web get", code="stale_page")
     document = parse_html(_response_text(response))
+    _build_form_index(document)
     nodes = _action_nodes(document)
     if not 1 <= args.index <= len(nodes):
         raise CsustError("操作序号超出页面范围", code="action_not_found")
@@ -1165,23 +1421,30 @@ def _run_action_common(args: argparse.Namespace, client: Client, path: str, *, p
         raise CsustError("网页操作可能修改账号数据，请加 --yes", code="confirmation_required")
     submits_form = _action_submits_form(node, document)
     data = _form_fields(form, node, document) if submits_form else []
-    state = _js_state_fields(node, form, document, override_map) if submits_form else []
+    state = _js_state_fields(node, form, document, override_map)
     state_names = {name for name, _ in state}
     data = [(name, value) for name, value in data if name not in state_names]
     data.extend(state)
     override_names = {name for name, _ in overrides}
     data = [(name, value) for name, value in data if name not in override_names] + overrides
-    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public)
+    files = _parse_upload_files(getattr(args, "file", []))
+    required_files = _form_file_names(form, document) if submits_form else set()
+    if required_files - {name for name, _value in files}:
+        raise CsustError("表单包含文件字段，请使用 --file NAME=PATH 提供文件", code="invalid_argument")
+    mutating = method not in READ_ONLY_METHODS or _is_side_effect_get(target)
+    if mutating and not args.yes:
+        raise CsustError("网页操作可能修改账号数据，请加 --yes", code="confirmation_required")
+    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public, multipart=files or None, mutating=mutating)
     descriptor = _describe_action(node, response.url, args.index, document, override_map)
+    mutation_request = {"method": method, "path": urlparse(result.url).path, "fields": [name for name, _ in data]}
+    if mutating:
+        _save_mutation(client, mutation_request)
     if saved:
-        if method not in READ_ONLY_METHODS:
-            client.save()
-        return _download_result(result, {**saved, "action": descriptor}, method not in READ_ONLY_METHODS)
-    page = inspect_page(_response_text(result), result.url)
-    if method in READ_ONLY_METHODS:
+        return _download_result(result, {**saved, "action": descriptor}, mutating)
+    page = _page_payload(result)
+    if not mutating:
         return {"ok": True, "submitted": False, "confirmed": True, "action": descriptor, "page": page}
-    client.save()
-    return _mutation_result(result, page, {"method": method, "path": urlparse(result.url).path, "fields": [name for name, _ in data]}, action=descriptor)
+    return _mutation_result(result, page, mutation_request, action=descriptor)
 
 
 def _run_action(args: argparse.Namespace, client: Client) -> dict[str, object]:
@@ -1198,7 +1461,7 @@ def _run_route(args: argparse.Namespace, client: Client) -> dict[str, object]:
     if args.action is not None:
         args.index = args.action
         return _run_action_common(args, client, args.route_path)
-    if args.data or args.button is not None:
+    if args.data or getattr(args, "file", []) or args.button is not None:
         raise CsustError("--data/--button 需要同时指定 --form 或 --action", code="invalid_argument")
     return _run_get(type("Args", (), {"path": args.route_path, "param": args.param, "output": args.output})(), client)
 
@@ -1219,14 +1482,15 @@ def _run_public_post(args: argparse.Namespace, client: Client) -> dict[str, obje
     target = _public_target(client, args.path, _pairs(args.param, "--param"))
     data = _pairs(args.data, "--data")
     response, saved = _request(client, "POST", target, data, output=args.output, require_session=False)
-    _save_cookie_refresh(client, response)
+    mutation_request = {"method": "POST", "path": urlparse(response.url).path, "fields": [name for name, _ in data]}
+    _save_mutation(client, mutation_request)
     if saved:
         return _download_result(response, saved, True)
-    page = inspect_page(_response_text(response), response.url)
+    page = _page_payload(response)
     return _mutation_result(
         response,
         page,
-        {"method": "POST", "path": urlparse(response.url).path, "fields": [name for name, _ in data]},
+        mutation_request,
     )
 
 
@@ -1239,15 +1503,19 @@ def _run_request(args: argparse.Namespace, client: Client) -> dict[str, object]:
     if method not in READ_ONLY_METHODS and not args.yes:
         raise CsustError("通用请求可能修改账号数据，请加 --yes", code="confirmation_required")
     data = _pairs(args.data, "--data")
+    files = _parse_upload_files(getattr(args, "file", []))
+    if method in READ_ONLY_METHODS and files:
+        raise CsustError("GET/HEAD/OPTIONS 不能上传文件", code="invalid_argument")
     target = _target(client, args.path, _pairs(args.param, "--param"))
     ensure_session(client)
-    response, saved = _request(client, method, target, data, output=args.output, require_session=True)
-    if method not in READ_ONLY_METHODS:
-        client.save()
-    if saved:
-        return _download_result(response, {**saved, "request": {"method": method, "path": urlparse(response.url).path}}, method not in READ_ONLY_METHODS)
-    page = inspect_page(_response_text(response), response.url)
+    mutating = method not in READ_ONLY_METHODS
+    response, saved = _request(client, method, target, data, output=args.output, require_session=True, multipart=files or None, mutating=mutating)
     request = {"method": method, "path": urlparse(response.url).path, "fields": [name for name, _ in data]}
+    if method not in READ_ONLY_METHODS:
+        _save_mutation(client, request)
+    if saved:
+        return _download_result(response, {**saved, "request": request}, method not in READ_ONLY_METHODS)
+    page = _page_payload(response)
     if method not in READ_ONLY_METHODS:
         return _mutation_result(response, page, request)
     return {"ok": True, "submitted": False, "confirmed": True, "request": request, "page": page}
@@ -1284,15 +1552,19 @@ def _run_graduation_design(args: argparse.Namespace, client: Client) -> dict[str
     result: dict[str, object] = {"ok": True, "external": True, "url": _safe_external_url(target), "method": "GET"}
     if args.fetch:
         if args.output is not None:
-            response = client.request(target, method="GET", binary=True, with_metadata=True)
+            response = client.request(target, method="GET", binary=True, with_metadata=True, stream_to=args.output, defer_stream_commit=True)
             assert isinstance(response, Response)
         else:
             response = client.get(target)
-        result["response"] = inspect_page(_response_text(response), response.url)
-        if args.output is not None:
-            download = _write_download(response, args.output, require_session=False)
-            download["url"] = _safe_external_url(response.url)
-            result["download"] = download
+        try:
+            result["response"] = _page_payload(response)
+            if args.output is not None:
+                download = _write_download(response, args.output, require_session=False)
+                download["url"] = _safe_external_url(response.url)
+                result["download"] = download
+        except BaseException:
+            _discard_stream(response)
+            raise
     return result
 
 
@@ -1302,6 +1574,8 @@ def _add_page_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--button", type=int, help="表单内按 1 起始序号选择提交按钮")
     parser.add_argument("--action", type=int, help="按 1 起始序号执行页面动作")
     parser.add_argument("--data", action="append", default=[], help="覆盖/附加字段 NAME=VALUE，可重复")
+    parser.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
+    parser.add_argument("--fingerprint", help="web get 返回的页面指纹")
     parser.add_argument("--yes", action="store_true", help="确认执行可能改变账号数据的操作")
     parser.add_argument("--output", help="把响应原样保存到文件，适用于打印/导出/下载")
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -1327,6 +1601,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     post.add_argument("--path", required=True, help="/jsxsd/ 下的页面路径")
     post.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
     post.add_argument("--data", action="append", default=[], help="表单字段 NAME=VALUE，可重复")
+    post.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
     post.add_argument("--yes", action="store_true", help="确认可能产生远端变更的请求")
     post.add_argument("--output", help="保存响应文件")
     post.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -1337,6 +1612,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     action.add_argument("--index", required=True, type=int, help="web get 输出的动作序号")
     action.add_argument("--param", action="append", default=[], help="初始页面查询参数 NAME=VALUE，可重复")
     action.add_argument("--data", action="append", default=[], help="覆盖表单字段 NAME=VALUE，可重复")
+    action.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
+    action.add_argument("--fingerprint", required=True, help="web get 返回的页面指纹，防止操作序号对应到变化后的页面")
     action.add_argument("--yes", action="store_true", help="确认执行网页动作")
     action.add_argument("--output", help="保存响应文件")
     action.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -1347,6 +1624,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     request.add_argument("--method", default="GET", help="GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS")
     request.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
     request.add_argument("--data", action="append", default=[], help="请求字段 NAME=VALUE，可重复")
+    request.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
     request.add_argument("--yes", action="store_true", help="确认非只读请求")
     request.add_argument("--output", help="保存响应文件")
     request.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -1384,6 +1662,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     public_action.add_argument("--index", required=True, type=int)
     public_action.add_argument("--param", action="append", default=[])
     public_action.add_argument("--data", action="append", default=[])
+    public_action.add_argument("--fingerprint", required=True, help="public get 返回的页面指纹")
     public_action.add_argument("--yes", action="store_true")
     public_action.add_argument("--output")
     public_action.add_argument("--json", action="store_true", default=argparse.SUPPRESS)

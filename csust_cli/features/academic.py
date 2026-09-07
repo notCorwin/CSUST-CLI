@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import argparse
 import re
+from urllib.parse import urlparse
 
 from ..core import (
     Client,
     CsustError,
+    HttpError,
+    MutationUnverified,
+    NetworkError,
     result_status,
     Element,
     ParseError,
@@ -23,6 +27,8 @@ from ..core import (
     internal_url,
     parse_html,
     require_logged_in,
+    is_login_page,
+    request_with_session_retry,
     same_origin_url,
     _safe_urljoin,
 )
@@ -33,8 +39,28 @@ def _table(document: Element, *ids: str) -> Element | None:
         table = document.first("table", element_id=element_id)
         if table is not None:
             return table
-    tables = document.find_all("table")
-    return next((table for table in tables if table.find_all("tr")), None)
+    tables = [table for table in document.find_all("table") if table.find_all("tr")]
+    if len(tables) <= 1:
+        return tables[0] if tables else None
+    expected = {
+        "dataList": ("序号", "课程", "成绩", "考试", "学期", "教师"),
+        "kbtable": ("星期", "周次", "教室", "课程", "学期", "起始日"),
+        "xjkpTable": ("姓名", "学号", "院系", "专业"),
+        "xjxxTable": ("姓名", "学号", "院系", "专业"),
+    }
+    scores: list[tuple[int, int, Element]] = []
+    for index, table in enumerate(tables):
+        text = table.text(include_scripts=False)
+        headers = " ".join(cell.text(include_scripts=False) for row in _table_rows(table) for cell in row.direct("th"))
+        score = sum(1 for word in expected.get(ids[0], ()) if word in text or word in headers) if ids else 0
+        scores.append((score, -index, table))
+    best_score = max(score for score, _index, _table_item in scores)
+    if best_score:
+        best = [table for score, _index, table in scores if score == best_score]
+        if len(best) > 1:
+            raise ParseError("页面包含多个无法唯一确定的业务表")
+        return best[0]
+    raise ParseError("页面包含多个无法确定用途的业务表")
 
 
 def _rows(table: Element | None) -> list[tuple[Element, list[Element]]]:
@@ -214,7 +240,7 @@ def _first_link(row: Element, page_url: str) -> str:
     if href.lower().startswith("javascript:"):
         quoted = re.search(r"['\"]([^'\"]+)", href)
         href = quoted.group(1) if quoted else ""
-    return _safe_urljoin(page_url, href) if href else ""
+    return _safe_url(_safe_urljoin(page_url, href), page_url) if href else ""
 
 
 def parse_evaluation_batches(source: str, page_url: str) -> dict[str, object]:
@@ -292,6 +318,7 @@ def parse_evaluation_form(source: str, page_url: str, *, include_sensitive: bool
             "value": (
                 node.attr("value")
                 if include_sensitive
+                else "<redacted>" if re.search(r"execution|flowexecutionkey|\b(?:state|lt)\b", node.attr("name"), re.I)
                 else "" if _SENSITIVE_FIELD.search(node.attr("name")) else _safe_event(node.attr("value"))
             ),
         }
@@ -346,10 +373,26 @@ def _heading_value(document: Element, label: str) -> str:
 
 
 def _get_page(client: Client, path: str) -> tuple[Response, Element]:
-    response = client.get(path)
+    response = _query_response(client, "GET", path)
+    return response, parse_html(response.body)
+
+
+def _query_response(
+    client: Client,
+    method: str,
+    path: str,
+    data: dict[str, str] | list[tuple[str, str]] | None = None,
+    *,
+    headers: dict[str, str] | None = None,
+) -> Response:
+    response = request_with_session_retry(client, method, path, data=data, headers=headers) if method.upper() != "GET" else request_with_session_retry(client, method, path, headers=headers)
     require_logged_in(response)
     _save_cookie_refresh(client, response)
-    return response, parse_html(response.body)
+    from . import web
+
+    payload = web._feedback(response)
+    result_status(payload, mutating=False)
+    return response
 
 
 def _run_profile(args: argparse.Namespace, client: Client) -> dict[str, object]:
@@ -362,13 +405,11 @@ def _run_exams(args: argparse.Namespace, client: Client) -> dict[str, object]:
     ensure_session(client)
     query, document = _get_page(client, "/jsxsd/xsks/xsksap_query")
     term = args.term or _selected(_options(document, "xnxqid")) or ""
-    response = client.post(
+    response = _query_response(client, "POST",
         "/jsxsd/xsks/xsksap_list",
         {"xqlbmc": args.category or "", "xnxqid": term, "xqlb": args.category_id or ""},
         headers={"Referer": query.url},
     )
-    require_logged_in(response)
-    _save_cookie_refresh(client, response)
     data = parse_exams(response.body, response.url)
     data["term"] = term
     return data
@@ -385,7 +426,7 @@ def _run_classrooms(args: argparse.Namespace, client: Client) -> dict[str, objec
     if section is None:
         raise CsustError("--section 必须在 1 到 5 之间", code="invalid_argument")
     ensure_session(client)
-    response = client.post(
+    response = _query_response(client, "POST",
         "/jsxsd/kbcx/kbxx_classroom_ifr",
         {
             "xnxqh": args.term or "",
@@ -403,8 +444,6 @@ def _run_classrooms(args: argparse.Namespace, client: Client) -> dict[str, objec
             "jc2": section[1],
         },
     )
-    require_logged_in(response)
-    _save_cookie_refresh(client, response)
     data = parse_classrooms(response.body, response.url)
     data.update({"campus": campus_id, "week": args.week, "weekday": args.weekday, "section": args.section})
     return data
@@ -414,9 +453,7 @@ def _run_selection(args: argparse.Namespace, client: Client) -> dict[str, object
     ensure_session(client)
     query, document = _get_page(client, "/jsxsd/xkgl/xsxkjgcx")
     term = args.term or _selected(_options(document, "xnxqid")) or ""
-    response = client.post("/jsxsd/xkgl/loadXsxkjgList", {"xnxqid": term}, headers={"Referer": query.url})
-    require_logged_in(response)
-    _save_cookie_refresh(client, response)
+    response = _query_response(client, "POST", "/jsxsd/xkgl/loadXsxkjgList", {"xnxqid": term}, headers={"Referer": query.url})
     data = parse_selection_results(response.body, response.url)
     data["term"] = term
     return data
@@ -441,9 +478,7 @@ def _run_semester_start(args: argparse.Namespace, client: Client) -> dict[str, o
     ensure_session(client)
     query, document = _get_page(client, "/jsxsd/jxzl/jxzl_query")
     term = args.term or _selected(_options(document, "xnxq01id")) or ""
-    response = client.post("/jsxsd/jxzl/jxzl_query", {"xnxq01id": term}, headers={"Referer": query.url})
-    require_logged_in(response)
-    _save_cookie_refresh(client, response)
+    response = _query_response(client, "POST", "/jsxsd/jxzl/jxzl_query", {"xnxq01id": term}, headers={"Referer": query.url})
     data = parse_semester_start(response.body, response.url)
     data["term"] = term
     return data
@@ -492,9 +527,13 @@ def _evaluation_page(client: Client, path: str) -> Response:
     if callable(quality_request):
         response = quality_request(path)
     else:
-        response = client.get(target)
-        require_logged_in(response)
-        _save_cookie_refresh(client, response)
+        response = _query_response(client, "GET", target)
+        return response
+    require_logged_in(response)
+    _save_cookie_refresh(client, response)
+    from . import web
+
+    result_status(web._feedback(response), mutating=False)
     return response
 
 
@@ -529,6 +568,8 @@ def _run_evaluation(args: argparse.Namespace, client: Client) -> dict[str, objec
         raise CsustError("该评价已经提交，不能再修改", code="already_submitted")
     questions = form["questions"]
     assert isinstance(questions, list)
+    if not questions:
+        raise ParseError("评价表没有可填写的题目")
     question_ids = {str(question["id"]) for question in questions if isinstance(question, dict)}
     unknown = sorted(set(answers) - question_ids)
     if unknown:
@@ -549,21 +590,27 @@ def _run_evaluation(args: argparse.Namespace, client: Client) -> dict[str, objec
             payload.append((name, str(field.get("value") or "")))
     for question_id, option_id in answers.items():
         payload.append((f"pj0601id_{question_id}", option_id))
-    if form["suggestion_field"]:
-        payload.append((str(form["suggestion_field"]), args.suggestion or ""))
+    suggestion = getattr(args, "suggestion", None)
+    if form["suggestion_field"] and (getattr(args, "clear_suggestion", False) or suggestion is not None):
+        payload.append((str(form["suggestion_field"]), "" if getattr(args, "clear_suggestion", False) else str(suggestion)))
     payload.extend([("issubmit", "1" if command == "submit" else "0"), ("sfxyt", "0")])
     quality_request = getattr(client, "request_web", None)
-    if callable(quality_request):
-        result = quality_request(str(form["action"]), method="POST", data=payload, referer=response.url)
-    else:
-        target = same_origin_url(client, str(form["action"]))
-        result = client.post(target, payload, headers={"Referer": response.url})
-    require_logged_in(result)
-    client.save()
-    message = _response_message(result.body)
-    from .web import inspect_page
+    request = {"method": "POST", "path": str(urlparse(str(form["action"])).path), "fields": [name for name, _ in payload], "operation": command}
+    try:
+        if callable(quality_request):
+            result = quality_request(str(form["action"]), method="POST", data=payload, referer=response.url)
+        else:
+            target = same_origin_url(client, str(form["action"]))
+            result = client.post(target, payload, headers={"Referer": response.url})
+    except (HttpError, NetworkError) as exc:
+        raise MutationUnverified("评价写请求已发送但结果未知", details={"submitted": True, "confirmed": False, "request": request, "cause": exc.code}) from exc
+    if is_login_page(result):
+        raise MutationUnverified("评价写请求已发送但返回登录页，结果未知", details={"submitted": True, "confirmed": False, "request": request, "cause": "login_required"})
+    from . import web
 
-    status = result_status(inspect_page(result.body, result.url), mutating=True, details={"operation": command})
+    web._save_mutation(client, request)
+    message = _response_message(result.body)
+    status = result_status(web._feedback(result), mutating=True, details=request)
     return {**status, "operation": command, "message": message}
 
 
@@ -637,13 +684,34 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         child.add_argument("--path", required=name != "batches", help="页面路径或 batches 输出的 path")
         if name in {"save", "submit"}:
             child.add_argument("--answer", action="append", default=[], help="答案，格式 QUESTION=OPTION，可重复")
-            child.add_argument("--suggestion", default="", help="学生建议")
+            child.add_argument("--suggestion", default=argparse.SUPPRESS, help="学生建议")
+            child.add_argument("--clear-suggestion", action="store_true", help="清空已有学生建议")
             child.add_argument("--yes", action="store_true", help="确认修改远端评价")
         child.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
         child.set_defaults(feature_runner=_run_evaluation, feature_renderer=render)
 
 
 def render(data: dict[str, object]) -> None:
+    if "terms" in data:
+        for item in data.get("terms", []):
+            if isinstance(item, dict):
+                marker = " *" if item.get("selected") else ""
+                print(f"{_safe_terminal_text(item.get('label') or item.get('value'))}{marker}")
+        return
+    if "start_date" in data:
+        print(f"学期起始日：{_safe_terminal_text(data.get('start_date'))}")
+        return
+    if "questions" in data:
+        for question in data.get("questions", []):
+            if not isinstance(question, dict):
+                continue
+            options = "/".join(str(option.get("label") or option.get("id")) for option in question.get("options", []) if isinstance(option, dict))
+            print(f"{_safe_terminal_text(question.get('id'))}: {_safe_terminal_text(question.get('title'))} [{_safe_terminal_text(options)}]")
+        return
+    if "operation" in data and "submitted" in data:
+        message = data.get("message") or ("已提交" if data.get("submitted") else "已处理")
+        print(f"{_safe_terminal_text(data.get('operation'))}: {_safe_terminal_text(message)}")
+        return
     if "fields" in data:
         for field in data.get("fields", []):
             if isinstance(field, dict):

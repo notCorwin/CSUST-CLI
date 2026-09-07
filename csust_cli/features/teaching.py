@@ -12,11 +12,15 @@ import argparse
 import json
 import re
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from ..core import (
     Client,
     CsustError,
+    HttpError,
+    MutationUnverified,
+    NetworkError,
+    ParseError,
     business_state,
     result_status,
     Response,
@@ -24,13 +28,19 @@ from ..core import (
     _save_cookie_refresh,
     _table_rows,
     _write_private_file,
+    _safe_url,
+    _safe_terminal_text,
+    same_origin_url,
+    is_login_page,
     parse_html,
     require_logged_in,
+    _SENSITIVE_FIELD,
 )
 from . import web
 from .vpn import (
     VPN_BASE_URL,
     VpnClient,
+    _has_session_cookie,
     _json_argument,
     _parse_files,
     _parse_pairs,
@@ -396,7 +406,7 @@ _TEACHING_API_ROWS = (
     _api("password-update", "POST", "/meol/popups/password_do.jsp", True, "提交密码修改"),
     _api("security-question", "GET", "/meol/validateQuestion.do", False, "安全问题设置页面"),
     _api("security-question-update", "POST", "/meol/validateQuestionDo.do", True, "提交安全问题"),
-    _api("security-email-verify", "GET", "/meol/validateEmailSend.do", False, "发送邮箱验证"),
+    _api("security-email-verify", "GET", "/meol/validateEmailSend.do", True, "发送邮箱验证"),
     _api("security-mobile", "GET", "/meol/lifelong/user/bind_mobile.jsp", False, "绑定手机页面"),
     _api("bind-mobile-reminder", "GET", "/meol/lifelong/user/bind_mobile_ignore.jsp", False, "绑定手机提醒页面"),
     _api("security-send-sms", "POST", "/meol/sendSms.do", True, "发送手机验证码"),
@@ -434,7 +444,7 @@ _TEACHING_API_ROWS = (
     _api("course-qrcode", "GET", "/meol/lesson/qrcode.jsp", False, "课程二维码"),
     _api("course-logout", "GET", "/meol/homepage/common/logout.jsp", False, "退出教学平台"),
     _api("course-user-stat", "POST", "/meol/jpk/course/userLessonStat.jsp", False, "课程首页统计数据"),
-    _api("course-online-heartbeat", "POST", "/meol/lesson/onlinetime_listener.jsp", False, "记录课程在线时长"),
+    _api("course-online-heartbeat", "POST", "/meol/lesson/onlinetime_listener.jsp", True, "记录课程在线时长"),
     _api("online-help", "GET", "/meol/common/help/help.jsp", False, "在线帮助"),
     _api("course-note-compose", "GET", "/meol/common/notebook/course_write_note.jsp", False, "课程首页写笔记"),
     _api("course-note-book", "GET", "/meol/common/notebook/course_notebook.jsp", False, "课程首页笔记本"),
@@ -606,7 +616,7 @@ TEACHING_ACTION_CATALOG = (
     {"name": "personal.password.update", "section": "个人", "label": "修改密码", "method": "POST", "path": "/meol/popups/password_do.jsp", "mutating": True, "fields": ["uid", "oldpass", "newpass", "rnewpass"]},
     {"name": "personal.security-question.open", "section": "个人", "label": "设置安全问题", "method": "GET", "path": "/meol/validateQuestion.do", "mutating": False, "fields": []},
     {"name": "personal.security-question.update", "section": "个人", "label": "提交安全问题", "method": "POST", "path": "/meol/validateQuestionDo.do", "mutating": True, "fields": ["secret", "questionId", "questionVal", "questionId2", "questionVal2", "questionId3", "questionVal3"]},
-    {"name": "personal.email.verify", "section": "个人", "label": "发送邮箱验证", "method": "GET", "path": "/meol/validateEmailSend.do", "mutating": False, "fields": []},
+    {"name": "personal.email.verify", "section": "个人", "label": "发送邮箱验证", "method": "GET", "path": "/meol/validateEmailSend.do", "mutating": True, "fields": []},
     {"name": "personal.mobile.send-sms", "section": "个人", "label": "发送绑定手机验证码", "method": "POST", "path": "/meol/sendSms.do", "mutating": True, "fields": ["mobile", "opertionType"]},
     {"name": "personal.mobile.login-send-sms", "section": "个人", "label": "发送手机登录验证码", "method": "POST", "path": "/meol/sendSms.do", "mutating": True, "fields": ["mobile", "opertionType=loginoperation"]},
     {"name": "personal.mobile.bind", "section": "个人", "label": "绑定手机", "method": "POST", "path": "/meol/bindMobileDo.do", "mutating": True, "fields": ["mobile", "randomcode"]},
@@ -697,7 +707,7 @@ TEACHING_ACTION_CATALOG = (
     {"name": "course.unit-blank.open", "section": "课程", "label": "打开单元学习容器", "method": "GET", "path": "/meol/jpk/course/layout/_blank.jsp", "mutating": False, "fields": []},
     {"name": "course.qrcode.open", "section": "课程", "label": "查看课程二维码", "method": "GET", "path": "/meol/lesson/qrcode.jsp", "mutating": False, "fields": ["lessonId"]},
     {"name": "course.stat", "section": "课程", "label": "读取课程统计", "method": "POST", "path": "/meol/jpk/course/userLessonStat.jsp", "mutating": False, "fields": ["courseId"]},
-    {"name": "course.online-heartbeat", "section": "课程", "label": "记录在线时长", "method": "POST", "path": "/meol/lesson/onlinetime_listener.jsp", "mutating": False, "fields": ["lessId"]},
+    {"name": "course.online-heartbeat", "section": "课程", "label": "记录在线时长", "method": "POST", "path": "/meol/lesson/onlinetime_listener.jsp", "mutating": True, "fields": ["lessId"]},
     {"name": "online-help.open", "section": "公共组件", "label": "打开在线帮助", "method": "GET", "path": "/meol/common/help/help.jsp", "mutating": False, "fields": ["qstr"]},
     {"name": "course.mailbox.open", "section": "课程", "label": "打开站内邮箱", "method": "GET", "path": "/meol/common/mail/inputbox.jsp", "mutating": False, "fields": []},
     {"name": "course.note.compose", "section": "课程", "label": "写课程笔记", "method": "GET", "path": "/meol/common/notebook/course_write_note.jsp", "mutating": False, "fields": ["uid", "lid"]},
@@ -812,27 +822,48 @@ class TeachingClient(VpnClient):
         service_name: str = TEACHING_SERVICE_NAME,
         load_cookies: bool = True,
     ) -> None:
-        super().__init__(base_url or VPN_BASE_URL, cookie_file, session_file, load_cookies=load_cookies)
+        super().__init__(base_url, cookie_file, session_file, load_cookies=load_cookies)
         self.web_prefix = (prefix or "").rstrip("/")
         self.service_name = service_name
         self.service: dict[str, object] | None = None
 
-    def ensure_service(self) -> dict[str, object]:
+    def ensure_service(self, *, recover: bool = True) -> dict[str, object]:
+        self._validate_prefix(self.web_prefix or os_environ("CSUST_TEACHING_PREFIX"))
+        recovered = False
+        if not self.session.get("token") and not _has_session_cookie(self):
+            if not recover:
+                raise LoginRequired("VPN 会话不存在")
+            self._recover_vpn_session()
+            recovered = True
         if self.web_prefix:
             return self.service or {"name": self.service_name, "urlPlus": self.web_prefix}
-        configured = os_environ("CSUST_TEACHING_PREFIX")
+        configured = os_environ("CSUST_TEACHING_PREFIX") if self.service_name == TEACHING_SERVICE_NAME else ""
         if configured:
             self.web_prefix = configured.rstrip("/")
             return {"name": self.service_name, "urlPlus": self.web_prefix}
-        _response, value = self.request_api(TEACHING_SERVICE_GROUP_API, method="GET", retry_refresh=False)
+        try:
+            _response, value = self.request_api(TEACHING_SERVICE_GROUP_API, method="GET", retry_refresh=False)
+        except HttpError as exc:
+            if exc.status != 401:
+                raise
+            if not recover:
+                raise
+            if not recovered:
+                self._recover_vpn_session()
+                recovered = True
+            _response, value = self.request_api(TEACHING_SERVICE_GROUP_API, method="GET", retry_refresh=False)
         if isinstance(value, dict) and str(value.get("code")) == "3010":
             from .vpn import login
 
-            if self.session.get("refreshToken"):
-                if not self.refresh():
-                    raise CsustError("VPN 会话刷新失败，请重新登录", code="login_required")
-            else:
-                login(argparse.Namespace(auth="cas", username=None, password_stdin=False, captcha_info=None), self)
+            if not recover:
+                raise LoginRequired("VPN 会话已失效")
+            if not recovered:
+                if self.session.get("refreshToken"):
+                    if not self.refresh():
+                        raise CsustError("VPN 会话刷新失败，请重新登录", code="login_required")
+                else:
+                    login(argparse.Namespace(auth="cas", username=None, password_stdin=False, captcha_info=None), self)
+                recovered = True
             _response, value = self.request_api(TEACHING_SERVICE_GROUP_API, method="GET", retry_refresh=False)
         result_status(value, mutating=False, success_codes=("200",))
         service = _find_teaching_service(value, self.service_name)
@@ -844,7 +875,7 @@ class TeachingClient(VpnClient):
                 self._api_path(service_url),
                 method="GET",
                 headers={
-                    **self._headers(),
+                    **self._headers(self._api_path(service_url)),
                     "Accept": "text/html,application/xhtml+xml,application/json,text/plain,*/*",
                     "Accept-Encoding": "identity",
                 },
@@ -852,6 +883,9 @@ class TeachingClient(VpnClient):
             )
             assert isinstance(opened, Response)
             _save_cookie_refresh(self, opened)
+            opened_payload = web._feedback(opened)
+            if business_state(opened_payload) is False:
+                result_status(opened_payload, mutating=False)
         url_plus = str(service.get("urlPlus") or "")
         match = re.match(r"^(/(?:http|https)/[^/]+)", url_plus, re.I)
         if not match:
@@ -860,16 +894,41 @@ class TeachingClient(VpnClient):
         self.service = {"name": self.service_name, "id": service.get("id"), "type": service.get("type"), "urlPlus": self.web_prefix}
         return self.service
 
-    def web_url(self, path: str) -> str:
-        service = self.ensure_service()
-        prefix = str(service.get("urlPlus") or self.web_prefix).rstrip("/")
+    def _validate_prefix(self, prefix: str) -> None:
+        if not prefix:
+            return
+        try:
+            parsed = urlsplit(prefix)
+            path = unquote(unquote(parsed.path))
+        except (TypeError, ValueError) as exc:
+            raise CsustError("教学平台网关前缀格式无效", code="invalid_path") from exc
+        if parsed.scheme or parsed.netloc or not path.startswith(("/http/", "/https/")) or "\\" in path or any(part in {".", ".."} for part in path.split("/")):
+            raise CsustError("教学平台网关前缀必须是当前 VPN 的 /http/... 或 /https/... 路径", code="invalid_path")
+
+    def _recover_vpn_session(self) -> None:
+        from .vpn import login
+
+        if self.session.get("refreshToken") and self.refresh():
+            return
+        login(argparse.Namespace(auth="cas", username=None, password_stdin=False, captcha_info=None), self)
+
+    def web_url(self, path: str, *, _recover_session: bool = True) -> str:
         if not isinstance(path, str) or not path.strip() or any(ord(c) < 0x20 for c in path):
             raise CsustError("教学平台路径格式无效", code="invalid_path")
         value = path.strip()
+        try:
+            parsed_value = urlsplit(value)
+            request_path = unquote(unquote(parsed_value.path))
+        except (TypeError, ValueError) as exc:
+            raise CsustError("教学平台路径格式无效", code="invalid_path") from exc
+        if "\\" in request_path or any(part in {".", ".."} for part in request_path.split("/") if part):
+            raise CsustError("教学平台路径不能包含目录跳转", code="invalid_path")
+        absolute_target = same_origin_url(self, value) if value.lower().startswith(("http://", "https://")) else ""
+        service = self.ensure_service(recover=_recover_session)
+        prefix = str(service.get("urlPlus") or self.web_prefix).rstrip("/")
+        self._validate_prefix(prefix)
         if value.lower().startswith(("http://", "https://")):
-            target = self.url(value)
-            if urlsplit(target).netloc.lower() != urlsplit(self.base_url).netloc.lower():
-                raise CsustError("教学平台只允许访问 VPN 当前站点", code="invalid_path")
+            target = absolute_target
             if not urlsplit(target).path.startswith(prefix + "/") and urlsplit(target).path != prefix:
                 raise CsustError("教学平台地址不属于当前服务", code="invalid_path")
             return target
@@ -890,15 +949,18 @@ class TeachingClient(VpnClient):
         data: list[tuple[str, str]] | None = None,
         json_body: object = _UNSET,
         multipart: list[tuple[str, object]] | None = None,
-        output: bool = False,
+        output: bool | str = False,
         referer: str = "",
+        _recover_session: bool = True,
+        mutating: bool | None = None,
     ) -> Response:
         method = method.strip().upper()
         if method not in web.SUPPORTED_METHODS:
             raise CsustError("不支持的 HTTP 方法", code="invalid_argument")
+        effective_mutating = method not in web.READ_ONLY_METHODS if mutating is None else mutating
         raw = _resolve_path(path, params, ())
-        target = self.web_url(raw)
-        headers = self._headers()
+        target = self.web_url(raw, _recover_session=_recover_session)
+        headers = self._headers(target)
         headers["Accept"] = "text/html,application/xhtml+xml,application/json,text/plain,*/*"
         headers["Accept-Encoding"] = "identity"
         # Legacy THEOL SSO expects a browser navigation.  The EnUES bearer
@@ -908,7 +970,10 @@ class TeachingClient(VpnClient):
             headers.pop(key, None)
         if referer and urlsplit(referer).netloc.lower() == urlsplit(target).netloc.lower():
             headers["Referer"] = referer
-        options: dict[str, object] = {"method": method, "headers": headers, "with_metadata": True, "binary": output}
+        options: dict[str, object] = {"method": method, "headers": headers, "with_metadata": True, "binary": bool(output)}
+        if isinstance(output, str):
+            options["stream_to"] = output
+            options["defer_stream_commit"] = True
         if method in web.READ_ONLY_METHODS:
             if data is not None or multipart is not None or json_body is not _UNSET:
                 raise CsustError("只读请求请使用 --param", code="invalid_argument")
@@ -918,9 +983,43 @@ class TeachingClient(VpnClient):
             options["json_body"] = json_body
         else:
             options["data"] = data or []
-        result = self.request(target, **options)
+        try:
+            result = self.request(target, **options)
+        except HttpError as exc:
+            if exc.status != 401 or effective_mutating or not _recover_session:
+                if effective_mutating:
+                    raise MutationUnverified(
+                        "教学平台写请求已发送但结果未知",
+                        details={"submitted": True, "confirmed": False, "request": {"method": method, "path": urlsplit(target).path}, "cause": exc.code},
+                    ) from exc
+                raise
+            self._recover_vpn_session()
+            result = self.request(target, **options)
+        except NetworkError as exc:
+            if not effective_mutating:
+                raise
+            raise MutationUnverified(
+                "教学平台写请求已发送但结果未知",
+                details={"submitted": True, "confirmed": False, "request": {"method": method, "path": urlsplit(target).path}, "cause": exc.code},
+            ) from exc
         assert isinstance(result, Response)
-        _save_cookie_refresh(self, result)
+        try:
+            if effective_mutating and is_login_page(result):
+                raise MutationUnverified(
+                    "教学平台写请求已发送但返回登录页，结果未知",
+                    details={"submitted": True, "confirmed": False, "request": {"method": method, "path": urlsplit(target).path}, "cause": "login_required"},
+                )
+            _save_cookie_refresh(self, result)
+        except CsustError as exc:
+            _discard_stream(result)
+            if isinstance(exc, MutationUnverified):
+                raise
+            if effective_mutating:
+                raise MutationUnverified(
+                    "教学平台写请求已完成但会话保存失败，结果未知",
+                    details={"submitted": True, "confirmed": False, "request": {"method": method, "path": urlsplit(target).path}, "save_error": exc.code},
+                ) from exc
+            raise
         return result
 
 
@@ -957,11 +1056,63 @@ def _response_text(response: Response) -> str:
     return _decode_body(response.body, response.headers)
 
 
-def _response_payload(response: Response, *, raw: bool = False) -> object:
+def _redact_raw_text(value: str, page_url: str = "") -> str:
+    def redact_control(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        identity = re.search(
+            r"\b(?:name|id)\s*=\s*(['\"]?)([^'\"\s>]+)\1", tag, re.I
+        )
+        if identity and _SENSITIVE_FIELD.search(identity.group(2)):
+            tag = re.sub(
+                r"(\bvalue\s*=\s*)(['\"])(.*?)(\2)",
+                r"\1\2<redacted>\4",
+                tag,
+                count=1,
+                flags=re.I | re.S,
+            )
+        return tag
+
+    value = re.sub(
+        r"<(?:input|textarea|select|option|button)\b[^>]*>",
+        redact_control,
+        value,
+        flags=re.I | re.S,
+    )
+    value = re.sub(
+        r"(\b(?:href|src|action)\s*=\s*)(['\"])(.*?)(\2)",
+        lambda match: (
+            match.group(1)
+            + match.group(2)
+            + (
+                _safe_url(match.group(3), page_url)
+                if any(token in match.group(3) for token in ("?", ";"))
+                or match.group(3).lower().startswith(("http://", "https://"))
+                else match.group(3)
+            )
+            + match.group(4)
+        ),
+        value,
+        flags=re.I | re.S,
+    )
+    return re.sub(
+        rf"(?i)((?:{_SENSITIVE_FIELD.pattern})\s*[=:]\s*)([^&\s,;<>\"']+)",
+        r"\1<redacted>",
+        value,
+    )
+
+
+def _response_payload(response: Response, *, raw: bool = False, mutating: bool = False) -> object:
     require_logged_in(response)
+    if not _response_text(response).strip():
+        return None
     payload = _redact(web._feedback(response))
+    if isinstance(payload, str):
+        payload = _redact_raw_text(payload, response.url)
+    if not mutating and business_state(payload) is False:
+        result_status(payload, mutating=False)
     if raw and isinstance(payload, dict):
-        payload = {**payload, "body": _response_text(response)}
+        body = _redact_raw_text(_response_text(response), response.url)
+        payload = {**payload, "body": body}
     return payload
 
 
@@ -970,9 +1121,12 @@ def _entry(name: str | None, path: str | None, method: str | None) -> tuple[str,
         raise CsustError("--name 与 --path 不能同时使用", code="invalid_argument")
     if name:
         key = name.strip()
-        item = TEACHING_ACTION_BY_NAME.get(key) or TEACHING_API_BY_NAME.get(key) or TEACHING_ROUTE_BY_NAME.get(key)
-        if item is None:
+        matches = [catalog.get(key) for catalog in (TEACHING_ACTION_BY_NAME, TEACHING_API_BY_NAME, TEACHING_ROUTE_BY_NAME) if key in catalog]
+        if not matches:
             raise CsustError(f"未知教学平台目录项：{name}；先运行 csust teaching catalog", code="unknown_route")
+        if len(matches) > 1:
+            raise CsustError(f"教学平台目录名称有歧义：{name}；请改用 --path", code="ambiguous_route")
+        item = matches[0]
         method = str(item.get("method") or method or "GET").strip().upper()
         return str(item["path"]), method, bool(item.get("mutating", method not in web.READ_ONLY_METHODS)), key
     if not path:
@@ -1010,18 +1164,19 @@ def _run_request(args: argparse.Namespace, client: TeachingClient) -> dict[str, 
         data=None if json_body is not _UNSET or files else (data or None),
         json_body=json_body,
         multipart=(data + files) if files else None,
-        output=bool(args.output),
+        output=args.output or False,
         referer=getattr(args, "referer", ""),
+        mutating=mutating,
     )
     request = _request_info(name, path, method, data)
-    payload = _response_payload(response, raw=bool(args.raw))
+    payload = None if args.output and response.stream_path else _response_payload(response, raw=bool(args.raw), mutating=mutating)
     if business_state(payload) is False:
         result_status(payload, mutating=mutating, details={"request": request})
     if args.output:
         body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
         output = Path(args.output).expanduser()
-        _write_private_file(output, body, code="teaching_output_write_failed", label="教学平台响应")
-        saved = {"downloaded": True, "output": str(output), "bytes": len(body), "status": response.status, "request": request}
+        saved = web._write_download(response, output, require_session=False, mutating=mutating)
+        saved.update({"status": response.status, "request": request})
         return {**saved, **result_status(payload, mutating=mutating, details=saved)}
     return {
         **result_status(payload, mutating=mutating, details={"request": request}),
@@ -1047,17 +1202,17 @@ def _course_rows(source: str, page_url: str) -> list[dict[str, object]]:
             source = course.attr("href") + " " + course.attr("onclick")
             course_id_match = re.search(r"courseId=([A-Za-z0-9_-]+)", source)
             query = {"courseId": course_id_match.group(1)} if course_id_match else {}
-            values = [cell.text() for cell in cells]
+            values = [cell.text(include_scripts=False) for cell in cells]
             order: dict[str, object] = {
                 "course_id": query.get("courseId", ""),
-                "name": course.text(),
-                "href": re.sub(r"^javascript:.*?(['\"])([^'\"]*courseId=[^'\"]+)\1.*$", r"\2", source).strip(),
+                "name": course.text(include_scripts=False),
+                "href": _safe_url(re.sub(r"^javascript:.*?(['\"])([^'\"]*courseId=[^'\"]+)\1.*$", r"\2", source).strip(), page_url),
                 "columns": values,
             }
             for direction in ("up", "down"):
                 link = next((item for item in links if f"LESS{direction.upper()}" in item.attr("href")), None)
                 if link is not None:
-                    order[direction] = link.attr("href")
+                    order[direction] = _safe_url(link.attr("href"), page_url)
             if len(values) >= 4:
                 order.update({"course_number": values[0], "department": values[2], "tutor": values[3]})
             rows.append(order)
@@ -1077,9 +1232,11 @@ def run_courses(args: argparse.Namespace, client: TeachingClient) -> dict[str, o
         data=data or None,
         referer=personal.url,
     )
+    if not _response_text(response).strip():
+        raise ParseError("教学平台课程页面为空")
     payload = _response_payload(response, raw=bool(args.raw))
     rows = _course_rows(_response_text(response), response.url)
-    return {"ok": response.status < 400, "courses": rows, "course_count": len(rows), "page": payload}
+    return {"ok": True, "courses": rows, "course_count": len(rows), "page": payload}
 
 
 def run_course(args: argparse.Namespace, client: TeachingClient) -> dict[str, object]:
@@ -1092,15 +1249,21 @@ def run_course(args: argparse.Namespace, client: TeachingClient) -> dict[str, ob
         path = "/meol/jpk/course/layout/newpage/index.jsp"
         params = [("courseId", args.course_id)]
     response = client.request_web(path, params=params)
-    return {"ok": response.status < 400, "course_id": args.course_id, "column_id": args.column_id or None, "page": _response_payload(response, raw=bool(args.raw))}
+    if not _response_text(response).strip():
+        raise ParseError("教学平台课程页面为空")
+    return {"ok": True, "course_id": args.course_id, "column_id": args.column_id or None, "page": _response_payload(response, raw=bool(args.raw))}
 
 
 def run_course_order(args: argparse.Namespace, client: TeachingClient) -> dict[str, object]:
     if not args.yes:
         raise CsustError("调整课程顺序会改变远端状态，请加 --yes", code="confirmation_required")
     action = "LESSUP" if args.direction == "up" else "LESSDOWN"
-    response = client.request_web("/meol/lesson/blen.student.lesson.list.jsp", params=[("ACTION", action), ("lid", args.course_id)])
-    payload = _response_payload(response)
+    response = client.request_web(
+        "/meol/lesson/blen.student.lesson.list.jsp",
+        params=[("ACTION", action), ("lid", args.course_id)],
+        mutating=True,
+    )
+    payload = _response_payload(response, mutating=True)
     return {**result_status(payload, mutating=True), "page": payload}
 
 
@@ -1193,7 +1356,7 @@ def render(data: dict[str, object]) -> None:
     if "courses" in data:
         for item in data.get("courses", []):
             if isinstance(item, dict):
-                print("\t".join(str(item.get(key, "")) for key in ("course_id", "course_number", "name", "department", "tutor")))
+                print("\t".join(_safe_terminal_text(item.get(key, "")) for key in ("course_id", "course_number", "name", "department", "tutor")))
         return
     if data.get("downloaded"):
         print(f"已保存：{data.get('output')}（{data.get('bytes')} bytes）")

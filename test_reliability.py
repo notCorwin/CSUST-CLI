@@ -60,6 +60,7 @@ class ReliabilityTests(unittest.TestCase):
             file.write_bytes(b'\x00\xfffile')
             for module, cls in ((teaching, teaching.TeachingClient), (quality, quality.QualityClient)):
                 client = cls(base_url=base, prefix='/http/gateway', cookie_file=Path(directory)/'cookies', session_file=Path(directory)/'session', load_cookies=False)
+                client.session['token'] = 'vpn-token'
                 if module is quality:
                     client.quality_logged_in = True
                 args = SimpleNamespace(name=None, path='/meol/json', method='POST', data=['tag=a', 'tag=', 'courseId=1'], file=[f'file={file}'], param=[], data_json=None, yes=True, output=None, raw=False, referer='')
@@ -81,7 +82,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(page['actions'][0]['target'], '')
         self.assertIn('parse_error', page['actions'][0])
         response = Response('https://example.test/jsxsd/page', 200, {}, source)
-        args = SimpleNamespace(data=[], index=1, param=[], yes=True, output=None)
+        args = SimpleNamespace(data=[], index=1, param=[], yes=True, output=None, fingerprint=page['fingerprint'])
         with mock.patch.object(web, '_get_page', return_value=(response, page)), mock.patch.object(web, '_request') as request:
             with self.assertRaises(CsustError) as raised:
                 web._run_action_common(args, object(), '/jsxsd/page')
@@ -96,8 +97,8 @@ class ReliabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             client = Client(base_url='https://example.test', cookie_file=Path(directory)/'cookies', load_cookies=False)
             for runner in (web._run_form, web._run_action_common):
-                args = SimpleNamespace(data=[], param=[], form=1, button=1, index=1, yes=True, output=None)
-                with mock.patch.object(web, '_get_page', return_value=(page, {})), mock.patch.object(web, '_request', return_value=(saved, None)) as request:
+                args = SimpleNamespace(data=[], param=[], form=1, button=1, index=1, yes=True, output=None, fingerprint='fp')
+                with mock.patch.object(web, '_get_page', return_value=(page, {'fingerprint': 'fp'})), mock.patch.object(web, '_request', return_value=(saved, None)) as request:
                     self.assertTrue(runner(args, client, '/jsxsd/page')['confirmed'])
                     self.assertEqual(request.call_args.args[3], [('term', '')])
 
@@ -110,6 +111,20 @@ class ReliabilityTests(unittest.TestCase):
                 with self.subTest(body=body), self.assertRaises(CsustError):
                     web._write_download(response, str(target), require_session=True)
                 self.assertEqual(target.read_bytes(), b'previous')
+            temporary = Path(directory) / 'stream.part'
+            temporary.write_text('<form id="loginForm"></form>', encoding='utf-8')
+            response = Response(
+                'https://example.test',
+                200,
+                {'Content-Type': 'application/octet-stream'},
+                temporary.read_bytes(),
+                str(target),
+                str(temporary),
+            )
+            with self.assertRaises(CsustError):
+                web._write_download(response, str(target), require_session=True)
+            self.assertEqual(target.read_bytes(), b'previous')
+            self.assertFalse(temporary.exists())
 
     def test_login_and_bad_json_are_not_business_pages(self):
         for body, content_type, code in (
@@ -125,14 +140,15 @@ class ReliabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             client = vpn.VpnClient(base_url='https://example.test', cookie_file=Path(directory)/'cookies', session_file=Path(directory)/'session', load_cookies=False)
             expired = Response('https://example.test/api/save', 200, {}, '{"code":3010}')
-            for refreshed, count in ((True, 2), (False, 1)):
+            for refreshed, count in ((True, 1), (False, 1)):
                 with mock.patch.object(client, 'request', return_value=expired) as request, mock.patch.object(client, 'refresh', return_value=refreshed) as refresh:
                     client.request_api('/api/save', method='POST', data={})
                     self.assertEqual(request.call_count, count)
-                    refresh.assert_called_once()
+                    refresh.assert_not_called()
             with mock.patch.object(client, 'request', side_effect=NetworkError('timeout')) as request, mock.patch.object(client, 'refresh') as refresh:
-                with self.assertRaises(NetworkError):
+                with self.assertRaises(CsustError) as raised:
                     client.request_api('/api/save', method='POST', data={})
+                self.assertEqual(raised.exception.code, 'mutation_unverified')
                 request.assert_called_once()
                 refresh.assert_not_called()
 

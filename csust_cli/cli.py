@@ -27,12 +27,29 @@ def _run_login(args: argparse.Namespace, client: Client) -> dict[str, object]:
 
 
 def _run_logout(_args: argparse.Namespace, client: Client) -> dict[str, object]:
+    result: dict[str, object] | None = None
+    primary: BaseException | None = None
+    cleanup_error: BaseException | None = None
     try:
-        client.get(f"/jsxsd/xk/LoginToXk?method=exit&tktime={int(time.time() * 1000)}")
+        response = client.get(f"/jsxsd/xk/LoginToXk?method=exit&tktime={int(time.time() * 1000)}")
+        result = web._logout_result(response)
+    except BaseException as exc:
+        primary = exc
     finally:
-        client.clear_cookies()
-        client.save()
-    return {"ok": True, "logged_out": True, "cookie_file": str(client.cookie_file)}
+        try:
+            client.clear_cookies()
+        except BaseException as exc:
+            cleanup_error = exc
+        try:
+            client.save()
+        except BaseException as exc:
+            cleanup_error = cleanup_error or exc
+    if primary is not None:
+        raise primary
+    if cleanup_error is not None:
+        raise cleanup_error
+    assert result is not None
+    return {**result, "cookie_file": str(client.cookie_file)}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -87,16 +104,21 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("输出路径必须是普通文件")
             except (OSError, RuntimeError, ValueError) as exc:
                 raise CsustError("下载路径无效", code="invalid_argument") from exc
+        teaching_command = args.command in {"teaching", "theol"}
         static_catalog = (args.command == "web" and args.web_command == "catalog") or (
             args.command == "vpn" and args.vpn_command in {"routes", "controls", "catalog", "page"}
-        ) or (args.command == "teaching" and args.teaching_command == "catalog") or (
+        ) or (teaching_command and args.teaching_command == "catalog") or (
             args.command in {"quality", "quality-assurance", "assurance"} and args.quality_command == "catalog"
         )
         if args.command == "vpn":
             from .features.vpn import VpnClient
 
-            client = None if static_catalog else VpnClient(native=bool(getattr(args, "native", False)))
-        elif args.command == "teaching":
+            client = None if static_catalog else VpnClient(
+                native=bool(getattr(args, "native", False)),
+                load_cookies=args.vpn_command != "login",
+                load_session=args.vpn_command != "login",
+            )
+        elif teaching_command:
             from .features.teaching import TeachingClient
 
             client = None if static_catalog else TeachingClient()
@@ -110,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         data = runner(args, client)
         if isinstance(data, dict):
             mutating = data.get("submitted") is True
-            if data.get("ok") is False:
+            if data.get("ok") is False and not data.get("pending") and not data.get("next"):
                 raise CsustError("远端请求失败", code="mutation_rejected" if mutating else "business_rejected")
             if mutating and data.get("confirmed") is not True:
                 result_status(None, mutating=True, details={key: data[key] for key in ("request", "downloaded", "output", "bytes") if key in data})
@@ -128,6 +150,13 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(_error_payload(exc), ensure_ascii=False))
         else:
             print(f"错误: {_safe_terminal_text(exc)}", file=sys.stderr)
+        return 2
+    except (RuntimeError, ValueError, TypeError) as exc:
+        payload = {"error": "参数或地址格式无效", "code": "invalid_argument"}
+        if json_mode:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"错误: {payload['error']}", file=sys.stderr)
         return 2
 
 

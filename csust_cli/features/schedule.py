@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import re
 
-from ..core import CsustError, DAY_NAMES, Client, Element, ParseError, _option_value, _safe_terminal_text, _save_cookie_refresh, _table_rows, ensure_session, parse_html, require_logged_in
+from ..core import CsustError, DAY_NAMES, Client, Element, ParseError, _option_value, _safe_terminal_text, _table_rows, ensure_session, parse_html
+from .academic import _query_response
 
 
 def parse_ints(value: str) -> list[int]:
@@ -40,9 +41,11 @@ def parse_week_spec(value: str, fallback_sections: str = "") -> tuple[list[int],
 
 
 def parse_schedule_cell(cell: Element, fallback_sections: str) -> list[dict[str, object]]:
-    detailed = [node for node in cell.find_all("div") if node.has_class("kbcontent") and not node.has_class("kbcontent1") and node.text(include_scripts=False)]
-    summaries = [node for node in cell.find_all("div") if node.has_class("kbcontent1") and node.text(include_scripts=False)]
-    contents = detailed or summaries
+    contents = [
+        node
+        for node in cell.find_all("div")
+        if (node.has_class("kbcontent") or node.has_class("kbcontent1")) and node.text(include_scripts=False)
+    ]
     items: list[dict[str, object]] = []
     for content in contents:
         for fragment in re.split(r"-{5,}", content.to_html()):
@@ -139,7 +142,9 @@ def run(args: argparse.Namespace, client: Client) -> dict[str, object]:
     if args.week is not None and args.week < 1:
         raise CsustError("--week 必须是正整数", code="invalid_argument")
     ensure_session(client)
-    response = client.post(
+    response = _query_response(
+        client,
+        "POST",
         "/jsxsd/xskb/xskb_list.do",
         [
             ("jx0404id", ""),
@@ -151,8 +156,6 @@ def run(args: argparse.Namespace, client: Client) -> dict[str, object]:
             ("kbjcmsid", args.scheme_id),
         ],
     )
-    require_logged_in(response)
-    _save_cookie_refresh(client, response)
     document = parse_html(response.body)
     resolved_term = args.term or selected_option(document, "xnxq01id")
     items = parse_schedule(response.body, resolved_term)

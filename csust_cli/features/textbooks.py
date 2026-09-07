@@ -10,6 +10,7 @@ from ..core import (
     Client,
     CsustError,
     Element,
+    NetworkError,
     HttpError,
     MutationUnverified,
     ParseError,
@@ -26,12 +27,16 @@ from ..core import (
     _safe_url,
     _save_cookie_refresh,
     _table_rows,
+    business_state,
     ensure_session,
+    is_login_page,
     parse_html,
     require_logged_in,
+    result_status,
     same_origin_url,
     _safe_urljoin,
 )
+from .academic import _query_response
 
 
 TEXTBOOK_PATHS = (
@@ -97,6 +102,7 @@ def textbook_table(document: Element) -> Element | None:
     candidates: list[tuple[int, Element]] = []
     for table in document.find_all("table"):
         text = table.text(include_scripts=False)
+        rows = _table_rows(table)
         controls = table.find_all("input") + table.find_all("button") + table.find_all("a")
         action_text = " ".join(
             " ".join(str(parse_control(node).get(key, "")) for key in ("text", "value", "onclick", "href"))
@@ -109,11 +115,27 @@ def textbook_table(document: Element) -> Element | None:
             score += 3
         if re.search(r"选订|订购|退订|取消订|增订", action_text):
             score += 4
-        if table.find_all("tr"):
+        if rows:
             score += 1
+        if any(len(row.direct("th")) >= 2 for row in rows):
+            score += 2
+        elif any(
+            len(values) >= 2 and sum(value in _HEADER_WORDS for value in values) >= 2
+            for values in (
+                [cell.text(include_scripts=False).strip() for cell in row.direct("td")]
+                for row in rows
+            )
+        ):
+            score += 2
         if score:
             candidates.append((score, table))
-    return max(candidates, key=lambda item: item[0])[1] if candidates else None
+    if not candidates:
+        return None
+    best_score = max(score for score, _table in candidates)
+    best = [table for score, table in candidates if score == best_score]
+    if len(best) > 1:
+        raise ParseError("页面包含多个无法唯一确定的教材表")
+    return best[0]
 
 
 def textbook_rows(document: Element) -> list[tuple[Element, list[Element]]]:
@@ -148,9 +170,16 @@ def _table_headers(document: Element) -> list[str]:
     return []
 
 
-def _header_value(headers: list[str], cells: list[Element], pattern: str) -> str:
+def _header_value(headers: list[str], cells: list[Element], field: str) -> str:
+    aliases = {
+        "course": {"课程", "课程名称", "科目", "科目名称"},
+        "course_id": {"课程代码", "课程编号", "课号", "科目代码", "科目编号"},
+        "title": {"教材", "书名", "教材名称", "图书", "图书名称"},
+        "isbn": {"isbn", "书号"},
+    }.get(field, set())
     for index, header in enumerate(headers):
-        if re.search(pattern, header, re.I) and index < len(cells):
+        normalized = re.sub(r"\s+", "", header).strip().casefold()
+        if normalized in {alias.casefold() for alias in aliases} and index < len(cells):
             return cells[index].text(include_scripts=False)
     return ""
 
@@ -203,6 +232,9 @@ def _row_status(row_text: str, actions: list[str]) -> str:
 
 def parse_textbooks(source: str, page_url: str) -> dict[str, object]:
     document = parse_html(source)
+    page_text = document.text(include_scripts=False)
+    if _has_failure_signal(page_text) and re.search(r"教材|查询|订购|选订", page_text):
+        raise CsustError("远端明确报告教材查询失败", code="business_rejected")
     headers = _table_headers(document)
     items: list[dict[str, object]] = []
     for row, cells in textbook_rows(document):
@@ -211,13 +243,15 @@ def parse_textbooks(source: str, page_url: str) -> dict[str, object]:
         controls.extend(parse_control(node, safe=True) for node in row.find_all("a") if node.attr("href") or node.attr("onclick"))
         row_text = row.text(include_scripts=False)
         actions = _row_actions(row)
-        course = _header_value(headers, cells, r"课程|课程名称|课程代码|课号")
-        title = _header_value(headers, cells, r"教材|书名|教材名称|图书")
-        isbn = _header_value(headers, cells, r"ISBN")
+        course = _header_value(headers, cells, "course")
+        course_id = _header_value(headers, cells, "course_id")
+        title = _header_value(headers, cells, "title")
+        isbn = _header_value(headers, cells, "isbn")
         item = {
             "index": len(items) + 1,
-            "course": course or (cells[0].text(include_scripts=False) if cells else ""),
-            "title": title or (cells[1].text(include_scripts=False) if len(cells) > 1 else ""),
+            "course": course or ("" if headers else cells[0].text(include_scripts=False) if cells else ""),
+            "course_id": course_id,
+            "title": title or ("" if headers else cells[1].text(include_scripts=False) if len(cells) > 1 else ""),
             "isbn": isbn,
             "status": _row_status(row_text, actions),
             "actions": actions,
@@ -233,15 +267,20 @@ def parse_textbooks(source: str, page_url: str) -> dict[str, object]:
 def find_textbook_page(client: Client) -> tuple[Response, Element]:
     for path in TEXTBOOK_PATHS:
         try:
-            response = client.get(path)
+            response = _query_response(client, "GET", path)
         except HttpError as exc:
             if exc.status == 404:
                 continue
             raise
-        require_logged_in(response)
-        _save_cookie_refresh(client, response)
         document = parse_html(response.body)
+        from . import web
+
+        payload = web._feedback(response)
+        if business_state(payload) is False:
+            result_status(payload, mutating=False)
         if textbook_table(document) is not None:
+            return response, document
+        if re.search(r"未查询到数据|暂无教材|没有教材|无教材", document.text(include_scripts=False)):
             return response, document
     raise ParseError("未找到教材页面；学校可能暂未开放教材确认或已更换页面")
 
@@ -426,13 +465,25 @@ def submit_textbook_action(
     if form is None and method != "GET":
         raise ParseError("教材条目没有可提交的表单")
     payload = form_fields(form, row, action_node) if form is not None and _action_submits_form(descriptor) else []
-    if method == "GET":
-        target = _append_query(target, payload)
-        result = client.get(target)
-    else:
-        result = client.post(target, payload, headers={"Referer": response.url})
-    require_logged_in(result)
-    client.save()
+    request = {"method": method, "path": urlparse(target).path, "operation": operation, "index": position + 1}
+    try:
+        if method == "GET":
+            target = _append_query(target, payload)
+            result = client.get(target)
+        else:
+            result = client.post(target, payload, headers={"Referer": response.url})
+    except (HttpError, NetworkError) as exc:
+        raise MutationUnverified("教材操作已发送但结果未知", details={"submitted": True, "confirmed": False, "request": request, "cause": exc.code}) from exc
+    try:
+        require_logged_in(result)
+    except CsustError as exc:
+        raise MutationUnverified("教材操作已发送但返回登录页，结果未知", details={"submitted": True, "confirmed": False, "request": request, "cause": exc.code}) from exc
+    from . import web
+
+    web._save_mutation(client, request)
+    payload_result = web._feedback(result)
+    if business_state(payload_result) is False:
+        result_status(payload_result, mutating=True, details=request)
     message = response_message(result.body)
     safe_request = {"method": method, "path": urlparse(target).path}
     if _failure_message(message):
@@ -501,12 +552,13 @@ def run(args: argparse.Namespace, client: Client) -> dict[str, object]:
     if args.textbooks_command == "list":
         ensure_session(client)
         response, document = find_textbook_page(client)
+        from . import web
+
+        result_status(web._feedback(response), mutating=False)
         return parse_textbooks(response.body, response.url)
     if args.textbooks_command == "account":
         ensure_session(client)
-        response = client.get(TEXTBOOK_ACCOUNT_PATH)
-        require_logged_in(response)
-        _save_cookie_refresh(client, response)
+        response = _query_response(client, "GET", TEXTBOOK_ACCOUNT_PATH)
         return parse_textbooks(response.body, response.url)
     if not args.yes:
         raise CsustError("远端订退教材会修改账号数据，请加 --yes", code="confirmation_required")

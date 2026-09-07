@@ -74,6 +74,7 @@ class QualityTests(unittest.TestCase):
                 session_file=Path(directory) / "session.json",
                 load_cookies=False,
             )
+            client.session["token"] = "vpn-token"
             client._ensure_vpn_session = mock.Mock()  # type: ignore[method-assign]
             client.ensure_service = mock.Mock(return_value={"urlPlus": "/http/current"})  # type: ignore[method-assign]
             self.assertEqual(
@@ -134,6 +135,7 @@ class QualityTests(unittest.TestCase):
                 session_file=Path(directory) / "session.json",
                 load_cookies=False,
             )
+            client.session["token"] = "vpn-token"
             self.assertEqual(web._public_target(client, "/findmm.jsp"), f"{base}/http/current/findmm.jsp")
 
     def test_quality_login_preserves_gateway_and_establishes_portal_session(self) -> None:
@@ -145,6 +147,7 @@ class QualityTests(unittest.TestCase):
                 session_file=Path(directory) / "session.json",
                 load_cookies=False,
             )
+            client.session["token"] = "vpn-token"
             with mock.patch("csust_cli.features.quality._credentials", return_value=("account", "password")), mock.patch(
                 "csust_cli.features.quality.solve_captcha", return_value="1234"
             ):
@@ -182,6 +185,7 @@ class QualityTests(unittest.TestCase):
                 session_file=Path(directory) / "session.json",
                 load_cookies=False,
             )
+            client.session["token"] = "vpn-token"
             client.login = mock.Mock(return_value={"ok": True})  # type: ignore[method-assign]
             client.ensure_quality_session()
             client.login.assert_called_once_with()

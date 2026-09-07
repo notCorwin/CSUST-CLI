@@ -445,6 +445,7 @@ class CsustParserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
             env_file.write_text("username=from-file\npassword='file password'\n", encoding="utf-8")
+            env_file.chmod(0o600)
             with mock.patch.dict(os.environ, {"CSUST_ENV_FILE": str(env_file)}, clear=True):
                 self.assertEqual(_credentials(), ("from-file", "file password"))
             with mock.patch.dict(
@@ -1174,8 +1175,8 @@ class CsustParserTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             client = Client(base_url="https://example.test", cookie_file=Path(directory) / "cookies.txt", load_cookies=False)
-            args = SimpleNamespace(index=1, data=[], param=[], yes=True, output=None)
-            with mock.patch("csust_cli.features.web._get_page", return_value=(response, {})), mock.patch.object(client, "request") as request:
+            args = SimpleNamespace(index=1, data=[], param=[], yes=True, output=None, fingerprint="fp")
+            with mock.patch("csust_cli.features.web._get_page", return_value=(response, {"fingerprint": "fp"})), mock.patch.object(client, "request") as request:
                 with self.assertRaises(CsustError) as raised:
                     _run_action_common(args, client, "/jsxsd/page")
             self.assertEqual(raised.exception.code, "action_not_found")
@@ -1201,8 +1202,8 @@ class CsustParserTests(unittest.TestCase):
                 "<form action='/save' method='post'><input type='hidden' name='token' value='secret'>"
                 "<a href='/jsxsd/link'>普通链接</a></form>",
             )
-            link_args = SimpleNamespace(index=1, data=[], param=[], yes=True, output=None)
-            with mock.patch("csust_cli.features.web._get_page", return_value=(link_response, {})), mock.patch.object(
+            link_args = SimpleNamespace(index=1, data=[], param=[], yes=True, output=None, fingerprint="fp")
+            with mock.patch("csust_cli.features.web._get_page", return_value=(link_response, {"fingerprint": "fp"})), mock.patch.object(
                 client, "request", return_value=link_response
             ) as request:
                 _run_action_common(link_args, client, "/jsxsd/page")
@@ -1683,8 +1684,8 @@ class CsustParserTests(unittest.TestCase):
                 {},
                 "<form><button formaction='/jsxsd/page' formmethod='TRACE'>提交</button></form>",
             )
-            action_args = SimpleNamespace(param=[], data=[], index=1, yes=False, output=None)
-            with mock.patch("csust_cli.features.web._get_page", return_value=(action_response, {})):
+            action_args = SimpleNamespace(param=[], data=[], index=1, yes=False, output=None, fingerprint="fp")
+            with mock.patch("csust_cli.features.web._get_page", return_value=(action_response, {"fingerprint": "fp"})):
                 with self.assertRaises(CsustError) as raised:
                     _run_action_common(action_args, client, "/jsxsd/page")
             self.assertEqual(raised.exception.code, "invalid_argument")
@@ -1852,12 +1853,12 @@ class CsustParserTests(unittest.TestCase):
         saved = {"ok": True, "downloaded": True}
         with tempfile.TemporaryDirectory() as directory:
             client = Client(base_url="https://example.test", cookie_file=Path(directory) / "cookies.txt", load_cookies=False)
-            with mock.patch("csust_cli.features.web._get_page", return_value=(response, {})), mock.patch(
+            with mock.patch("csust_cli.features.web._get_page", return_value=(response, {"fingerprint": "fp"})), mock.patch(
                 "csust_cli.features.web._request", return_value=(response, saved)
             ), mock.patch.object(client, "save") as save:
                 for runner, args in (
                     (_run_form, SimpleNamespace(param=[], data=[], form=1, button=None, yes=True, output="export.bin")),
-                    (_run_action_common, SimpleNamespace(param=[], data=[], index=1, yes=True, output="export.bin")),
+                    (_run_action_common, SimpleNamespace(param=[], data=[], index=1, yes=True, output="export.bin", fingerprint="fp")),
                 ):
                     with self.assertRaises(MutationUnverified) as raised:
                         runner(args, client, "/jsxsd/page")
@@ -1918,7 +1919,10 @@ class CsustParserTests(unittest.TestCase):
             result = _run_graduation_design(SimpleNamespace(fetch=True, output=str(output)), client)
             self.assertEqual(output.read_bytes(), bytes((0x80, 0x81)))
             self.assertTrue(result["download"]["downloaded"])
-            self.assertEqual(client.calls[0][1], {"method": "GET", "binary": True, "with_metadata": True})
+            self.assertEqual(
+                client.calls[0][1],
+                {"method": "GET", "binary": True, "with_metadata": True, "stream_to": str(output), "defer_stream_commit": True},
+            )
             with self.assertRaises(CsustError) as raised:
                 _run_graduation_design(SimpleNamespace(fetch=True, output=""), client)
             self.assertEqual(raised.exception.code, "invalid_argument")

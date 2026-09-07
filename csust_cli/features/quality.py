@@ -6,13 +6,15 @@ import argparse
 import json
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from ..core import (
     AuthenticationFailed,
     CAPTCHA_RETRIES,
     CaptchaError,
     CsustError,
+    HttpError,
+    LoginRequired,
     business_state,
     result_status,
     Response,
@@ -23,7 +25,9 @@ from ..core import (
     _write_private_file,
     generate_encoded,
     is_login_page,
+    _valid_login_probe,
     solve_captcha,
+    same_origin_url,
 )
 from . import academic, teaching, vpn, web
 from .teaching import TeachingClient
@@ -32,6 +36,26 @@ from .vpn import _has_session_cookie, _json_argument, _parse_files, _parse_pairs
 
 QUALITY_SERVICE_NAME = "教学一体化"
 QUALITY_SYSTEM_NAME = "教学质量保障系统"
+
+
+def _validate_quality_path(client: Client, path: str) -> str:
+    if not isinstance(path, str) or not path.strip() or any(
+        ord(char) < 0x20 or ord(char) == 0x7F for char in path
+    ):
+        raise CsustError("教学质量保障系统路径格式无效", code="invalid_path")
+    value = path.strip()
+    try:
+        parsed = urlparse(value)
+        decoded_path = unquote(unquote(parsed.path))
+    except ValueError as exc:
+        raise CsustError("教学质量保障系统路径格式无效", code="invalid_path") from exc
+    if "\\" in decoded_path or any(part in {".", ".."} for part in decoded_path.split("/")):
+        raise CsustError("教学质量保障系统路径不能包含目录跳转", code="invalid_path")
+    if value.lower().startswith(("http://", "https://")):
+        target = client.url(value)
+        if not web._is_report_target(target):
+            same_origin_url(client, value)
+    return value
 
 QUALITY_ROUTE_CATALOG = tuple(
     {
@@ -68,9 +92,11 @@ class QualityClient(TeachingClient):
         )
         self.quality_logged_in = False
 
-    def _ensure_vpn_session(self, args: argparse.Namespace | None = None) -> None:
-        if self.web_prefix or self.session.get("token") or _has_session_cookie(self):
+    def _ensure_vpn_session(self, args: argparse.Namespace | None = None, *, allow_login: bool = True) -> None:
+        if self.session.get("token") or _has_session_cookie(self):
             return
+        if not allow_login:
+            raise LoginRequired("VPN 会话不存在")
         login_args = argparse.Namespace(
             username=getattr(args, "username", None) if args else None,
             password_stdin=False,
@@ -81,27 +107,52 @@ class QualityClient(TeachingClient):
         if not isinstance(result, dict) or not result.get("ok"):
             raise AuthenticationFailed("VPN 统一认证未建立有效会话")
 
-    def web_url(self, path: str) -> str:
-        self._ensure_vpn_session()
-        if isinstance(path, str):
-            value = path.strip()
-            if value.lower().startswith(("http://", "https://")) or value.startswith(("/http/", "/https/")):
-                target = self.url(value)
-                parsed = urlparse(target)
-                base = urlparse(self.base_url)
-                marker = parsed.path.find("/jsxsd/")
-                service = self.ensure_service()
-                prefix = str(service.get("urlPlus") or self.web_prefix).rstrip("/")
-                if parsed.netloc.lower() == base.netloc.lower() and marker >= 0 and prefix:
-                    if not parsed.path.startswith(prefix + "/") and parsed.path != prefix:
-                        path = parsed._replace(path=prefix + parsed.path[marker:]).geturl()
-        return super().web_url(path)
+    def web_url(self, path: str, *, _recover_session: bool = True) -> str:
+        value = _validate_quality_path(self, path)
+        absolute_target = self.url(value) if value.lower().startswith(("http://", "https://")) else ""
+        if absolute_target:
+            if not web._is_report_target(absolute_target):
+                same_origin_url(self, value)
+        self._ensure_vpn_session(allow_login=_recover_session)
+        if value.lower().startswith(("http://", "https://")):
+            target = absolute_target
+            parsed = urlparse(target)
+            if web._is_report_target(target):
+                return target
+            marker = parsed.path.find("/jsxsd/")
+            service = self.ensure_service(recover=_recover_session)
+            prefix = str(service.get("urlPlus") or self.web_prefix).rstrip("/")
+            base = urlparse(self.base_url)
+            if parsed.netloc.lower() == base.netloc.lower() and marker >= 0 and prefix:
+                if not parsed.path.startswith(prefix + "/") and parsed.path != prefix:
+                    value = parsed._replace(path=prefix + parsed.path[marker:]).geturl()
+        return super().web_url(value, _recover_session=_recover_session)
 
     def request_web(self, path: str, **kwargs: object) -> Response:
-        self._ensure_vpn_session()
-        return super().request_web(path, **kwargs)
+        _validate_quality_path(self, path)
+        recover = bool(kwargs.get("_recover_session", True))
+        self._ensure_vpn_session(allow_login=recover)
+        try:
+            return super().request_web(path, **kwargs)
+        except HttpError as exc:
+            if exc.status != 401 or not recover or getattr(self, "_quality_login_in_progress", False):
+                raise
+            self.quality_logged_in = False
+            self.login()
+            retry_kwargs = dict(kwargs)
+            retry_kwargs["_recover_session"] = False
+            return super().request_web(path, **retry_kwargs)
 
     def login(self, args: argparse.Namespace | None = None) -> dict[str, object]:
+        if getattr(self, "_quality_login_in_progress", False):
+            raise AuthenticationFailed("教学质量保障系统登录流程递归失败")
+        self._quality_login_in_progress = True
+        try:
+            return self._login_impl(args)
+        finally:
+            self._quality_login_in_progress = False
+
+    def _login_impl(self, args: argparse.Namespace | None = None) -> dict[str, object]:
         self._ensure_vpn_session(args)
         account, password = _credentials(getattr(args, "username", None) if args else None)
         captcha_override = getattr(args, "captcha", None) if args else None
@@ -139,7 +190,7 @@ class QualityClient(TeachingClient):
                     continue
                 raise failure
             probe = self.request_web("/jsxsd/framework/xsMain.jsp")
-            if not is_login_page(probe):
+            if _valid_login_probe(probe):
                 self.quality_logged_in = True
                 self.save()
                 return {
@@ -157,15 +208,39 @@ class QualityClient(TeachingClient):
         if self.quality_logged_in:
             return
         self._ensure_vpn_session()
-        probe = self.request_web("/jsxsd/framework/xsMain.jsp")
-        if is_login_page(probe):
+        try:
+            probe = self.request_web("/jsxsd/framework/xsMain.jsp")
+        except HttpError as exc:
+            if exc.status != 401:
+                raise
+            self.login()
+            return
+        if not _valid_login_probe(probe):
             self.login()
         else:
             self.quality_logged_in = True
 
     def logout(self) -> Response:
-        self.ensure_quality_session()
-        response = self.request_web(f"/jsxsd/xk/LoginToXk?method=exit&tktime={int(time.time() * 1000)}")
+        if not (self.quality_logged_in or self.session.get("token") or _has_session_cookie(self)):
+            self.quality_logged_in = False
+            return Response(self.base_url, 204, {}, "")
+        try:
+            self._ensure_vpn_session(allow_login=False)
+        except LoginRequired:
+            self.quality_logged_in = False
+            return Response(self.base_url, 204, {}, "")
+        if not self.quality_logged_in:
+            try:
+                probe = self.request_web("/jsxsd/framework/xsMain.jsp", _recover_session=False)
+            except (HttpError, LoginRequired) as exc:
+                if not isinstance(exc, HttpError) or exc.status == 401:
+                    self.quality_logged_in = False
+                    return Response(self.base_url, 204, {}, "")
+                raise
+            if is_login_page(probe):
+                self.quality_logged_in = False
+                return Response(probe.url, 204, {}, "")
+        response = self.request_web(f"/jsxsd/xk/LoginToXk?method=exit&tktime={int(time.time() * 1000)}", _recover_session=False)
         self.quality_logged_in = False
         _save_cookie_refresh(self, response)
         return response
@@ -184,8 +259,8 @@ def _entry(name: str | None, path: str | None) -> tuple[str, str]:
     return path, "GET"
 
 
-def _payload(response: Response, *, raw: bool = False) -> object:
-    return teaching._response_payload(response, raw=raw)
+def _payload(response: Response, *, raw: bool = False, mutating: bool = False) -> object:
+    return teaching._response_payload(response, raw=raw, mutating=mutating)
 
 
 def run_catalog(_args: argparse.Namespace, _client: QualityClient | None = None) -> dict[str, object]:
@@ -214,18 +289,47 @@ def run_login(args: argparse.Namespace, client: QualityClient) -> dict[str, obje
 
 
 def run_status(_args: argparse.Namespace, client: QualityClient) -> dict[str, object]:
-    client.ensure_quality_session()
-    return {"ok": True, "logged_in": True, "service": QUALITY_SERVICE_NAME, "system": QUALITY_SYSTEM_NAME}
+    if not (client.quality_logged_in or client.session.get("token") or _has_session_cookie(client)):
+        return {"ok": True, "logged_in": False, "service": QUALITY_SERVICE_NAME, "system": QUALITY_SYSTEM_NAME}
+    try:
+        probe = client.request_web("/jsxsd/framework/xsMain.jsp", _recover_session=False)
+    except (LoginRequired, HttpError):
+        return {"ok": True, "logged_in": False, "service": QUALITY_SERVICE_NAME, "system": QUALITY_SYSTEM_NAME}
+    return {"ok": True, "logged_in": _valid_login_probe(probe), "service": QUALITY_SERVICE_NAME, "system": QUALITY_SYSTEM_NAME}
 
 
 def run_logout(_args: argparse.Namespace, client: QualityClient) -> dict[str, object]:
-    response = client.logout()
-    return {"ok": response.status < 400, "logged_out": response.status < 400, "status": response.status, "service": QUALITY_SERVICE_NAME}
+    response: Response | None = None
+    result: dict[str, object] | None = None
+    primary: BaseException | None = None
+    cleanup_error: BaseException | None = None
+    try:
+        response = client.logout()
+        result = web._logout_result(response)
+    except BaseException as exc:
+        primary = exc
+    finally:
+        try:
+            client.clear_cookies()
+        except BaseException as exc:
+            cleanup_error = exc
+        try:
+            client.save()
+        except BaseException as exc:
+            cleanup_error = cleanup_error or exc
+    if primary is not None:
+        raise primary
+    if cleanup_error is not None:
+        raise cleanup_error
+    assert response is not None and result is not None
+    return {**result, "service": QUALITY_SERVICE_NAME}
 
 
 def run_routes(_args: argparse.Namespace, client: QualityClient) -> dict[str, object]:
     client.ensure_quality_session()
     response = client.request_web("/jsxsd/framework/xsMain.jsp")
+    if not teaching._response_text(response).strip():
+        raise CsustError("教学质量保障菜单页面为空", code="parse_error")
     return {"ok": response.status < 400, "service": QUALITY_SERVICE_NAME, "system": QUALITY_SYSTEM_NAME, "page": _payload(response)}
 
 
@@ -235,6 +339,7 @@ def run_form(args: argparse.Namespace, client: QualityClient) -> dict[str, objec
 
 def _run_request(args: argparse.Namespace, client: QualityClient) -> dict[str, object]:
     path, named_method = _entry(getattr(args, "name", None), getattr(args, "path", None))
+    _validate_quality_path(client, path)
     method = (getattr(args, "method", None) or named_method).strip().upper()
     if method not in web.SUPPORTED_METHODS:
         raise CsustError("不支持的 HTTP 方法", code="invalid_argument")
@@ -248,11 +353,10 @@ def _run_request(args: argparse.Namespace, client: QualityClient) -> dict[str, o
         raise CsustError("GET/HEAD/OPTIONS 只能使用 --param", code="invalid_argument")
     if method not in web.READ_ONLY_METHODS and not args.yes:
         raise CsustError("教学质量保障请求可能修改账号数据，请加 --yes", code="confirmation_required")
-    client.ensure_quality_session()
     options: dict[str, object] = {
         "method": method,
         "params": params,
-        "output": bool(args.output),
+        "output": args.output or False,
         "referer": getattr(args, "referer", ""),
     }
     if method in web.READ_ONLY_METHODS:
@@ -263,17 +367,16 @@ def _run_request(args: argparse.Namespace, client: QualityClient) -> dict[str, o
         options["json_body"] = _json_argument(data_json)
     else:
         options["data"] = data
+    client.ensure_quality_session()
     response = client.request_web(path, **options)
     request = {"name": getattr(args, "name", None), "method": method, "path": urlparse(path).path, "fields": [name for name, _ in data], "service": QUALITY_SERVICE_NAME}
-    payload = _payload(response, raw=bool(args.raw))
     mutating = method not in web.READ_ONLY_METHODS
+    payload = None if args.output and response.stream_path else _payload(response, raw=bool(args.raw), mutating=mutating)
     if business_state(payload) is False:
         result_status(payload, mutating=mutating, details={"request": request})
     if args.output:
-        body = response.body if isinstance(response.body, bytes) else str(response.body).encode("utf-8")
-        output = Path(args.output).expanduser()
-        _write_private_file(output, body, code="quality_output_write_failed", label="教学质量保障响应")
-        saved = {"downloaded": True, "status": response.status, "output": str(output), "bytes": len(body), "request": request}
+        saved = web._write_download(response, args.output, require_session=False, mutating=mutating)
+        saved.update({"status": response.status, "request": request})
         return {**saved, **result_status(payload, mutating=mutating, details=saved)}
     return {
         **result_status(payload, mutating=mutating, details={"request": request}),
@@ -356,6 +459,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     public_action.add_argument("--index", required=True, type=int)
     public_action.add_argument("--param", action="append", default=[])
     public_action.add_argument("--data", action="append", default=[])
+    public_action.add_argument("--fingerprint", required=True, help="public get 返回的页面指纹")
     public_action.add_argument("--yes", action="store_true")
     public_action.add_argument("--output")
     public_action.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -377,6 +481,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     action.add_argument("--index", required=True, type=int, help="quality get 输出的动作序号")
     action.add_argument("--param", action="append", default=[], help="初始查询参数 NAME=VALUE，可重复")
     action.add_argument("--data", action="append", default=[], help="覆盖/附加字段 NAME=VALUE，可重复")
+    action.add_argument("--fingerprint", required=True, help="quality get 返回的页面指纹，防止操作序号对应到变化后的页面")
     action.add_argument("--yes", action="store_true", help="确认执行可能改变远端状态的动作")
     action.add_argument("--output", help="保存响应文件")
     action.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -400,7 +505,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         child.add_argument("--path", required=True, help="页面路径或 batches 输出的 path")
         if name in {"save", "submit"}:
             child.add_argument("--answer", action="append", default=[], help="答案，格式 QUESTION=OPTION，可重复")
-            child.add_argument("--suggestion", default="", help="学生建议")
+            child.add_argument("--suggestion", default=argparse.SUPPRESS, help="学生建议")
+            child.add_argument("--clear-suggestion", action="store_true", help="清空已有学生建议")
             child.add_argument("--yes", action="store_true", help="确认修改远端评价")
         child.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
         child.set_defaults(feature_runner=academic._run_evaluation, feature_renderer=academic.render)

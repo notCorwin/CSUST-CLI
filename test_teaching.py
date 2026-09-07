@@ -102,6 +102,7 @@ class TeachingTests(unittest.TestCase):
                 session_file=Path(directory) / "session.json",
                 load_cookies=False,
             )
+            client.session["token"] = "vpn-token"
             response = client.request_web("/meol/page")
             page = teaching._response_payload(response)
             self.assertEqual(response.status, 200)
@@ -117,6 +118,7 @@ class TeachingTests(unittest.TestCase):
                 session_file=Path(directory) / "session.json",
                 load_cookies=False,
             )
+            client.session["token"] = "vpn-token"
             service = {
                 "id": "service-id",
                 "name": teaching.TEACHING_SERVICE_NAME,
@@ -140,6 +142,7 @@ class TeachingTests(unittest.TestCase):
                 cookie_file=Path(directory) / "cookies.txt",
                 load_cookies=False,
             )
+            client.session["token"] = "vpn-token"
             response = client.request_web("/meol/json", method="POST", json_body={"courseId": 1})
             self.assertEqual(response.status, 200)
             self.assertEqual(TeachingHandler.last[0:2], ("POST", "/http/gateway/meol/json"))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import html
 import json
 import gzip
@@ -13,6 +14,7 @@ import shlex
 import sys
 import tempfile
 import time
+import zlib
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from http.client import HTTPException
@@ -39,6 +41,13 @@ CAPTCHA_RETRIES = 3
 DAY_NAMES = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
 HTML_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"})
 _JSON_BODY_UNSET = object()
+_RESPONSE_CHUNK_SIZE = 1024 * 1024
+_MAX_ERROR_BODY = 64 * 1024
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl.
+    fcntl = None
 
 
 class CsustError(RuntimeError):
@@ -131,6 +140,12 @@ def _url_origin(value: str) -> tuple[str, str, int | None]:
     return parsed.scheme.lower(), (parsed.hostname or "").lower(), port
 
 
+def _same_origin_or_upgrade(base: tuple[str, str, int | None], target: tuple[str, str, int | None]) -> bool:
+    if base == target:
+        return True
+    return base[0] == "http" and target == ("https", base[1], 443) and base[2] == 80
+
+
 def _parse_http_url(value: object) -> tuple[object, tuple[str, str, int | None]] | None:
     if not isinstance(value, str) or not value or _has_url_control(value):
         return None
@@ -154,25 +169,37 @@ class _SafeCookiePolicy(DefaultCookiePolicy):
         self._base_host = base.hostname or ""
 
     def return_ok(self, cookie, request):
-        request_origin = _url_origin(request.get_full_url())
-        secure_upgrade = (
-            self._base_origin[0] == "http"
-            and request_origin[0] == "https"
-            and self._base_origin[1] == request_origin[1]
-            and self._base_origin[2] == 80
-            and request_origin[2] == 443
-        )
-        if request_origin != self._base_origin and not secure_upgrade and _cookie_domain_matches_host(
+        try:
+            request_origin = _url_origin(request.get_full_url())
+        except (TypeError, ValueError):
+            return False
+        if not _same_origin_or_upgrade(self._base_origin, request_origin) and _cookie_domain_matches_host(
             cookie.domain, self._base_host
         ):
             return False
         return super().return_ok(cookie, request)
 
+    def set_ok(self, cookie, request):
+        try:
+            request_origin = _url_origin(request.get_full_url())
+        except (TypeError, ValueError):
+            return False
+        if not _same_origin_or_upgrade(self._base_origin, request_origin) and _cookie_domain_matches_host(
+            cookie.domain, self._base_host
+        ):
+            return False
+        return super().set_ok(cookie, request)
+
 
 class _SafeRedirectHandler(HTTPRedirectHandler):
-    def __init__(self, allowed_downgrade_hosts: set[str] | frozenset[str] = frozenset()):
+    def __init__(
+        self,
+        allowed_downgrade_hosts: set[str] | frozenset[str] = frozenset(),
+        allowed_origins: set[tuple[str, str, int | None]] | frozenset[tuple[str, str, int | None]] | None = None,
+    ):
         super().__init__()
         self.allowed_downgrade_hosts = {str(host).rstrip(".").lower() for host in allowed_downgrade_hosts if host}
+        self.allowed_origins = None if allowed_origins is None else set(allowed_origins)
 
     def http_error_308(self, req, fp, code, msg, headers):
         return self.http_error_302(req, fp, code, msg, headers)
@@ -193,15 +220,19 @@ class _SafeRedirectHandler(HTTPRedirectHandler):
             raise NetworkError("已拒绝非 HTTP(S) 重定向")
         old, old_origin = old_parts
         target, target_origin = target_parts
+        if self.allowed_origins is not None and not any(
+            _same_origin_or_upgrade(origin, target_origin) for origin in self.allowed_origins
+        ):
+            raise NetworkError("已拒绝重定向到未授权站点")
         if (
             old.scheme.lower() == "https"
             and target.scheme.lower() == "http"
             and target_origin[1] not in self.allowed_downgrade_hosts
         ):
             raise NetworkError("已拒绝 HTTPS 到 HTTP 的重定向降级")
-        cross_origin = old_origin != target_origin
+        cross_origin = not _same_origin_or_upgrade(old_origin, target_origin)
         method = req.get_method().upper()
-        if cross_origin and (method not in {"GET", "HEAD", "OPTIONS"} or req.data is not None):
+        if code in (307, 308) and cross_origin and (method not in {"GET", "HEAD", "OPTIONS"} or req.data is not None):
             raise NetworkError("已拒绝把请求数据重定向到其他站点")
         if code in (307, 308):
             redirected = Request(
@@ -236,9 +267,9 @@ class _SafeRedirectHandler(HTTPRedirectHandler):
 class HttpError(NetworkError):
     code = "http_error"
 
-    def __init__(self, status: int, reason: str):
+    def __init__(self, status: int, reason: str, *, details: dict[str, object] | None = None):
         self.status = status
-        super().__init__(f"HTTP {status} {reason}", details={"status": status})
+        super().__init__(f"HTTP {status} {reason}", details={"status": status, **(details or {})})
 
 
 class MutationUnverified(CsustError):
@@ -257,6 +288,8 @@ def business_state(payload: object, *, success_codes: tuple[str, ...] = ("0", "2
         else:
             if isinstance(payload.get("success"), bool):
                 states.append(payload["success"])
+            if isinstance(payload.get("ok"), bool):
+                states.append(payload["ok"])
             code = payload.get("code")
             if isinstance(code, (str, int)) and not isinstance(code, bool) and str(code):
                 states.append(str(code) in success_codes)
@@ -269,8 +302,8 @@ def business_state(payload: object, *, success_codes: tuple[str, ...] = ("0", "2
         if _has_failure_signal(text) or re.search(r"无效|拒绝|异常|\b(?:failed|failure|error|denied|invalid|unauthorized|forbidden)\b", text, re.I):
             return False
         # ponytail: short acknowledgements only; add endpoint-specific evidence for richer responses.
-        if re.fullmatch(r"(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序)?(?:成功|完成)[！!。.]?", text) or re.fullmatch(
-            r"已(?:保存|提交|更新|删除|发布|评价|报名|选课|缴费|撤销)[！!。.]?", text
+        if re.fullmatch(r"(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序|退出|注销|登出)?(?:成功|完成)[！!。.]?", text) or re.fullmatch(
+            r"已(?:保存|提交|更新|删除|发布|评价|报名|选课|缴费|撤销|退出|注销|登出)[！!。.]?", text
         ):
             return True
     if False in states:
@@ -414,6 +447,7 @@ def _table_rows(table: Element) -> list[Element]:
 class DocumentParser(HTMLParser):
     VOID_TAGS = HTML_VOID_TAGS
     AUTO_CLOSE = {"option": {"option"}, "tr": {"tr"}, "td": {"td", "th"}, "th": {"td", "th"}}
+    CDATA_CONTENT_ELEMENTS = {"script", "style", "textarea", "title"}
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -470,6 +504,8 @@ class DocumentParser(HTMLParser):
         del self.stack[index:]
 
     def handle_data(self, data: str) -> None:
+        if self.stack[-1].tag in {"textarea", "title"}:
+            data = html.unescape(data)
         self.stack[-1].add(data)
 
 
@@ -493,6 +529,8 @@ class Response:
     status: int
     headers: object
     body: str | bytes
+    stream_path: str | None = None
+    stream_temp_path: str | None = None
 
 
 def _header_value(headers: object, name: str) -> str:
@@ -515,6 +553,19 @@ def _header_value(headers: object, name: str) -> str:
         except (LookupError, TypeError, ValueError):
             return ""
     return ""
+
+
+def _is_binary_content_type(content_type: str) -> bool:
+    value = content_type.lower().split(";", 1)[0].strip()
+    return (value.startswith(("image/", "audio/", "video/")) and value != "image/svg+xml") or value in {
+        "application/octet-stream",
+        "application/pdf",
+        "application/zip",
+        "application/gzip",
+        "application/x-7z-compressed",
+        "application/x-rar-compressed",
+        "application/vnd.rar",
+    }
 
 
 def _has_set_cookie(response: Response) -> bool:
@@ -551,6 +602,142 @@ def _decode_body(body: str | bytes, headers: object) -> str:
         return body.decode(charset or "utf-8", errors="replace")
     except (LookupError, UnicodeError):
         return body.decode("utf-8", errors="replace")
+
+
+def _redact_error_text(value: str) -> str:
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, (dict, list)):
+        def redact_json(item: object) -> object:
+            if isinstance(item, dict):
+                return {
+                    key: "<redacted>" if _SENSITIVE_FIELD.search(str(key)) else redact_json(child)
+                    for key, child in item.items()
+                }
+            if isinstance(item, list):
+                return [redact_json(child) for child in item]
+            return item
+
+        value = json.dumps(redact_json(parsed), ensure_ascii=False, separators=(",", ":"))
+    value = re.sub(
+        rf"(?i)((?:{_SENSITIVE_FIELD.pattern})\s*[=:]\s*)([^&\s,;<>\"']+)",
+        r"\1<redacted>",
+        value,
+    )
+    return _safe_terminal_text(value)[:_MAX_ERROR_BODY]
+
+
+def _cookie_key(cookie) -> tuple[object, ...]:
+    return (cookie.domain, cookie.path, cookie.name)
+
+
+def _cookie_value(cookie) -> tuple[object, ...]:
+    return (cookie.domain, cookie.path, cookie.name, cookie.value, cookie.expires, cookie.secure, cookie.discard)
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path):
+    lock_path = path.with_name(f".{path.name}.lock")
+    descriptor = None
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        if descriptor is not None:
+            if fcntl is not None:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+            os.close(descriptor)
+
+
+def _stream_private_response(
+    response,
+    path: Path,
+    *,
+    gzip_encoded: bool = False,
+    defer_commit: bool = False,
+) -> tuple[bytes, str | None]:
+    temporary: str | None = None
+    descriptor = None
+    gzip_decoder = zlib.decompressobj(16 + zlib.MAX_WBITS) if gzip_encoded else None
+    preview = bytearray()
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise OSError(f"{path} 不是普通文件或是符号链接")
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            while True:
+                try:
+                    chunk = response.read(_RESPONSE_CHUNK_SIZE)
+                except TypeError:
+                    chunk = response.read()
+                if not chunk:
+                    break
+                if isinstance(chunk, str):
+                    chunk = chunk.encode("utf-8")
+                decoded = gzip_decoder.decompress(chunk) if gzip_decoder is not None else chunk
+                stream.write(decoded)
+                if len(preview) < _MAX_ERROR_BODY:
+                    preview.extend(decoded[: _MAX_ERROR_BODY - len(preview)])
+            if gzip_encoded:
+                decoded = gzip_decoder.flush()
+                stream.write(decoded)
+                if len(preview) < _MAX_ERROR_BODY:
+                    preview.extend(decoded[: _MAX_ERROR_BODY - len(preview)])
+        os.chmod(temporary, 0o600)
+        temporary_path = temporary
+        if not defer_commit:
+            os.replace(temporary, path)
+            temporary_path = None
+        else:
+            temporary = None
+        return bytes(preview), temporary_path
+    except (OSError, RuntimeError, TypeError, ValueError, zlib.error) as exc:
+        raise CsustError(f"无法保存下载文件 {path}: {exc}", code="output_write_failed") from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def _discard_stream(response: Response) -> None:
+    temporary = getattr(response, "stream_temp_path", None)
+    if not temporary:
+        return
+    try:
+        os.unlink(temporary)
+    except OSError:
+        pass
+    response.stream_temp_path = None
+
+
+def _commit_stream(response: Response, *, code: str = "file_write_failed", label: str = "下载文件") -> None:
+    temporary = getattr(response, "stream_temp_path", None)
+    if not temporary:
+        return
+    target = Path(response.stream_path or "")
+    try:
+        if not response.stream_path or target.is_symlink() or (target.exists() and not target.is_file()):
+            raise OSError(f"{target} 不是普通文件或是符号链接")
+        os.replace(temporary, target)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise CsustError(f"无法保存{label} {target}: {exc}", code=code) from exc
+    response.stream_temp_path = None
 
 
 class Client:
@@ -594,9 +781,22 @@ class Client:
             if parsed_base.scheme.lower() == "http" and parsed_base.hostname
             else frozenset()
         )
-        self.opener = build_opener(_SafeRedirectHandler(allowed_downgrade_hosts), HTTPCookieProcessor(self.cookies))
+        self._allowed_downgrade_hosts = allowed_downgrade_hosts
+        self._redirect_origins: set[tuple[str, str, int | None]] | None = {_url_origin(self.base_url)}
+        self.opener = self._build_opener()
         self._insecure_warning_shown = False
         self._saved_cookie_state = self._cookie_state()
+        self._initial_cookie_snapshot = { _cookie_key(cookie): _cookie_value(cookie) for cookie in self.cookies }
+
+    def _build_opener(self):
+        return build_opener(
+            _SafeRedirectHandler(self._allowed_downgrade_hosts, self._redirect_origins),
+            HTTPCookieProcessor(self.cookies),
+        )
+
+    def set_redirect_origins(self, origins: set[tuple[str, str, int | None]] | None) -> None:
+        self._redirect_origins = None if origins is None else set(origins)
+        self.opener = self._build_opener()
 
     def url(self, path: str) -> str:
         if not isinstance(path, str) or _has_url_control(path):
@@ -623,6 +823,9 @@ class Client:
         headers: dict[str, str] | None = None,
         binary: bool = False,
         with_metadata: bool = False,
+        stream_to: Path | str | None = None,
+        defer_stream_commit: bool = False,
+        allowed_redirect_origins: set[tuple[str, str, int | None]] | frozenset[tuple[str, str, int | None]] | None = None,
     ) -> Response | bytes:
         target = self.url(path)
         if _parse_http_url(target) is None:
@@ -656,22 +859,59 @@ class Client:
             request = Request(target, data=encoded, headers=request_headers, method=method)
         except (TypeError, ValueError) as exc:
             raise CsustError("请求地址格式无效", code="invalid_path") from exc
+        opener = self.opener
+        if allowed_redirect_origins is not None:
+            opener = build_opener(
+                _SafeRedirectHandler(self._allowed_downgrade_hosts, allowed_redirect_origins),
+                HTTPCookieProcessor(self.cookies),
+            )
         try:
-            with self.opener.open(request, timeout=30) as response:
-                content = response.read()
+            with opener.open(request, timeout=30) as response:
+                content_type = _header_value(response.headers, "Content-Type")
+                if stream_to is not None and binary and (not content_type or _is_binary_content_type(content_type)):
+                    output_path = Path(stream_to).expanduser()
+                    preview, temporary_path = _stream_private_response(
+                        response,
+                        output_path,
+                        gzip_encoded=_header_value(response.headers, "Content-Encoding").lower().split(";", 1)[0].strip() == "gzip",
+                        defer_commit=defer_stream_commit and with_metadata,
+                    )
+                    if with_metadata:
+                        return Response(response.geturl(), response.status, response.headers, preview, str(output_path), temporary_path)
+                    return b""
+                chunks: list[bytes] = []
+                while True:
+                    try:
+                        chunk = response.read(_RESPONSE_CHUNK_SIZE)
+                    except TypeError:
+                        chunk = response.read()
+                    if not chunk:
+                        break
+                    chunks.append(chunk if isinstance(chunk, bytes) else str(chunk).encode("utf-8"))
+                content = b"".join(chunks)
                 if _header_value(response.headers, "Content-Encoding").lower().split(";", 1)[0].strip() == "gzip":
                     try:
                         content = gzip.decompress(content)
                     except OSError:
                         pass
+                if not binary and _is_binary_content_type(_header_value(response.headers, "Content-Type")):
+                    raise CsustError(
+                        "响应是二进制内容；请使用 --output 保存文件",
+                        code="binary_output_required",
+                        details={"content_type": _header_value(response.headers, "Content-Type")},
+                    )
                 if binary and not with_metadata:
                     return content
                 if binary:
                     return Response(response.geturl(), response.status, response.headers, content)
                 return Response(response.geturl(), response.status, response.headers, _decode_body(content, response.headers))
         except HTTPError as exc:
+            error_body = b""
             try:
-                exc.read()
+                try:
+                    error_body = exc.read(_MAX_ERROR_BODY)
+                except TypeError:
+                    error_body = exc.read()
             except Exception:
                 pass
             finally:
@@ -679,7 +919,21 @@ class Client:
                     exc.close()
                 except Exception:
                     pass
-            raise HttpError(exc.code, str(exc.reason)) from exc
+            details: dict[str, object] = {}
+            if error_body:
+                details["body"] = _redact_error_text(_decode_body(error_body, exc.headers))
+            content_type = _header_value(exc.headers, "Content-Type")
+            if content_type:
+                details["content_type"] = content_type
+            location = _header_value(exc.headers, "Location")
+            if location:
+                details["location"] = _safe_url(location, getattr(exc, "url", ""))
+            try:
+                if self._cookie_state() != self._saved_cookie_state:
+                    self.save()
+            except CsustError as save_error:
+                details["cookie_save_error"] = save_error.code
+            raise HttpError(exc.code, str(exc.reason), details=details) from exc
         except (URLError, TimeoutError, OSError, HTTPException) as exc:
             reason = getattr(exc, "reason", None) or str(exc)
             raise NetworkError(f"无法连接教务系统: {reason}") from exc
@@ -711,17 +965,36 @@ class Client:
             self.cookie_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if self.cookie_file.is_symlink() or (self.cookie_file.exists() and not self.cookie_file.is_file()):
                 raise OSError("会话文件必须是普通文件且不能是符号链接")
-            descriptor, temporary = tempfile.mkstemp(prefix=f".{self.cookie_file.name}.", dir=self.cookie_file.parent)
-            os.close(descriptor)
-            persistent = MozillaCookieJar(temporary)
-            host = (urlparse(self.base_url).hostname or "").rstrip(".").lower()
-            for cookie in self.cookies:
-                if _cookie_domain_matches_host(cookie.domain, host):
-                    persistent.set_cookie(cookie)
-            persistent.save(temporary, ignore_discard=True, ignore_expires=True)
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, self.cookie_file)
-            self._saved_cookie_state = self._cookie_state()
+            with _file_lock(self.cookie_file):
+                descriptor, temporary = tempfile.mkstemp(prefix=f".{self.cookie_file.name}.", dir=self.cookie_file.parent)
+                os.close(descriptor)
+                descriptor = None
+                persistent = MozillaCookieJar(temporary)
+                latest = MozillaCookieJar(str(self.cookie_file))
+                if self.cookie_file.exists():
+                    try:
+                        latest.load(ignore_discard=True, ignore_expires=True)
+                    except (OSError, ValueError):
+                        latest = MozillaCookieJar(str(self.cookie_file))
+                host = (urlparse(self.base_url).hostname or "").rstrip(".").lower()
+                current = {_cookie_key(cookie): cookie for cookie in self.cookies}
+                current_values = {_cookie_key(cookie): _cookie_value(cookie) for cookie in self.cookies}
+                latest_map = {_cookie_key(cookie): cookie for cookie in latest}
+                initial = self._initial_cookie_snapshot
+                for key, cookie in latest_map.items():
+                    if not _cookie_domain_matches_host(key[0], host):
+                        persistent.set_cookie(cookie)
+                        continue
+                    if current_values.get(key) == initial.get(key):
+                        persistent.set_cookie(cookie)
+                for key, cookie in current.items():
+                    if _cookie_domain_matches_host(key[0], host) and current_values.get(key) != initial.get(key):
+                        persistent.set_cookie(cookie)
+                persistent.save(temporary, ignore_discard=True, ignore_expires=True)
+                os.chmod(temporary, 0o600)
+                os.replace(temporary, self.cookie_file)
+                self._saved_cookie_state = self._cookie_state()
+                self._initial_cookie_snapshot = current_values
         except (OSError, ValueError) as exc:
             raise CsustError(f"无法保存会话文件 {self.cookie_file}: {exc}", code="cookie_write_failed") from exc
         finally:
@@ -745,7 +1018,7 @@ def same_origin_url(client: Client, path: str) -> str:
     target = client.url(path)
     target_parts = _parse_http_url(target)
     base_parts = _parse_http_url(client.base_url)
-    if target_parts is None or base_parts is None or target_parts[1] != base_parts[1]:
+    if target_parts is None or base_parts is None or not _same_origin_or_upgrade(base_parts[1], target_parts[1]):
         raise CsustError("只允许访问当前教务系统地址", code="invalid_path")
     return target
 
@@ -771,9 +1044,9 @@ def _append_query(url: str, params: list[tuple[str, str]]) -> str:
 
 
 _REDACTED_URL = "%3Credacted%3E"
-_URL_SENSITIVE = re.compile(r"pass|password|token|secret|sign|randomcode|ticket|encoded|cookie|session|jsessionid|csrf|nonce", re.I)
+_URL_SENSITIVE = re.compile(r"pass|password|token|secret|sign|randomcode|ticket|encoded|cookie|session|jsessionid|csrf|nonce|execution|flowexecutionkey", re.I)
 _SENSITIVE_FIELD = re.compile(
-    r"password|passwd|cookie|session|captcha|randomcode|encoded|token|secret|ticket|sign|yztoken|csrf|nonce",
+    r"password|passwd|cookie|session|captcha|randomcode|encoded|token|secret|ticket|sign|yztoken|csrf|nonce|execution|flowexecutionkey|state|lt",
     re.I,
 )
 _FAILURE_SIGNAL = re.compile(r"(?:未(?:能)?|不|无法|没有)(?:成功|完成)|失败|错误|不能|不允许|无权限|未登录|不存在")
@@ -992,6 +1265,17 @@ def _dotenv_values() -> dict[str, str]:
             return {}
     except (OSError, RuntimeError, ValueError):
         return {}
+    try:
+        owner = getattr(os, "getuid", lambda: -1)()
+        file_stat = path.stat()
+        insecure = owner >= 0 and (file_stat.st_uid != owner or file_stat.st_mode & 0o077)
+    except OSError:
+        insecure = False
+    if insecure:
+        if os.environ.get("CSUST_ALLOW_INSECURE_ENV", "").strip().lower() not in {"1", "true", "yes"}:
+            print(f"警告：拒绝读取权限过宽的凭据文件 {path}，请设置为 600；如需兼容可显式设置 CSUST_ALLOW_INSECURE_ENV=1。", file=sys.stderr)
+            return {}
+        print(f"警告：已启用 CSUST_ALLOW_INSECURE_ENV，读取权限过宽的凭据文件 {path}。", file=sys.stderr)
     values: dict[str, str] = {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1009,11 +1293,15 @@ def _dotenv_values() -> dict[str, str]:
         name = name.strip()
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             continue
-        try:
-            parts = shlex.split(raw, comments=False, posix=True)
-        except ValueError:
-            continue
-        values[name] = parts[0] if parts else ""
+        raw = raw.strip()
+        if raw[:1] in {"'", '"'}:
+            try:
+                parts = shlex.split(raw, comments=False, posix=True)
+            except ValueError:
+                continue
+            values[name] = parts[0] if parts else ""
+        else:
+            values[name] = re.split(r"\s+#", raw, maxsplit=1)[0].rstrip()
     return values
 
 
@@ -1044,8 +1332,13 @@ def solve_captcha(image: bytes) -> str:
 
 
 def _credentials(username: str | None = None) -> tuple[str, str]:
-    account = username or env_value("CSUST_USERNAME", env_value("username")).strip()
-    password = env_value("CSUST_PASSWORD", env_value("password"))
+    need_dotenv = (
+        (not username and "CSUST_USERNAME" not in os.environ and "username" not in os.environ)
+        or ("CSUST_PASSWORD" not in os.environ and "password" not in os.environ)
+    )
+    dotenv = _dotenv_values() if need_dotenv else {}
+    account = username or os.environ.get("CSUST_USERNAME", dotenv.get("CSUST_USERNAME", os.environ.get("username", dotenv.get("username", "")))).strip()
+    password = os.environ.get("CSUST_PASSWORD", dotenv.get("CSUST_PASSWORD", os.environ.get("password", dotenv.get("password", ""))))
     missing: list[str] = []
     if not account:
         missing.append("CSUST_USERNAME")
@@ -1074,7 +1367,7 @@ def _encrypt_cas_password(password: str, salt: str) -> str:
         return password
     key = salt.encode("utf-8")
     if len(key) not in {16, 24, 32}:
-        return password
+        raise CsustError("统一认证登录参数中的加密盐长度无效", code="login_protocol_error")
     try:
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.primitives.padding import PKCS7
@@ -1096,9 +1389,15 @@ def _authserver_login_url(service: str) -> str:
     return _authserver_url(f"{AUTHSERVER_LOGIN_PATH}?{urlencode({'service': service})}")
 
 
-def _authserver_need_captcha(client: Client, account: str) -> bool:
+def _authserver_need_captcha(
+    client: Client,
+    account: str,
+    allowed_redirect_origins: set[tuple[str, str, int | None]] | None = None,
+) -> bool:
     query = urlencode({"username": account, "_": str(int(time.time() * 1000))})
-    response = client.get(_authserver_url(f"{AUTHSERVER_CAPTCHA_CHECK_PATH}?{query}"))
+    path = _authserver_url(f"{AUTHSERVER_CAPTCHA_CHECK_PATH}?{query}")
+    options = {"allowed_redirect_origins": allowed_redirect_origins} if allowed_redirect_origins is not None and isinstance(client, Client) else {}
+    response = client.get(path, **options)
     try:
         value = json.loads(_decode_body(response.body, response.headers))
     except (TypeError, ValueError):
@@ -1142,16 +1441,22 @@ def _authserver_form(response: Response, account: str, password: str, service: s
         (
             ("username", account),
             ("password", _encrypt_cas_password(password, salt)),
-            ("captcha", ""),
             ("_eventId", "submit"),
             ("cllt", "userNameLogin"),
             ("dllt", "generalLogin"),
             ("lt", ""),
         )
     )
-    action = urljoin(response.url, form.attr("action") or response.url)
-    if _url_origin(action) != _url_origin(response.url):
+    try:
+        auth_origin = _url_origin(AUTHSERVER_BASE_URL)
+        response_origin = _url_origin(response.url)
+        action = urljoin(response.url, form.attr("action") or response.url)
+        action_parts = _parse_http_url(action)
+    except (TypeError, ValueError) as exc:
+        raise CsustError("统一认证表单地址格式无效", code="invalid_path") from exc
+    if response_origin != auth_origin or action_parts is None or action_parts[1] != auth_origin:
         raise CsustError("统一认证表单地址不是认证服务器", code="invalid_path")
+    action = action_parts[0].geturl()
     action_parts = urlparse(action)
     action_query = parse_qsl(action_parts.query, keep_blank_values=True)
     if not any(key == "service" for key, _value in action_query):
@@ -1168,17 +1473,47 @@ def _authserver_form(response: Response, account: str, password: str, service: s
     return action, fields
 
 
-def _fetch_authserver_captcha(client: Client, path: str | None = None) -> tuple[Path, bytes]:
+def _fetch_authserver_captcha(
+    client: Client,
+    path: str | None = None,
+    allowed_redirect_origins: set[tuple[str, str, int | None]] | None = None,
+) -> tuple[Path, bytes]:
     try:
         output = Path(path).expanduser() if path else client.cookie_file.parent / "authserver-captcha.png"
     except (OSError, RuntimeError, ValueError) as exc:
         raise CsustError("验证码图片路径无效", code="captcha_write_failed") from exc
-    content = client.request(_authserver_url(AUTHSERVER_CAPTCHA_PATH), binary=True)
+    options: dict[str, object] = {"binary": True}
+    if allowed_redirect_origins is not None and isinstance(client, Client):
+        options["allowed_redirect_origins"] = allowed_redirect_origins
+    content = client.request(_authserver_url(AUTHSERVER_CAPTCHA_PATH), **options)
     assert isinstance(content, bytes)
     if not content:
         raise CaptchaError("统一认证返回了空验证码", details={"captcha_image": str(output)})
     _write_private_file(output, content, code="captcha_write_failed", label="验证码图片")
     return output, content
+
+
+def _login_request(client: Client, method: str, path: str, origins: set[tuple[str, str, int | None]], **kwargs):
+    if isinstance(client, Client):
+        kwargs["allowed_redirect_origins"] = origins
+    return client.get(path, **kwargs) if method == "GET" else client.post(path, kwargs.pop("data"), **kwargs)
+
+
+def _valid_login_probe(response: Response) -> bool:
+    body = _decode_body(response.body, response.headers)
+    if response.status >= 400 or not body.strip() or is_login_page(response):
+        return False
+    content_type = _header_value(response.headers, "Content-Type").lower()
+    if "json" in content_type or body.lstrip().startswith(("{", "[")):
+        try:
+            parsed = json.loads(body)
+        except (TypeError, ValueError):
+            return False
+        return business_state(parsed) is not False and business_state(parsed) is not None
+    if "html" in content_type or body.lstrip().startswith("<"):
+        visible = parse_html(body).text(include_scripts=False).strip()
+        return bool(visible) and business_state(visible) is not False
+    return bool(body.strip()) and business_state(body) is not False
 
 
 def _login_sso(
@@ -1191,9 +1526,10 @@ def _login_sso(
     ocr: Callable[[bytes], str] | None = None,
     max_attempts: int = CAPTCHA_RETRIES,
 ) -> dict[str, object]:
-    service = EDUCATION_SSO_SERVICE if (urlparse(client.base_url).hostname or "").lower() == "xk.csust.edu.cn" else client.url(EDUCATION_SSO_PATH)
+    service = client.url(EDUCATION_SSO_PATH)
+    redirect_origins = {_url_origin(AUTHSERVER_BASE_URL), _url_origin(client.base_url)}
     try:
-        client.get(EDUCATION_SSO_PATH)
+        _login_request(client, "GET", EDUCATION_SSO_PATH, redirect_origins)
     except NetworkError:
         # The SSO handoff remains useful when the legacy landing page is flaky.
         pass
@@ -1202,11 +1538,11 @@ def _login_sso(
     recognizer = ocr or solve_captcha
     last_path: Path | None = None
     for attempt in range(1, attempts + 1):
-        form_response = client.get(_authserver_login_url(service))
+        form_response = _login_request(client, "GET", _authserver_login_url(service), redirect_origins)
         action, fields = _authserver_form(form_response, account, password, service)
         captcha = override
-        if _authserver_need_captcha(client, account):
-            path, image = _fetch_authserver_captcha(client, captcha_image)
+        if _authserver_need_captcha(client, account, redirect_origins):
+            path, image = _fetch_authserver_captcha(client, captcha_image, redirect_origins)
             last_path = path
             if not captcha:
                 try:
@@ -1217,6 +1553,8 @@ def _login_sso(
                     if attempt >= attempts:
                         raise CaptchaError(str(exc), details=details) from exc
                     continue
+                except (OcrUnavailable, CsustError):
+                    raise
                 except Exception as exc:
                     if attempt >= attempts:
                         raise CaptchaError("OCR 识别失败", details={"captcha_image": str(path), "attempts": attempt}) from exc
@@ -1225,7 +1563,7 @@ def _login_sso(
                         continue
                     raise CaptchaError("OCR 未识别出验证码", details={"captcha_image": str(path), "attempts": attempt})
         fields.append(("captcha", captcha or ""))
-        response = client.post(action, fields, headers={"Referer": form_response.url})
+        response = _login_request(client, "POST", action, redirect_origins, data=fields, headers={"Referer": form_response.url})
         body = _decode_body(response.body, response.headers)
         failure = _login_failure(body)
         if failure is not None and not isinstance(failure, CaptchaError):
@@ -1241,8 +1579,8 @@ def _login_sso(
             if attempt < attempts and not override:
                 continue
             raise AuthenticationFailed("统一认证登录失败，未建立有效会话", details={"attempts": attempt})
-        probe = client.get(LOGIN_PROBE_PATH)
-        if is_login_page(probe):
+        probe = _login_request(client, "GET", LOGIN_PROBE_PATH, redirect_origins)
+        if not _valid_login_probe(probe):
             if attempt < attempts and not override:
                 continue
             raise AuthenticationFailed("统一认证回跳成功，但教务系统未建立有效会话", details={"attempts": attempt})
@@ -1307,6 +1645,8 @@ def login(
             if attempt >= attempts:
                 raise CaptchaError(str(exc), details=details) from exc
             continue
+        except (OcrUnavailable, CsustError):
+            raise
         except Exception as exc:
             if attempt >= attempts:
                 raise CaptchaError("OCR 识别失败", details={"captcha_image": str(path), "attempts": attempt}) from exc
@@ -1336,7 +1676,7 @@ def login(
             details = {"captcha_image": str(path), "attempts": attempt}
             raise type(failure)(str(failure), details=details) from failure
         probe = client.get(LOGIN_PROBE_PATH)
-        if is_login_page(probe):
+        if not _valid_login_probe(probe):
             if attempt < attempts and not override:
                 continue
             raise AuthenticationFailed("登录失败，教务系统未建立有效会话", details={"captcha_image": str(path), "attempts": attempt})
@@ -1359,7 +1699,9 @@ def ensure_session(client: Client, *, ocr: Callable[[bytes], str] | None = None)
         return
     try:
         response = client.get(LOGIN_PROBE_PATH)
-        require_logged_in(response)
+        if not _valid_login_probe(response):
+            login(client=client, ocr=ocr)
+            return
         _save_cookie_refresh(client, response)
         return
     except LoginRequired:
@@ -1369,3 +1711,26 @@ def ensure_session(client: Client, *, ocr: Callable[[bytes], str] | None = None)
         if exc.status != 401:
             raise
         login(client=client, ocr=ocr)
+
+
+def request_with_session_retry(client: Client, method: str, path: str, *, retry: bool = True, **kwargs: object) -> Response:
+    """Retry one read-only request after a session-race 401."""
+    method = method.upper()
+
+    def call() -> Response:
+        if method == "GET":
+            response = client.get(path, **kwargs)
+        else:
+            options = dict(kwargs)
+            data = options.pop("data", None)
+            response = client.post(path, data or [], **options)
+        assert isinstance(response, Response)
+        return response
+
+    try:
+        return call()
+    except HttpError as exc:
+        if not retry or exc.status != 401:
+            raise
+        ensure_session(client)
+        return request_with_session_retry(client, method, path, retry=False, **kwargs)
