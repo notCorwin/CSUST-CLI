@@ -1,0 +1,534 @@
+"""Generic access to public and authenticated CSUST subdomains."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from collections import deque
+from pathlib import Path
+from urllib.parse import unquote, urlparse, urlunsplit
+
+from ..core import (
+    AUTHSERVER_BASE_URL,
+    Client,
+    CsustError,
+    HttpError,
+    NetworkError,
+    Response,
+    _append_query,
+    _decode_body,
+    _same_origin_or_upgrade,
+    _safe_url,
+    _safe_urljoin,
+    _save_cookie_refresh,
+    _url_origin,
+    login_sso_service,
+)
+from .web import (
+    READ_ONLY_METHODS,
+    SUPPORTED_METHODS,
+    _download_result,
+    _feedback,
+    _is_side_effect_get,
+    _page_payload,
+    _pairs,
+    _parse_upload_files,
+    _request,
+    _retry_read,
+    _run_action_common,
+    _run_form,
+    _supported_method,
+    inspect_page,
+)
+
+
+_BODY_UNSET = object()
+
+
+CSUST_ROOT_DOMAIN = "csust.edu.cn"
+SITE_COOKIE_DIR = Path.home() / ".config" / "csust-cli" / "sites"
+
+# This is a useful starting map, not a hard limit. `site discover` is the
+# live source of truth and the generic commands accept newly added subdomains.
+SITE_CATALOG = (
+    ("www.csust.edu.cn", "学校主页", "https://www.csust.edu.cn/"),
+    ("ehall.csust.edu.cn", "统一门户", "https://ehall.csust.edu.cn/"),
+    ("authserver.csust.edu.cn", "统一身份认证", "https://authserver.csust.edu.cn/authserver/login"),
+    ("xk.csust.edu.cn", "教务系统", "http://xk.csust.edu.cn/"),
+    ("vpn.csust.edu.cn", "VPN 门户", "https://vpn.csust.edu.cn/enclient/start.html"),
+    ("fuwu.csust.edu.cn", "教育阳光服务网", "https://fuwu.csust.edu.cn/"),
+    ("gis.csust.edu.cn", "校园地图", "https://gis.csust.edu.cn/"),
+    ("mail.csust.edu.cn", "校园邮箱", "https://mail.csust.edu.cn/"),
+    ("lib.csust.edu.cn", "图书馆", "https://lib.csust.edu.cn/"),
+    ("tsgvpn2.csust.edu.cn", "图书馆远程访问", "https://tsgvpn2.csust.edu.cn/"),
+    ("rczpw.csust.edu.cn", "人才招聘", "https://rczpw.csust.edu.cn/zp.html"),
+    ("jxjy.csust.edu.cn", "继续教育", "https://jxjy.csust.edu.cn/"),
+    ("zyjx.csust.edu.cn", "专业技术人员继续教育", "https://zyjx.csust.edu.cn/"),
+    ("cslgdygx.csust.edu.cn", "校友服务", "https://cslgdygx.csust.edu.cn/"),
+    ("highwayexperiment.csust.edu.cn", "公路工程实验中心", "https://highwayexperiment.csust.edu.cn/"),
+    ("cslgqk.csust.edu.cn", "期刊社", "https://cslgqk.csust.edu.cn/"),
+    ("cslgxbsk.csust.edu.cn", "学报社科版", "https://cslgxbsk.csust.edu.cn/"),
+    ("cslgxbzk.csust.edu.cn", "学报自然科学版", "https://cslgxbzk.csust.edu.cn/"),
+    ("syjx.csust.edu.cn", "实验教学与仪器", "https://syjx.csust.edu.cn/"),
+    ("zwgl.csust.edu.cn", "中外公路", "https://zwgl.csust.edu.cn/"),
+    ("zwgl1980.csust.edu.cn", "中外公路旧入口", "https://zwgl1980.csust.edu.cn/"),
+)
+
+
+def _official_host(host: str) -> bool:
+    value = host.rstrip(".").lower()
+    return value == CSUST_ROOT_DOMAIN or value.endswith("." + CSUST_ROOT_DOMAIN)
+
+
+def _normalize_url(value: str, *, base_url: str | None = None) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CsustError("site URL 不能为空", code="invalid_path")
+    candidate = value.strip()
+    if not candidate.lower().startswith(("http://", "https://")):
+        if base_url is None:
+            candidate = "https://" + candidate
+        else:
+            candidate = base_url.rstrip("/") + "/" + candidate.lstrip("/")
+    try:
+        parsed = urlparse(candidate)
+        parsed.port
+        host = (parsed.hostname or "").rstrip(".").lower()
+        decoded_path = unquote(unquote(parsed.path))
+    except (TypeError, UnicodeError, ValueError) as exc:
+        raise CsustError("site URL 格式无效", code="invalid_path") from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or not host
+        or not _official_host(host)
+        or parsed.username is not None
+        or parsed.password is not None
+        or "\\" in decoded_path
+        or any(part in {".", ".."} for part in decoded_path.split("/"))
+    ):
+        raise CsustError("site 只允许访问 csust.edu.cn 及其子域名", code="invalid_path")
+    target = parsed._replace(fragment="").geturl()
+    if base_url is not None:
+        if not _same_origin_or_upgrade(_url_origin(base_url), _url_origin(target)):
+            raise CsustError("site 操作必须保持当前子域名", code="invalid_path")
+    return target
+
+
+def _cookie_path(url: str) -> Path:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "site").lower().replace(".", "_")
+    if parsed.port:
+        host += f"_{parsed.port}"
+    return SITE_COOKIE_DIR / f"{host}.cookies.txt"
+
+
+class SiteClient(Client):
+    """A same-origin client whose base can be any official CSUST host."""
+
+    allow_anonymous_pages = True
+
+    def __init__(self, url: str, cookie_file: Path | None = None, *, load_cookies: bool = True) -> None:
+        normalized = _normalize_url(url)
+        parsed = urlparse(normalized)
+        base = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+        super().__init__(base, cookie_file or _cookie_path(base), load_cookies=load_cookies)
+        self.set_redirect_origins({_url_origin(self.base_url), _url_origin(AUTHSERVER_BASE_URL)})
+
+    def web_url(self, value: str) -> str:
+        return _normalize_url(self.url(value), base_url=self.base_url)
+
+    def ensure_web_session(self) -> None:
+        # Generic services do not share a reliable probe path. Saved cookies
+        # are used as-is; `site login` is the explicit recovery operation.
+        return
+
+
+def _client(args: argparse.Namespace, url: str, *, load_cookies: bool = True) -> SiteClient:
+    cookie_file = getattr(args, "cookie_file", None)
+    try:
+        path = Path(cookie_file).expanduser() if cookie_file else None
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise CsustError("site 会话文件路径无效", code="cookie_read_failed") from exc
+    return SiteClient(url, path, load_cookies=load_cookies)
+
+
+def _target(client: SiteClient, value: str, params: list[tuple[str, str]] = ()) -> str:
+    target = client.web_url(value)
+    return _append_query(target, params)
+
+
+def _json_argument(value: str | None) -> object:
+    if value is None:
+        raise CsustError("缺少 JSON 请求体", code="invalid_argument")
+    source = value
+    if value == "-":
+        source = sys.stdin.read()
+    elif value.startswith("@"):
+        try:
+            source = Path(value[1:]).expanduser().read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise CsustError(f"无法读取 JSON 请求体：{exc}", code="invalid_argument") from exc
+    try:
+        return json.loads(source)
+    except (TypeError, ValueError) as exc:
+        raise CsustError("--data-json 必须是有效 JSON，或使用 @FILE/−", code="invalid_argument") from exc
+
+
+def _headers(values: list[str]) -> dict[str, str]:
+    pairs = _pairs(values, "--header")
+    return {name: value for name, value in pairs}
+
+
+def run_catalog(_args: argparse.Namespace, _client: Client | None = None) -> dict[str, object]:
+    return {
+        "source": "https://www.csust.edu.cn/",
+        "catalog": [{"host": host, "name": name, "url": url} for host, name, url in SITE_CATALOG],
+        "domain": CSUST_ROOT_DOMAIN,
+        "note": "清单是已观察到的入口；site discover 才是实时发现，site 命令接受新子域名。",
+    }
+
+
+def run_get(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
+    client = client or _client(args, args.url)
+    target = _target(client, args.url, _pairs(args.param, "--param"))
+    response, saved = _request(
+        client,
+        "GET",
+        target,
+        output=args.output,
+        require_session=args.require_login,
+    )
+    if saved:
+        return {**saved, "site": client.base_url}
+    return {
+        "ok": True,
+        "submitted": False,
+        "confirmed": True,
+        "site": client.base_url,
+        "response": _page_payload(response),
+    }
+
+
+def run_request(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
+    method = _supported_method(args.method)
+    body = _json_argument(args.data_json) if args.data_json is not None else _BODY_UNSET
+    data = _pairs(args.data, "--data")
+    files = _parse_upload_files(args.file)
+    if body is not _BODY_UNSET and (data or files):
+        raise CsustError("--data-json 不能与 --data/--file 同时使用", code="invalid_argument")
+    if method in READ_ONLY_METHODS and (body is not _BODY_UNSET or files or data):
+        raise CsustError("GET/HEAD/OPTIONS 请使用 --param", code="invalid_argument")
+    client = client or _client(args, args.url)
+    target = _target(client, args.url, _pairs(args.param, "--param"))
+    mutating = method not in READ_ONLY_METHODS or _is_side_effect_get(target)
+    if mutating and not args.yes:
+        raise CsustError("site 请求可能修改远端数据，请加 --yes", code="confirmation_required")
+    request = {
+        "method": method,
+        "url": _safe_url(target),
+        "fields": [name for name, _ in data],
+        "json": body is not _BODY_UNSET,
+    }
+    request_options: dict[str, object] = {
+        "headers": _headers(args.header),
+    }
+    if body is not _BODY_UNSET:
+        request_options["json_body"] = body
+    response, saved = _request(
+        client,
+        method,
+        target,
+        data or None,
+        output=args.output,
+        require_session=args.require_login,
+        multipart=files or None,
+        mutating=mutating,
+        **request_options,
+    )
+    if mutating:
+        if saved:
+            return {**_download_result(response, {**saved, "request": request}, True), "site": client.base_url}
+        return {**_mutation_response(response, request), "site": client.base_url}
+    if saved:
+        return {**saved, "request": request, "site": client.base_url}
+    return {
+        "ok": True,
+        "submitted": False,
+        "confirmed": True,
+        "request": request,
+        "site": client.base_url,
+        "response": _page_payload(response),
+    }
+
+
+def _mutation_response(response: Response, request: dict[str, object]) -> dict[str, object]:
+    from ..core import result_status
+
+    payload = _page_payload(response)
+    return {**result_status(_feedback(response), mutating=True, details={"request": request}), "request": request, "response": payload}
+
+
+def run_form(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
+    client = client or _client(args, args.url)
+    return _run_form(args, client, args.url)
+
+
+def run_action(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
+    client = client or _client(args, args.url)
+    return _run_action_common(args, client, args.url)
+
+
+def _script_endpoints(source: str, page_url: str) -> list[str]:
+    endpoints: set[str] = set()
+    # ponytail: regex extraction covers route-like literals; add a JS parser only if a real page needs it.
+    for value in re.findall(r"[\"']([^\"'\s<>]+)[\"']", source):
+        if not value.startswith(("/", "http://", "https://")):
+            continue
+        target = _safe_urljoin(page_url, value)
+        try:
+            parsed = urlparse(target)
+        except ValueError:
+            continue
+        if not _official_host(parsed.hostname or ""):
+            continue
+        if value.startswith(("/api/", "/ajax/", "/rest/", "/service/", "/graphql", "/oauth/", "/auth/", "/v1/", "/v2/")) or re.search(
+            r"\.(?:do|action|json|jsp|php)(?:[?#]|$)", parsed.path, re.I
+        ):
+            endpoints.add(_safe_url(target))
+    return sorted(endpoint for endpoint in endpoints if endpoint)
+
+
+def run_scripts(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
+    if args.max_scripts < 1 or args.max_scripts > 100:
+        raise CsustError("--max-scripts 必须在 1 到 100 之间", code="invalid_argument")
+    client = client or _client(args, args.url)
+    root = _target(client, args.url)
+    page_response = _retry_read("GET", root, lambda: client.get(root))
+    _save_cookie_refresh(client, page_response)
+    page = inspect_page(_decode_body(page_response.body, page_response.headers), page_response.url)
+    script_sources = page.get("scripts", {}).get("src", []) if isinstance(page.get("scripts"), dict) else []
+    scripts: list[dict[str, object]] = []
+    endpoints: set[str] = set()
+    for source in list(script_sources)[: args.max_scripts]:
+        source_url = str(source or "")
+        try:
+            target = _normalize_url(_safe_urljoin(page_response.url, source_url), base_url=client.base_url)
+        except CsustError:
+            scripts.append({"url": _safe_url(source_url, page_response.url), "skipped": True, "reason": "external"})
+            continue
+        try:
+            response = _retry_read("GET", target, lambda: client.get(target))
+            text = _decode_body(response.body, response.headers)
+            found = _script_endpoints(text, response.url)
+            endpoints.update(found)
+            scripts.append({"url": _safe_url(response.url), "bytes": len(text.encode("utf-8")), "endpoints": found})
+        except (CsustError, HttpError, NetworkError) as exc:
+            scripts.append({"url": _safe_url(target), "error": str(exc), "code": getattr(exc, "code", "error")})
+    return {
+        "ok": True,
+        "page": {"url": page.get("url"), "title": page.get("title"), "kind": page.get("kind")},
+        "scripts": scripts,
+        "script_count": len(scripts),
+        "endpoints": sorted(endpoints),
+    }
+
+
+def _crawlable(client: SiteClient, value: str, root: str) -> str | None:
+    try:
+        target = _normalize_url(_safe_urljoin(root, value), base_url=client.base_url)
+        parsed = urlparse(target)
+    except CsustError:
+        return None
+    if _is_side_effect_get(target):
+        return None
+    if parsed.path.lower().endswith((".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".pdf", ".zip", ".woff", ".woff2")):
+        return None
+    return target
+
+
+def run_discover(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
+    if args.depth < 0 or args.depth > 3:
+        raise CsustError("--depth 必须在 0 到 3 之间", code="invalid_argument")
+    if args.max_pages < 1 or args.max_pages > 200:
+        raise CsustError("--max-pages 必须在 1 到 200 之间", code="invalid_argument")
+    client = client or _client(args, args.url)
+    root = _target(client, args.url)
+    queue = deque([(root, 0)])
+    queued = {root}
+    pages: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+    hosts = {urlparse(root).hostname or ""}
+    while queue and len(pages) < args.max_pages:
+        target, depth = queue.popleft()
+        try:
+            response = _retry_read("GET", target, lambda: client.get(target))
+            _save_cookie_refresh(client, response)
+            page = inspect_page(_decode_body(response.body, response.headers), response.url)
+        except (CsustError, HttpError, NetworkError) as exc:
+            errors.append({"url": _safe_url(target), "code": getattr(exc, "code", "error"), "error": str(exc)})
+            continue
+        pages.append({"url": page.get("url"), "title": page.get("title"), "kind": page.get("kind"), "links": page.get("links", []), "forms": page.get("forms", []), "actions": page.get("actions", []), "endpoints": page.get("endpoints", [])})
+        for link in page.get("links", []):
+            if not isinstance(link, dict):
+                continue
+            value = str(link.get("path") or "")
+            absolute = _safe_urljoin(response.url, value)
+            try:
+                host = (urlparse(absolute).hostname or "").lower()
+            except ValueError:
+                host = ""
+            if _official_host(host):
+                hosts.add(host)
+            if depth >= args.depth:
+                continue
+            child = _crawlable(client, value, response.url)
+            if child and child not in queued:
+                queued.add(child)
+                queue.append((child, depth + 1))
+    return {
+        "ok": True,
+        "root": _safe_url(root),
+        "depth": args.depth,
+        "max_pages": args.max_pages,
+        "pages": pages,
+        "page_count": len(pages),
+        "hosts": sorted(host for host in hosts if host),
+        "errors": errors,
+    }
+
+
+def run_login(args: argparse.Namespace, _client: SiteClient | None = None) -> dict[str, object]:
+    if args.auth not in {"auto", "sso"}:
+        raise CsustError("site login 只支持 auto 或 sso", code="invalid_argument")
+    client = _client(args, args.url, load_cookies=False)
+    return login_sso_service(client, _target(client, args.url), args)
+
+
+def run_logout(args: argparse.Namespace, client: SiteClient | None = None) -> dict[str, object]:
+    client = client or _client(args, args.url)
+    client.clear_cookies()
+    client.save()
+    return {"ok": True, "site": client.base_url, "cookie_file": str(client.cookie_file), "logged_out": True}
+
+
+def _session_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--cookie-file", help="覆盖该子域名的本机会话文件")
+
+
+def _common_page_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--url", required=True, help="完整的 csust.edu.cn 页面 URL")
+    _session_args(parser)
+    parser.add_argument("--output", help="原样保存响应文件")
+    parser.add_argument("--require-login", action="store_true", help="把登录页视为会话失效")
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+
+
+def _form_args(parser: argparse.ArgumentParser) -> None:
+    _common_page_args(parser)
+    parser.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
+    parser.add_argument("--form", required=True, type=int, help="按 1 起始序号选择表单")
+    parser.add_argument("--button", type=int, help="表单内按 1 起始序号选择按钮")
+    parser.add_argument("--data", action="append", default=[], help="覆盖表单字段 NAME=VALUE，可重复")
+    parser.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
+    parser.add_argument("--fingerprint", help="页面指纹")
+    parser.add_argument("--yes", action="store_true", help="确认可能产生远端变更的操作")
+
+
+def register(subparsers: argparse._SubParsersAction) -> None:
+    site = subparsers.add_parser("site", aliases=["domain", "portal"], help="访问任意 csust.edu.cn 子域名")
+    children = site.add_subparsers(dest="site_command", required=True)
+
+    catalog = children.add_parser("catalog", help="列出已观察到的官方入口")
+    catalog.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    catalog.set_defaults(feature_runner=run_catalog, feature_renderer=render)
+
+    get = children.add_parser("get", help="GET 页面并输出结构化快照")
+    _common_page_args(get)
+    get.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
+    get.set_defaults(feature_runner=run_get, feature_renderer=render)
+
+    request = children.add_parser("request", help="调用任意同源 HTTP 接口")
+    _common_page_args(request)
+    request.add_argument("--method", default="GET", choices=sorted(SUPPORTED_METHODS))
+    request.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
+    request.add_argument("--data", action="append", default=[], help="表单字段 NAME=VALUE，可重复")
+    request.add_argument("--data-json", help="JSON 请求体；可用 @FILE 或 -")
+    request.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
+    request.add_argument("--header", action="append", default=[], help="请求头 NAME=VALUE，可重复")
+    request.add_argument("--yes", action="store_true", help="确认非只读请求")
+    request.set_defaults(feature_runner=run_request, feature_renderer=render)
+
+    form = children.add_parser("form", help="按结构化页面表单提交")
+    _form_args(form)
+    form.set_defaults(feature_runner=run_form, feature_renderer=render)
+
+    action = children.add_parser("action", aliases=["run"], help="按页面动作 ref 或序号执行")
+    _common_page_args(action)
+    action.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
+    action.add_argument("--index", type=int, help="兼容模式：页面动作序号")
+    action.add_argument("--ref", help="页面快照中的稳定动作 ref")
+    action.add_argument("--data", action="append", default=[], help="覆盖/附加字段 NAME=VALUE，可重复")
+    action.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
+    action.add_argument("--fingerprint", help="使用 --index 时校验页面指纹")
+    action.add_argument("--yes", action="store_true", help="确认可能产生远端变更的操作")
+    action.set_defaults(feature_runner=run_action, feature_renderer=render)
+
+    scripts = children.add_parser("scripts", help="读取同源脚本并提取常见 API/页面端点")
+    scripts.add_argument("--url", required=True, help="脚本所在页面 URL")
+    _session_args(scripts)
+    scripts.add_argument("--max-scripts", type=int, default=30)
+    scripts.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    scripts.set_defaults(feature_runner=run_scripts, feature_renderer=render)
+
+    discover = children.add_parser("discover", help="实时抓取页面并发现同站链接和官方子域名")
+    discover.add_argument("--url", required=True, help="起始页面 URL")
+    _session_args(discover)
+    discover.add_argument("--depth", type=int, default=1)
+    discover.add_argument("--max-pages", type=int, default=30)
+    discover.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    discover.set_defaults(feature_runner=run_discover, feature_renderer=render)
+
+    login = children.add_parser("login", help="通过统一身份认证登录指定子域名")
+    login.add_argument("--url", required=True, help="需要登录的同源页面 URL")
+    _session_args(login)
+    login.add_argument("--username")
+    login.add_argument("--auth", choices=("auto", "sso"), default="auto")
+    login.add_argument("--captcha")
+    login.add_argument("--captcha-image")
+    login.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    login.set_defaults(feature_runner=run_login, feature_renderer=render)
+
+    logout = children.add_parser("logout", help="清除指定子域名的本机会话")
+    logout.add_argument("--url", required=True)
+    _session_args(logout)
+    logout.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    logout.set_defaults(feature_runner=run_logout, feature_renderer=render)
+
+
+def render(data: dict[str, object]) -> None:
+    if "catalog" in data:
+        for item in data["catalog"]:
+            if isinstance(item, dict):
+                print("\t".join(str(item.get(key, "")) for key in ("host", "name", "url")))
+        return
+    if data.get("downloaded"):
+        print(f"已保存：{data.get('output')}（{data.get('bytes', 0)} bytes）")
+        return
+    if "hosts" in data:
+        print(f"发现 {data.get('page_count', 0)} 个页面；官方子域名 {len(data.get('hosts', []))} 个")
+        for host in data.get("hosts", []):
+            print(host)
+        return
+    response = data.get("response", data)
+    if isinstance(response, dict):
+        print(f"{response.get('title', '')}\t{response.get('url', '')}".strip())
+        for form in response.get("forms", []):
+            if isinstance(form, dict):
+                print(f"表单\t{form.get('index', '')}\t{form.get('method', '')}\t{form.get('action', '')}")
+        for action in response.get("actions", []):
+            if isinstance(action, dict):
+                print(f"动作\t{action.get('ref', '')}\t{action.get('text', '')}\t{action.get('target', '')}")
+        return
+    print(json.dumps(response, ensure_ascii=False))

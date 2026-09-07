@@ -6,7 +6,7 @@ import argparse
 import re
 
 from ..core import CsustError, DAY_NAMES, Client, Element, ParseError, _option_value, _safe_terminal_text, _table_rows, ensure_session, parse_html
-from .academic import _query_response
+from .academic import _query_response, _table
 
 
 def parse_ints(value: str) -> list[int]:
@@ -75,7 +75,7 @@ def parse_schedule_cell(cell: Element, fallback_sections: str) -> list[dict[str,
 
 def parse_schedule(source: str, term: str | None = None) -> list[dict[str, object]]:
     document = parse_html(source)
-    table = document.first("table", element_id="kbtable")
+    table = _table(document, "kbtable")
     if table is None:
         if "未查询到数据" in document.text(include_scripts=False):
             return []

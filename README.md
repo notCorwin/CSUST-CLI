@@ -19,7 +19,8 @@ python3 csust.py terms --scope schedule --json
 python3 csust.py semester-start --json
 python3 csust.py routes --json
 python3 csust.py web get --path /jsxsd/xsxk/xklc_list --json
-python3 csust.py web action --path /jsxsd/xsxk/xklc_list --index 1 --yes --json
+python3 csust.py web get --name course-selection-center --json
+python3 csust.py web action --path /jsxsd/xsxk/xklc_list --ref action:... --yes --json
 python3 csust.py web catalog
 python3 csust.py web course-selection-center --json
 python3 csust.py web course-selection-center --form 1 --data xnxq01id=2026-2027-1 --yes --json
@@ -27,6 +28,17 @@ python3 csust.py web semester-timetable --output timetable.html --json
 python3 csust.py web public get --path /findmm.jsp --json
 python3 csust.py web public get --path /css/images/codeFrame.png --output csust-app-qr.png --json
 python3 csust.py web graduation-design --json
+
+# 任意 csust.edu.cn 子域名：实时发现、页面快照、表单/动作和通用接口
+python3 csust.py site catalog --json
+python3 csust.py site discover --url https://www.csust.edu.cn/ --depth 1 --json
+python3 csust.py site get --url https://fuwu.csust.edu.cn/ --json
+python3 csust.py site scripts --url https://gis.csust.edu.cn/ --json
+python3 csust.py site form --url https://example.csust.edu.cn/page --form 1 --data name=value --yes --json
+python3 csust.py site action --url https://example.csust.edu.cn/page --ref action:... --yes --json
+python3 csust.py site request --url https://example.csust.edu.cn/api \
+  --method POST --data-json @request.json --yes --json
+python3 csust.py site login --url https://ehall.csust.edu.cn/ --auth sso --json
 
 # VPN 门户：完整路由、控件和 bundle API 清单
 python3 csust.py vpn routes --json
@@ -78,7 +90,7 @@ python3 csust.py quality graduation-design --json
 python3 csust.py quality public get --path /findmm.jsp --json
 python3 csust.py quality get --name student-evaluation --json
 python3 csust.py quality form --path /jsxsd/... --form 1 --data NAME=VALUE --yes --json
-python3 csust.py quality action --path /jsxsd/... --index 1 --data NAME=VALUE --yes --json
+python3 csust.py quality action --path /jsxsd/... --ref action:... --data NAME=VALUE --yes --json
 python3 csust.py quality evaluation batches --json
 python3 csust.py quality evaluation courses --path PATH --json
 python3 csust.py quality evaluation form --path PATH --json
@@ -86,18 +98,28 @@ python3 csust.py quality request --path /jsxsd/... --method POST \
   --data NAME=VALUE --yes --json
 ```
 
-条件显示的“毕业设计”入口通过 `quality graduation-design` 解析并校验外部 SSO；`quality form` 和 `quality action` 直接复用网页端表单/动作解析，会自动带上隐藏字段并解析页面脚本状态。评价的 `courses`、`form`、`save`、`submit` 会直接复用网页结构解析。保存和提交会校验隐藏字段、题目及选项，并在响应无法确认成功时返回未验证。所有通用写请求均需显式 `--yes`。
+条件显示的“毕业设计”入口通过 `quality graduation-design` 解析并校验外部 SSO；`quality form` 和 `quality action` 直接复用网页端表单/动作解析，会自动带上隐藏字段并解析页面脚本状态，动作可用稳定 `--ref` 或旧的 `--index --fingerprint`。评价的 `courses`、`form`、`save`、`submit` 会直接复用网页结构解析。保存和提交会校验隐藏字段、题目及选项，并在响应无法确认成功时返回未验证。所有通用写请求均需显式 `--yes`。
 
 ## Web 映射
 
 `csust web catalog` 和 `ROUTE_CATALOG` 是同一份可检查清单；每一行的 `command` 就是对应 CLI 命令 `csust web <command>`，默认 GET 页面。该命令还支持：
 
+- `--name NAME`：按登录后主页的实时菜单文本或稳定命令名发现页面；与 `--path` 互斥。
 - `--param NAME=VALUE`：初始查询参数。
 - `--form N [--button M] --data NAME=VALUE`：按页面表单和按钮提交，自动带上未修改的隐藏字段。
 - `--action N --data NAME=VALUE`：按结构化页面输出中的动作序号执行链接、弹窗、表单或页面 JavaScript 中可解析的 URL 动作。
+- `web action --ref REF`：按页面动作的语义引用重新定位动作，不依赖页面动作顺序；`--index` 仍可用，但必须配合 `--fingerprint`。
 - `--output FILE`：原样保存打印、导出和下载响应；`web request` 另外支持 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS。
 
+`web get` 返回版本化页面快照，包含 `kind`、`capabilities`、`shape_fingerprint`、表格 `headers/data_rows`、控件 `label` 和动作 `ref`。HTML 页面优先使用直接 HTTP(S) 解析；只有脚本空壳而没有静态表单/链接/表格时标记为 `dynamic`，同时保留脚本和可发现接口，未知接口仍可通过 `web request` 显式调用。
+
 当前清单按网站二级菜单归组：教学评价 1；我的申请 3；我的考试 5；成绩管理 3；培养方案 5；我的课表 8；选课管理 9；教材管理 2；辅修管理 1；实验教学 2；第二课堂学分 2；学科竞赛 1；创新创业 5；公告留言 3；个人信息 2；在线问答 1；教学周历 1；学籍管理 8；我的成绩 4；毕业管理 3，共 69 条。`routes --json` 还返回登录、忘记密码、验证码、APP 登录页切换和条件显示的毕业设计外部 SSO 入口。
+
+## 全站通用映射
+
+`csust site` 面向 `csust.edu.cn` 根域名和全部子域名开放，不把静态入口清单当作能力边界。`site catalog` 是已观察到的服务起点；`site discover` 从实时页面抓取链接、表单、动作、脚本端点并报告新出现的官方子域名；`site scripts` 读取同源 SPA 脚本并提取常见 API/页面端点。`site get` 返回与 `web get` 相同的结构化页面快照，`site form`、`site action`、`site request` 复用网页结构解析，支持 GET/POST/PUT/PATCH/DELETE、JSON、表单、multipart、文件下载和动作 ref。每个子域名使用独立 Cookie 文件；`site login` 使用统一身份认证建立该页面的 SSO 会话。
+
+页面明确跳转到其他官方子域名时，先把目标 URL 作为新的 `site get`/`site request` 地址；页面外部服务不被错误地伪装成当前 csust 子域名。
 
 账号密码优先从 `CSUST_USERNAME`、`CSUST_PASSWORD` 读取；未设置时读取当前目录 `.env` 中的 `username`、`password`，不会交互询问或写入密码。`.env` 应保持 `600` 权限；权限过宽时默认拒绝读取，如需兼容旧环境可显式设置 `CSUST_ALLOW_INSECURE_ENV=1`。`login` 的 `--auth auto` 在标准 `xk.csust.edu.cn` 地址优先走统一身份认证，网络层失败才回退旧的教务登录；可用 `--auth sso` 强制统一认证，或 `--auth local` 强制旧登录。统一认证需要验证码时由 `ddddocr` 在本机识别，失败会自动重试 3 次；可用 `--captcha CODE` 做测试覆盖。
 
@@ -162,6 +184,6 @@ python3.12 -m venv .venv
 GitHub Actions 在每次 push 和 pull request 时执行安装、单元测试与命令入口检查。
 测试使用本地 HTTP 服务与模拟响应，不会提交学校账户数据。
 
-验证记录（2026-09-06）：本地 104 项测试通过，覆盖业务结果、混合上传、脚本解析、下载文件保留、会话刷新及 CLI 退出码。
+验证记录（2026-09-08）：本地 115 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱和图书馆远程访问入口；`site discover` 从学校主页发现 9 个官方子域名。
 线上尝试了教务登录、课表、成绩、教材列表、VPN 登录与状态、教学课程及质量保障状态和菜单；本机代理下旧教务站返回 HTTP 502，VPN 连接失败，直连探测也未成功。因此这轮没有线上业务验收通过记录，也未执行线上业务写操作。
 目录中的页面/API 数量表示已映射范围，不等同于每个端点已通过线上验证。

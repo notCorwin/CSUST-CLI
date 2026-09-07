@@ -44,6 +44,7 @@ from csust_cli.features.academic import (
     parse_semester_start,
 )
 from csust_cli.features.schedule import parse_schedule
+from csust_cli.features.site import SITE_CATALOG, SiteClient
 from csust_cli.features.textbooks import (
     TEXTBOOK_PATHS,
     action_url,

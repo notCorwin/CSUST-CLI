@@ -44,7 +44,7 @@ from csust_cli.core import Client, CsustError, HttpError, LOGIN_PROBE_PATH, Logi
 from csust_cli.features.academic import _options, _response_message, _run_evaluation, _selected, render as render_academic
 from csust_cli.features.grades import render as render_grades, run_detail
 from csust_cli.features.schedule import render as render_schedule, selected_option
-from csust_cli.features.web import ROUTE_CATALOG, _element_value, _form_button, _form_fields, _graduation_design_url, _js_state_fields, _mutation_verified, _public_target, _request, _run_action_common, _run_graduation_design, _run_post, _run_public_get, _run_public_post, _run_request, _run_form, _run_route, _safe_external_url, _write_download, inspect_page, render as render_web
+from csust_cli.features.web import ROUTE_CATALOG, _element_value, _form_button, _form_fields, _graduation_design_url, _js_state_fields, _mutation_verified, _public_target, _request, _resolve_route_name, _retry_read, _run_action_common, _run_graduation_design, _run_post, _run_public_get, _run_public_post, _run_request, _run_form, _run_route, _safe_external_url, _write_download, inspect_page, render as render_web
 from csust_cli.features.textbooks import _same_item, _state_confirms, action_url, form_fields, render as render_textbooks, response_message
 
 
@@ -1224,6 +1224,105 @@ class CsustParserTests(unittest.TestCase):
                 _run_form(direct_button_args, client, "/jsxsd/page")
             self.assertEqual(request.call_args.args[0], "https://example.test/jsxsd/link")
             self.assertIsNone(request.call_args.kwargs["data"])
+
+    def test_page_snapshot_and_action_refs_survive_nonsemantic_redesign(self):
+        original = inspect_page(
+            "<label for='term'>学期</label><form action='/query' method='post'>"
+            "<select id='term' name='term'><option selected value='old'>旧</option></select>"
+            "<button name='search'>查询</button></form>"
+            "<table class='old'><tr><th>课程</th><th>成绩</th></tr><tr><td>线代</td><td>95</td></tr></table>",
+            "https://example.test/jsxsd/page",
+        )
+        redesigned = inspect_page(
+            "<div class='new-shell'><label for='renamed-term'>学期</label>"
+            "<form action='/renamed-query' method='post'><select id='renamed-term' name='term'>"
+            "<option selected value='new'>新</option></select><button name='search'>查询</button></form>"
+            "<table class='new'><tr><th>课程</th><th>成绩</th></tr><tr><td>高数</td><td>88</td></tr></table></div>",
+            "https://example.test/jsxsd/page",
+        )
+        self.assertEqual(original["schema_version"], 1)
+        self.assertEqual(original["kind"], "html")
+        self.assertTrue({"forms", "tables", "actions"} <= set(original["capabilities"]))
+        self.assertEqual(original["shape_fingerprint"], redesigned["shape_fingerprint"])
+        self.assertEqual(original["forms"][0]["fields"][0]["label"], "学期")
+        self.assertEqual(original["tables"][0]["headers"], ["课程", "成绩"])
+        self.assertEqual(original["tables"][0]["data_rows"], [["线代", "95"]])
+        self.assertTrue(original["actions"][0]["ref"].startswith("action:"))
+
+    def test_action_ref_reselects_after_action_reordering(self):
+        url = "https://example.test/jsxsd/page"
+        original = inspect_page(
+            "<form action='/jsxsd/save' method='post'><input type='hidden' name='token' value='old'>"
+            "<button name='save' value='1'>保存</button><button name='cancel' value='0'>取消</button></form>",
+            url,
+        )
+        ref = next(action["ref"] for action in original["actions"] if action["text"] == "保存")
+        response = Response(
+            url,
+            200,
+            {"Content-Type": "text/html"},
+            "<form action='/jsxsd/renamed-save' method='post'><input type='hidden' name='token' value='new'>"
+            "<button name='cancel' value='0'>取消</button><button name='save' value='1'>保存</button></form>",
+        )
+        args = SimpleNamespace(index=None, ref=ref, data=[], param=[], yes=True, output=None)
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(base_url="https://example.test", cookie_file=Path(directory) / "cookies.txt", load_cookies=False)
+            with mock.patch("csust_cli.features.web._get_page", return_value=(response, inspect_page(response.body, url))), mock.patch.object(
+                client, "request", return_value=Response(url, 200, {}, "操作成功")
+            ) as request, mock.patch.object(client, "save"):
+                result = _run_action_common(args, client, "/jsxsd/page")
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(result["action"]["text"], "保存")
+        self.assertEqual(request.call_args.kwargs["data"], [("token", "new"), ("save", "1")])
+
+    def test_action_ref_rejects_ambiguous_targets_without_request(self):
+        url = "https://example.test/jsxsd/page"
+        source = "<form action='/jsxsd/save' method='post'><button>保存</button><button>保存</button></form>"
+        ref = inspect_page(source, url)["actions"][0]["ref"]
+        response = Response(url, 200, {"Content-Type": "text/html"}, source)
+        args = SimpleNamespace(index=None, ref=ref, data=[], param=[], yes=True, output=None)
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(base_url="https://example.test", cookie_file=Path(directory) / "cookies.txt", load_cookies=False)
+            with mock.patch("csust_cli.features.web._get_page", return_value=(response, inspect_page(source, url))), mock.patch.object(
+                client, "request"
+            ) as request:
+                with self.assertRaises(CsustError) as raised:
+                    _run_action_common(args, client, "/jsxsd/page")
+        self.assertEqual(raised.exception.code, "ambiguous_target")
+        request.assert_not_called()
+
+    def test_named_route_uses_live_menu_entry(self):
+        response = Response("https://example.test/jsxsd/framework/xsMain.jsp", 200, {}, "页面")
+        page = {"links": [{"name": "", "text": "课程成绩查询", "path": "/jsxsd/new-grades"}], "actions": []}
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(base_url="https://example.test", cookie_file=Path(directory) / "cookies.txt", load_cookies=False)
+            with mock.patch("csust_cli.features.web._get_page", return_value=(response, page)):
+                self.assertEqual(_resolve_route_name(client, "course-grades"), "/jsxsd/new-grades")
+
+    def test_only_idempotent_reads_are_retried_once(self):
+        calls = 0
+
+        def transient():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise HttpError(503, "busy")
+            return "ok"
+
+        with mock.patch("csust_cli.features.web.time.sleep"):
+            self.assertEqual(_retry_read("GET", "https://example.test/page", transient), "ok")
+        self.assertEqual(calls, 2)
+
+        calls = 0
+
+        def side_effect():
+            nonlocal calls
+            calls += 1
+            raise HttpError(503, "busy")
+
+        with self.assertRaises(HttpError):
+            _retry_read("GET", "https://example.test/save", side_effect)
+        self.assertEqual(calls, 1)
 
     def test_query_parameters_stay_before_url_fragments(self):
         self.assertEqual(_append_query("https://example.test/jsxsd/page?old=1#section", []), "https://example.test/jsxsd/page?old=1#section")

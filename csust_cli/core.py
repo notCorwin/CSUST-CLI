@@ -1525,14 +1525,22 @@ def _login_sso(
     captcha_image: str | None = None,
     ocr: Callable[[bytes], str] | None = None,
     max_attempts: int = CAPTCHA_RETRIES,
+    service_url: str | None = None,
+    handoff_path: str | None = EDUCATION_SSO_PATH,
+    probe_path: str | None = LOGIN_PROBE_PATH,
 ) -> dict[str, object]:
-    service = client.url(EDUCATION_SSO_PATH)
+    service = service_url or client.url(EDUCATION_SSO_PATH)
+    service_parts = _parse_http_url(service)
+    base_parts = _parse_http_url(client.base_url)
+    if service_parts is None or base_parts is None or not _same_origin_or_upgrade(base_parts[1], service_parts[1]):
+        raise CsustError("统一认证 service 必须指向当前站点", code="invalid_path")
     redirect_origins = {_url_origin(AUTHSERVER_BASE_URL), _url_origin(client.base_url)}
-    try:
-        _login_request(client, "GET", EDUCATION_SSO_PATH, redirect_origins)
-    except NetworkError:
-        # The SSO handoff remains useful when the legacy landing page is flaky.
-        pass
+    if handoff_path:
+        try:
+            _login_request(client, "GET", handoff_path, redirect_origins)
+        except NetworkError:
+            # The SSO handoff remains useful when the legacy landing page is flaky.
+            pass
     override = captcha_override or env_value("CSUST_CAPTCHA")
     attempts = 1 if override else max(1, max_attempts)
     recognizer = ocr or solve_captcha
@@ -1579,7 +1587,7 @@ def _login_sso(
             if attempt < attempts and not override:
                 continue
             raise AuthenticationFailed("统一认证登录失败，未建立有效会话", details={"attempts": attempt})
-        probe = _login_request(client, "GET", LOGIN_PROBE_PATH, redirect_origins)
+        probe = _login_request(client, "GET", probe_path, redirect_origins) if probe_path else response
         if not _valid_login_probe(probe):
             if attempt < attempts and not override:
                 continue
@@ -1593,6 +1601,34 @@ def _login_sso(
             "attempts": attempt,
         }
     raise AuthenticationFailed("统一认证登录失败", details={"attempts": attempts})
+
+
+def login_sso_service(
+    client: Client,
+    service_url: str,
+    args: object | None = None,
+    *,
+    ocr: Callable[[bytes], str] | None = None,
+    max_attempts: int = CAPTCHA_RETRIES,
+) -> dict[str, object]:
+    """Log in to any same-origin CSUST web service through the shared CAS."""
+    account, password = _credentials(getattr(args, "username", None) if args is not None else None)
+    client.clear_cookies()
+    client.warn_if_insecure(service_url)
+    result = _login_sso(
+        client,
+        account,
+        password,
+        captcha_override=getattr(args, "captcha", None) if args is not None else None,
+        captcha_image=getattr(args, "captcha_image", None) if args is not None else None,
+        ocr=ocr,
+        max_attempts=max_attempts,
+        service_url=service_url,
+        handoff_path=None,
+        probe_path=service_url,
+    )
+    result["service"] = _safe_url(service_url)
+    return result
 
 
 def login(

@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import time
 
-from .features import academic, grades, quality, schedule, teaching, textbooks, vpn, web
+from .features import academic, grades, quality, schedule, site, teaching, textbooks, vpn, web
 from .core import Client, CsustError, _safe_terminal_text, login, result_status
 
 
@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     vpn.register(subparsers)
     teaching.register(subparsers)
     quality.register(subparsers)
+    site.register(subparsers)
     return parser
 
 
@@ -109,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             args.command == "vpn" and args.vpn_command in {"routes", "controls", "catalog", "page"}
         ) or (teaching_command and args.teaching_command == "catalog") or (
             args.command in {"quality", "quality-assurance", "assurance"} and args.quality_command == "catalog"
-        )
+        ) or (args.command in {"site", "domain", "portal"} and args.site_command == "catalog")
         if args.command == "vpn":
             from .features.vpn import VpnClient
 
@@ -126,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
             from .features.quality import QualityClient
 
             client = None if static_catalog else QualityClient()
+        elif args.command in {"site", "domain", "portal"}:
+            client = None
         else:
             client = None if static_catalog else Client(load_cookies=args.command != "login")
         runner = getattr(args, "command_runner", None) or getattr(args, "feature_runner")

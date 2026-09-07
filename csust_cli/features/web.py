@@ -7,6 +7,7 @@ import ast
 import hashlib
 import json
 import re
+import time
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -160,8 +161,11 @@ SECOND_LEVEL_CATALOG = (
     ("毕业管理", "学籍成绩", "NEW_XSD_BYGL_BYGL"),
 )
 
+PAGE_SNAPSHOT_SCHEMA = 1
+
 READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SUPPORTED_METHODS = READ_ONLY_METHODS | {"POST", "PUT", "PATCH", "DELETE"}
+_BODY_UNSET = object()
 EVENT_ATTRIBUTES = ("onclick", "onchange", "onsubmit", "ondblclick")
 _REPORT_TARGETS = {
     ("192.168.3.125", "/FineReport"),
@@ -171,6 +175,7 @@ _SIDE_EFFECT_GET = re.compile(
     r"(?:/(?:logout|delete|remove|add|join|bind|ignore|favorite|recommend|subscribe|unsubscribe|cancel|submit|save|update|sort)(?:[/?._]|$)|[?&](?:action|op|ACTION|operation)=)",
     re.I,
 )
+_TRANSIENT_HTTP_STATUSES = frozenset({408, 502, 503, 504})
 
 # Compatibility for callers that used the old tuple.
 KNOWN_ROUTES = tuple((command, label, path) for command, _group, label, path in ROUTE_CATALOG)
@@ -181,6 +186,30 @@ def _supported_method(value: str) -> str:
     if method not in SUPPORTED_METHODS:
         raise CsustError("不支持的 HTTP 方法", code="invalid_argument")
     return method
+
+
+def _retry_read(method: str, target: str, call):
+    try:
+        return call()
+    except (HttpError, NetworkError) as exc:
+        status = getattr(exc, "status", None)
+        if (
+            method not in READ_ONLY_METHODS
+            or _is_side_effect_get(target)
+            or (isinstance(exc, HttpError) and status not in _TRANSIENT_HTTP_STATUSES)
+        ):
+            raise
+        # ponytail: one retry with fixed delay; add backoff only if measurements require it.
+        time.sleep(0.1)
+        return call()
+
+
+def _ensure_web_session(client: Client) -> None:
+    hook = getattr(client, "ensure_web_session", None)
+    if callable(hook):
+        hook()
+        return
+    ensure_session(client)
 
 
 def _is_side_effect_get(target: str) -> bool:
@@ -342,6 +371,41 @@ def _display_text(node: Element) -> str:
     return _safe_event(" ".join(_safe_page_text(node).replace("\xa0", " ").split()))
 
 
+def _semantic_text(value: object) -> str:
+    return " ".join(str(value or "").replace("\xa0", " ").split()).casefold()
+
+
+def _control_label(document: Element, node: Element) -> str:
+    value = node.attr("aria-label").strip()
+    if value:
+        return _safe_event(value)
+    labelledby = [item for item in node.attr("aria-labelledby").split() if item]
+    if labelledby:
+        labels = [document.first(element_id=item) for item in labelledby]
+        text = " ".join(_display_text(label) for label in labels if label is not None).strip()
+        if text:
+            return text
+    node_id = node.attr("id").strip()
+    if node_id:
+        label = next((item for item in document.find_all("label") if item.attr("for").strip() == node_id), None)
+        if label is not None:
+            text = _display_text(label)
+            if text:
+                return text
+    current: Element | None = node.parent
+    while current is not None:
+        if current.tag == "label":
+            text = _display_text(current)
+            if text:
+                return text
+        current = current.parent
+    for attribute in ("placeholder", "title"):
+        value = node.attr(attribute).strip()
+        if value:
+            return _safe_event(value)
+    return ""
+
+
 def _control(node: Element) -> dict[str, object]:
     name = node.attr("name")
     sensitive = _sensitive_control(node)
@@ -350,9 +414,13 @@ def _control(node: Element) -> dict[str, object]:
     data: dict[str, object] = {
         "tag": node.tag,
         "type": node.attr("type") or node.tag,
+        "id": node.attr("id"),
         "name": name,
         "value": value,
         "text": "" if sensitive else _display_text(node),
+        "role": node.attr("role"),
+        "aria_label": _safe_event(node.attr("aria-label")),
+        "placeholder": _safe_event(node.attr("placeholder")),
         "href": _safe_url(node.attr("href")),
         "onclick": _safe_event(node.attr("onclick")),
         "disabled": node.is_disabled(),
@@ -373,6 +441,35 @@ def _control(node: Element) -> dict[str, object]:
             for option in node.find_all("option")
         ]
     return data
+
+
+def _shape_fingerprint(document: Element) -> str:
+    """Hash the page shape without volatile values or rendered table data."""
+    parts: list[str] = []
+    stack: list[tuple[Element, bool]] = [(document, False)]
+    shape_attributes = frozenset(
+        {"type", "name", "role", "aria-label", "aria-labelledby", "placeholder", "method", "enctype", "multiple"}
+    )
+    layout_tags = frozenset({"div", "span", "section", "main", "header", "footer", "nav", "article", "aside", "tbody", "thead", "tfoot"})
+    while stack:
+        node, closing = stack.pop()
+        if closing:
+            parts.append(f"</{node.tag}>")
+            continue
+        if node.tag == "#document":
+            stack.extend((child, False) for child in reversed(node.children) if isinstance(child, Element))
+            continue
+        if node.tag in layout_tags:
+            stack.extend((child, False) for child in reversed(node.children) if isinstance(child, Element))
+            continue
+        attributes = ",".join(sorted(key for key in node.attrs if key in shape_attributes))
+        parts.append(f"<{node.tag}[{attributes}]>")
+        if node.tag in {"script", "style"}:
+            continue
+        if node.children:
+            stack.append((node, True))
+            stack.extend((child, False) for child in reversed(node.children) if isinstance(child, Element))
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
 
 
 def _nearest_form(node: Element) -> Element | None:
@@ -865,6 +962,38 @@ def _safe_arguments(source: str) -> list[str]:
     return [_safe_event(value) for value in call[1]]
 
 
+def _action_ref(node: Element, method: str, target: str, form: Element | None, fields: list[str]) -> str:
+    """Build a position-independent reference from the action's semantics."""
+    form_key = "|".join(fields) if fields else (form.attr("name") or form.attr("id") if form else "")
+    target_path = ""
+    if node.tag == "a" and target:
+        try:
+            target_path = urlparse(target).path
+        except ValueError:
+            target_path = ""
+    label = _display_text(node) or node.attr("value")
+    name = node.attr("name")
+    aria_label = node.attr("aria-label")
+    node_id = node.attr("id") if not (name or label or aria_label) else ""
+    call = _onclick_call(_event_source(node) or node.attr("href"))
+    identity = "\x1f".join(
+        (
+            node.tag,
+            _semantic_text(node.attr("type")),
+            _semantic_text(name),
+            _semantic_text(node_id),
+            _semantic_text(node.attr("role")),
+            _semantic_text(aria_label),
+            _semantic_text(label),
+            _semantic_text(call[0] if call else ""),
+            method.upper(),
+            _semantic_text(form_key),
+            target_path,
+        )
+    )
+    return "action:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+
+
 def _describe_action(
     node: Element,
     page_url: str,
@@ -890,19 +1019,26 @@ def _describe_action(
     if document is not None and form is not None:
         forms = getattr(document, "_form_index", (document.find_all("form"), {}, {}))[0]
         form_index = forms.index(form) + 1 if form in forms else 0
+    fields = sorted(
+        ({name for name, _ in _form_fields(form, node, document)} if submits_form else set())
+        | {name for name, _ in state}
+    )
+    text = "" if _sensitive_control(node) else (_display_text(node) or _safe_event(node.attr("value")))
     return {
         **({"parse_error": parse_error} if parse_error else {}),
         "index": index,
-        "text": "" if _sensitive_control(node) else (_display_text(node) or _safe_event(node.attr("value"))),
+        "ref": _action_ref(node, method, target, form, fields),
+        "text": text,
         "tag": node.tag,
         "method": method,
         "target": _safe_url(target, page_url),
+        "name": node.attr("name"),
+        "id": node.attr("id"),
+        "role": node.attr("role"),
+        "aria_label": _safe_event(node.attr("aria-label")),
         "form": form.attr("id") if form else "",
         "form_index": form_index,
-        "fields": sorted(
-            ({name for name, _ in _form_fields(form, node, document)} if submits_form else set())
-            | {name for name, _ in state}
-        ),
+        "fields": fields,
         "state_fields": [name for name, _ in state],
         "href": _safe_url(node.attr("href"), page_url),
         "onclick": _safe_event(node.attr("onclick")),
@@ -921,8 +1057,7 @@ def _script_messages(document: Element) -> list[str]:
     return list(dict.fromkeys(message for message in messages if message))
 
 
-def inspect_page(source: str, page_url: str) -> dict[str, object]:
-    document = parse_html(source)
+def _inspect_document(document: Element, source: str, page_url: str) -> dict[str, object]:
     forms_index, controls_index = _build_form_index(document)
     messages = _script_messages(document)
     title = document.first("title")
@@ -930,6 +1065,13 @@ def inspect_page(source: str, page_url: str) -> dict[str, object]:
     forms: list[dict[str, object]] = []
     for index, form in enumerate(forms_index, start=1):
         controls = controls_index.get(id(form), [])
+        fields: list[dict[str, object]] = []
+        for node in controls:
+            field = _control(node)
+            label = _control_label(document, node)
+            if label:
+                field["label"] = label
+            fields.append(field)
         forms.append(
             {
                 "index": index,
@@ -938,18 +1080,24 @@ def inspect_page(source: str, page_url: str) -> dict[str, object]:
                 "name": form.attr("name"),
                 "id": form.attr("id"),
                 "enctype": form.attr("enctype", "application/x-www-form-urlencoded"),
-                "fields": [_control(node) for node in controls],
+                "fields": fields,
             }
         )
     tables: list[dict[str, object]] = []
     for table in document.find_all("table"):
-        rows = []
-        for row in _table_rows(table):
+        table_rows = _table_rows(table)
+        rows: list[list[str]] = []
+        for row in table_rows:
             cells = row.direct("th") + row.direct("td")
             if cells:
                 rows.append([_display_text(cell) for cell in cells])
         if rows:
-            tables.append({"id": table.attr("id"), "class": table.attr("class"), "rows": rows})
+            table_data: dict[str, object] = {"id": table.attr("id"), "class": table.attr("class"), "rows": rows}
+            header_cells = table_rows[0].direct("th") if table_rows else []
+            if header_cells:
+                table_data["headers"] = [_display_text(cell) for cell in header_cells]
+                table_data["data_rows"] = rows[1:]
+            tables.append(table_data)
     actions = [
         _describe_action(node, page_url, index, document)
         for index, node in enumerate(_action_nodes(document), start=1)
@@ -957,29 +1105,52 @@ def inspect_page(source: str, page_url: str) -> dict[str, object]:
     functions: list[str] = []
     endpoints: list[str] = []
     for script in document.find_all("script"):
-        source = script.raw_text()
-        functions.extend(re.findall(r"function\s+([A-Za-z_$][\w$]*)\s*\(", source))
+        script_source = script.raw_text()
+        functions.extend(re.findall(r"function\s+([A-Za-z_$][\w$]*)\s*\(", script_source))
         endpoints.extend(
             _safe_url(value, page_url)
-            for value in re.findall(r"['\"]((?:/jsxsd|https?://)[^'\"\s<>]*)['\"]", source)
+            for value in re.findall(r"['\"]((?:/jsxsd|https?://)[^'\"\s<>]*)['\"]", script_source)
         )
         endpoints.extend(
             _safe_url(value, page_url)
-            for value in re.findall(r"['\"]((?:/meol|/moocresource)[^'\"\s<>]*)['\"]", source)
+            for value in re.findall(r"['\"]((?:/meol|/moocresource)[^'\"\s<>]*)['\"]", script_source)
         )
+    text = _display_text(document)[:12000]
+    script_sources = [_safe_url(node.attr("src"), page_url) for node in document.find_all("script") if node.attr("src")]
+    kind = "dynamic" if document.find_all("script") and not any((links, forms, tables, actions)) and not text else "html"
+    capabilities = [
+        name
+        for name, present in (
+            ("links", bool(links)),
+            ("forms", bool(forms)),
+            ("tables", bool(tables)),
+            ("actions", bool(actions)),
+            ("api_candidates", bool(endpoints)),
+            ("dynamic", kind == "dynamic"),
+        )
+        if present
+    ]
     return {
+        "schema_version": PAGE_SNAPSHOT_SCHEMA,
+        "kind": kind,
         "url": _safe_url(page_url),
         "fingerprint": hashlib.sha256(source.encode("utf-8", errors="replace")).hexdigest(),
+        "shape_fingerprint": _shape_fingerprint(document),
         "title": _display_text(title) if title else "",
-        "text": _display_text(document)[:12000],
+        "text": text,
+        "capabilities": capabilities,
         "messages": messages,
         "links": links,
         "forms": forms,
         "tables": tables,
         "actions": actions,
-        "scripts": {"src": [_safe_url(node.attr("src"), page_url) for node in document.find_all("script") if node.attr("src")], "functions": sorted(set(functions))},
+        "scripts": {"src": script_sources, "functions": sorted(set(functions))},
         "endpoints": sorted(set(endpoints)),
     }
+
+
+def inspect_page(source: str, page_url: str) -> dict[str, object]:
+    return _inspect_document(parse_html(source), source, page_url)
 
 
 def _response_text(response: Response) -> str:
@@ -1026,40 +1197,53 @@ def _request(
     require_session: bool = True,
     multipart: list[tuple[str, object]] | None = None,
     mutating: bool | None = None,
+    headers: dict[str, str] | None = None,
+    json_body: object = _BODY_UNSET,
     _retry_auth: bool = True,
 ) -> tuple[Response, dict[str, object] | None]:
     method = _supported_method(method)
     if multipart is not None and method not in READ_ONLY_METHODS:
         multipart = [*(data or []), *multipart]
         data = None
-    headers = None
+    request_headers = dict(headers or {})
     if referer:
         try:
             same_origin = _url_origin(referer) == _url_origin(target)
         except ValueError:
             same_origin = False
         if same_origin:
-            headers = {"Referer": referer}
+            request_headers["Referer"] = referer
+    request_options: dict[str, object] = {"headers": request_headers or None}
+    if json_body is not _BODY_UNSET:
+        if data is not None or multipart is not None:
+            raise CsustError("不能同时使用表单、multipart 和 JSON 参数", code="invalid_argument")
+        request_options["json_body"] = json_body
     request_target = target
     if (data or multipart) and method in READ_ONLY_METHODS:
         request_target = _append_query(request_target, data)
     effective_mutating = method not in READ_ONLY_METHODS if mutating is None else mutating
     quality_request = getattr(client, "request_web", None)
     if callable(quality_request):
+        if json_body is not _BODY_UNSET or headers:
+            raise CsustError("当前网页网关不支持自定义 JSON/请求头", code="invalid_argument")
         try:
-            result = quality_request(
+            result = _retry_read(
+                method,
                 request_target,
-                method=method,
-                data=data if method not in READ_ONLY_METHODS else None,
-                multipart=multipart if method not in READ_ONLY_METHODS else None,
-                output=output or False,
-                referer=referer if headers else "",
-                mutating=effective_mutating,
+                lambda: quality_request(
+                    request_target,
+                    method=method,
+                    data=data if method not in READ_ONLY_METHODS else None,
+                    multipart=multipart if method not in READ_ONLY_METHODS else None,
+                    output=output or False,
+                    referer=referer if request_headers else "",
+                    mutating=effective_mutating,
+                ),
             )
         except (HttpError, NetworkError) as exc:
             if require_session and _retry_auth and not effective_mutating and method in READ_ONLY_METHODS and isinstance(exc, HttpError) and exc.status == 401:
-                ensure_session(client)
-                return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, _retry_auth=False)
+                _ensure_web_session(client)
+                return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, headers=headers, json_body=json_body, _retry_auth=False)
             if not effective_mutating:
                 raise
             raise _mutation_transport_error(exc, {"method": method, "path": urlparse(target).path}) from exc
@@ -1082,21 +1266,25 @@ def _request(
             raise
     if output is not None:
         try:
-            result = client.request(
+            result = _retry_read(
+                method,
                 request_target,
-                method=method,
-                data=data if method not in READ_ONLY_METHODS else None,
-                multipart=multipart if method not in READ_ONLY_METHODS else None,
-                headers=headers,
-                binary=True,
-                with_metadata=True,
-                stream_to=output,
-                defer_stream_commit=True,
+                lambda: client.request(
+                    request_target,
+                    method=method,
+                    data=data if method not in READ_ONLY_METHODS else None,
+                    multipart=multipart if method not in READ_ONLY_METHODS else None,
+                    **request_options,
+                    binary=True,
+                    with_metadata=True,
+                    stream_to=output,
+                    defer_stream_commit=True,
+                ),
             )
         except (HttpError, NetworkError) as exc:
             if require_session and _retry_auth and not effective_mutating and method in READ_ONLY_METHODS and isinstance(exc, HttpError) and exc.status == 401:
-                ensure_session(client)
-                return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, _retry_auth=False)
+                _ensure_web_session(client)
+                return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, headers=headers, json_body=json_body, _retry_auth=False)
             if not effective_mutating:
                 raise
             raise _mutation_transport_error(exc, {"method": method, "path": urlparse(target).path}) from exc
@@ -1122,11 +1310,21 @@ def _request(
             _discard_stream(result)
             raise
     try:
-        result = client.request(request_target, method=method, data=data if method not in READ_ONLY_METHODS and multipart is None else None, multipart=multipart if method not in READ_ONLY_METHODS else None, headers=headers)
+        result = _retry_read(
+            method,
+            request_target,
+            lambda: client.request(
+                request_target,
+                method=method,
+                data=data if method not in READ_ONLY_METHODS and multipart is None else None,
+                multipart=multipart if method not in READ_ONLY_METHODS else None,
+                **request_options,
+            ),
+        )
     except (HttpError, NetworkError) as exc:
         if require_session and _retry_auth and not effective_mutating and method in READ_ONLY_METHODS and isinstance(exc, HttpError) and exc.status == 401:
-            ensure_session(client)
-            return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, _retry_auth=False)
+            _ensure_web_session(client)
+            return _request(client, method, target, data, referer=referer, output=output, require_session=require_session, multipart=multipart, mutating=mutating, headers=headers, json_body=json_body, _retry_auth=False)
         if not effective_mutating:
             raise
         raise _mutation_transport_error(exc, {"method": method, "path": urlparse(target).path}) from exc
@@ -1151,10 +1349,10 @@ def _get_page(client: Client, path: str, params: list[tuple[str, str]], *, publi
         if callable(quality_session):
             quality_session()
         else:
-            ensure_session(client)
+            _ensure_web_session(client)
     quality_request = getattr(client, "request_web", None)
-    response = quality_request(target) if callable(quality_request) else client.get(target)
-    if not public:
+    response = _retry_read("GET", target, lambda: quality_request(target) if callable(quality_request) else client.get(target))
+    if not public and not getattr(client, "allow_anonymous_pages", False):
         require_logged_in(response)
     _save_cookie_refresh(client, response)
     result_status(_feedback(response), mutating=False)
@@ -1182,7 +1380,7 @@ def _feedback(response: Response) -> object:
         except ValueError as exc:
             raise CsustError("远端返回了无效 JSON", code="parse_error") from exc
     if "html" in content_type or text.lstrip().startswith("<"):
-        return inspect_page(text, response.url)
+        return _inspect_document(_response_document(response), text, response.url)
     return text
 
 
@@ -1213,6 +1411,15 @@ def _redact_payload(value: object) -> object:
     return value
 
 
+def _response_document(response: Response) -> Element:
+    document = getattr(response, "_csust_document", None)
+    if isinstance(document, Element):
+        return document
+    document = parse_html(_response_text(response))
+    setattr(response, "_csust_document", document)
+    return document
+
+
 def _page_payload(response: Response) -> object:
     text = _response_text(response)
     if not text.strip():
@@ -1220,7 +1427,8 @@ def _page_payload(response: Response) -> object:
     content_type = _header_value(response.headers, "Content-Type").lower()
     if "json" in content_type or text.lstrip().startswith(("{", "[")):
         return _feedback(response)
-    return inspect_page(text, response.url)
+    document = _response_document(response)
+    return _inspect_document(document, text, response.url)
 
 
 def _mutation_verified(page: dict[str, object]) -> bool:
@@ -1262,14 +1470,87 @@ def _download_result(response: Response, saved: dict[str, object], mutating: boo
     return {**saved, **result_status(payload, mutating=mutating, details=saved)}
 
 
+def _discovered_routes(page: dict[str, object]) -> list[dict[str, object]]:
+    routes: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    page_url = str(page.get("url") or "")
+    for link in page.get("links", []):
+        if not isinstance(link, dict):
+            continue
+        target = str(link.get("path") or "")
+        if not target.startswith("/jsxsd/"):
+            continue
+        item = {"name": link.get("text") or "", "path": target, "method": "GET", "source": "link"}
+        key = (str(item["name"]), target)
+        if key not in seen:
+            seen.add(key)
+            routes.append(item)
+    for action in page.get("actions", []):
+        if not isinstance(action, dict) or str(action.get("method") or "GET").upper() != "GET":
+            continue
+        target = str(action.get("target") or "")
+        if not target.startswith(("/jsxsd/", "http://", "https://")):
+            continue
+        if target.startswith(("http://", "https://")):
+            try:
+                if _url_origin(target) != _url_origin(page_url):
+                    continue
+            except ValueError:
+                continue
+        item = {
+            "name": action.get("text") or "",
+            "path": target,
+            "method": "GET",
+            "ref": action.get("ref") or "",
+            "source": "action",
+        }
+        key = (str(item["name"]), target)
+        if key not in seen:
+            seen.add(key)
+            routes.append(item)
+    return routes
+
+
+def _resolve_route_name(client: Client, name: str) -> str:
+    requested = _semantic_text(name)
+    if not requested:
+        raise CsustError("页面名称不能为空", code="invalid_argument")
+    response, page = _get_page(client, "/jsxsd/framework/xsMain.jsp", [])
+    known_labels = {
+        _semantic_text(command): label
+        for command, _group, label, _path in ROUTE_CATALOG
+    }
+    label = known_labels.get(requested, name)
+    wanted = _semantic_text(label)
+    candidates = [
+        route
+        for route in _discovered_routes(page)
+        if _semantic_text(route.get("name")) == wanted
+    ]
+    if not candidates and label != name:
+        candidates = [
+            route
+            for route in _discovered_routes(page)
+            if wanted and wanted in _semantic_text(route.get("name"))
+        ]
+    if len(candidates) > 1:
+        raise CsustError(
+            "页面名称对应多个入口，请改用 --path",
+            code="ambiguous_target",
+            details={"name": name, "candidates": candidates, "url": _safe_url(response.url)},
+        )
+    if not candidates:
+        raise CsustError(
+            "当前页面未发现该入口",
+            code="route_not_found",
+            details={"name": name, "url": _safe_url(response.url)},
+        )
+    return str(candidates[0]["path"])
+
+
 def _run_routes(_args: argparse.Namespace, client: Client) -> dict[str, object]:
     response, page = _get_page(client, _args.path, [])
-    discovered: list[dict[str, object]] = []
-    for link in page["links"]:
-        assert isinstance(link, dict)
-        path = str(link.get("path") or "")
-        if path.startswith("/jsxsd/"):
-            discovered.append({"name": link.get("text") or "", "path": path, "onclick": link.get("onclick") or ""})
+    discovered = _discovered_routes(page)
     group_codes = {name: (top, code) for name, top, code in SECOND_LEVEL_CATALOG}
     catalog = [
         {"command": command, "group": group, "group_code": group_codes[group][1], "menu": group_codes[group][0], "name": label, "path": path}
@@ -1290,7 +1571,9 @@ def _run_routes(_args: argparse.Namespace, client: Client) -> dict[str, object]:
 
 def _run_get(args: argparse.Namespace, client: Client) -> dict[str, object]:
     params = _pairs(args.param, "--param")
-    target = _target(client, args.path, params)
+    name = getattr(args, "name", None)
+    path = _resolve_route_name(client, name) if name is not None else args.path
+    target = _target(client, path, params)
     ensure_session(client)
     response, saved = _request(client, "GET", target, require_session=True, output=args.output)
     if saved:
@@ -1382,7 +1665,7 @@ def _run_form(args: argparse.Namespace, client: Client, path: str, *, public: bo
     mutating = method not in READ_ONLY_METHODS or _is_side_effect_get(target)
     if mutating and not args.yes:
         raise CsustError("提交网页表单可能修改账号数据，请加 --yes", code="confirmation_required")
-    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public, multipart=files or None, mutating=mutating)
+    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public and getattr(args, "require_login", True), multipart=files or None, mutating=mutating)
     mutation_request = {"method": method, "path": urlparse(result.url).path, "fields": [name for name, _ in data]}
     if mutating:
         _save_mutation(client, mutation_request)
@@ -1396,20 +1679,46 @@ def _run_form(args: argparse.Namespace, client: Client, path: str, *, public: bo
 
 def _run_action_common(args: argparse.Namespace, client: Client, path: str, *, public: bool = False) -> dict[str, object]:
     overrides = _pairs(args.data, "--data")
-    if args.index < 1:
+    index = getattr(args, "index", None)
+    ref = str(getattr(args, "ref", "") or "").strip()
+    if (index is None) == (not ref):
+        raise CsustError("必须且只能指定 --index 或 --ref", code="invalid_argument")
+    if index is not None and index < 1:
         raise CsustError("操作序号必须是正整数", code="action_not_found")
     response, discovery_page = _get_page(client, path, _pairs(args.param, "--param"), public=public)
     expected_fingerprint = getattr(args, "fingerprint", None)
-    if not expected_fingerprint:
+    if index is not None and not expected_fingerprint:
         raise CsustError("执行页面动作必须提供页面快照 --fingerprint", code="fingerprint_required")
-    if expected_fingerprint != discovery_page.get("fingerprint"):
+    if expected_fingerprint and expected_fingerprint != discovery_page.get("fingerprint"):
         raise CsustError("页面已变化，操作序号已失效；请重新执行 web get", code="stale_page")
-    document = parse_html(_response_text(response))
+    document = _response_document(response)
     _build_form_index(document)
     nodes = _action_nodes(document)
-    if not 1 <= args.index <= len(nodes):
-        raise CsustError("操作序号超出页面范围", code="action_not_found")
-    node = nodes[args.index - 1]
+    selected_index: int
+    if index is not None:
+        if not 1 <= index <= len(nodes):
+            raise CsustError("操作序号超出页面范围", code="action_not_found")
+        selected_index = index - 1
+    else:
+        candidates = [
+            (candidate_index, _describe_action(node, response.url, candidate_index + 1, document))
+            for candidate_index, node in enumerate(nodes)
+        ]
+        matches = [(candidate_index, descriptor) for candidate_index, descriptor in candidates if descriptor.get("ref") == ref]
+        if len(matches) > 1:
+            raise CsustError(
+                "页面动作 ref 不唯一，请使用 --index 配合最新 fingerprint",
+                code="ambiguous_target",
+                details={"ref": ref, "candidates": [descriptor for _candidate_index, descriptor in matches]},
+            )
+        if not matches:
+            raise CsustError(
+                "页面动作 ref 已失效，请重新执行 web get",
+                code="stale_page",
+                details={"ref": ref},
+            )
+        selected_index = matches[0][0]
+    node = nodes[selected_index]
     form = _form_owner(node, document)
     override_map = dict(overrides)
     method, target = _action_target(node, form, response.url, document, override_map)
@@ -1434,8 +1743,8 @@ def _run_action_common(args: argparse.Namespace, client: Client, path: str, *, p
     mutating = method not in READ_ONLY_METHODS or _is_side_effect_get(target)
     if mutating and not args.yes:
         raise CsustError("网页操作可能修改账号数据，请加 --yes", code="confirmation_required")
-    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public, multipart=files or None, mutating=mutating)
-    descriptor = _describe_action(node, response.url, args.index, document, override_map)
+    result, saved = _request(client, method, target, data, referer=response.url, output=args.output, require_session=not public and getattr(args, "require_login", True), multipart=files or None, mutating=mutating)
+    descriptor = _describe_action(node, response.url, selected_index + 1, document, override_map)
     mutation_request = {"method": method, "path": urlparse(result.url).path, "fields": [name for name, _ in data]}
     if mutating:
         _save_mutation(client, mutation_request)
@@ -1590,8 +1899,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     web = subparsers.add_parser("web", help="访问教务系统页面、表单、动作和下载")
     children = web.add_subparsers(dest="web_command", required=True)
 
-    get = children.add_parser("get", help="GET /jsxsd 页面并输出结构化内容")
-    get.add_argument("--path", required=True, help="/jsxsd/ 下的页面路径")
+    get = children.add_parser("get", help="GET 页面并输出结构化内容")
+    path_or_name = get.add_mutually_exclusive_group(required=True)
+    path_or_name.add_argument("--path", help="页面路径；直接请求的快速路径")
+    path_or_name.add_argument("--name", help="按登录后主页实时菜单文本或稳定命令名发现页面")
     get.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
     get.add_argument("--output", help="保存响应文件")
     get.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -1607,13 +1918,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     post.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
     post.set_defaults(feature_runner=_run_post, feature_renderer=render)
 
-    action = children.add_parser("action", aliases=["run"], help="按页面动作序号提交表单或打开链接")
+    action = children.add_parser("action", aliases=["run"], help="按页面动作 ref 或序号提交表单或打开链接")
     action.add_argument("--path", required=True, help="/jsxsd/ 下的页面路径")
-    action.add_argument("--index", required=True, type=int, help="web get 输出的动作序号")
+    action.add_argument("--index", type=int, help="兼容模式：web get 输出的动作序号")
+    action.add_argument("--ref", help="web get 输出的稳定动作 ref；页面重新排列后仍可解析")
     action.add_argument("--param", action="append", default=[], help="初始页面查询参数 NAME=VALUE，可重复")
     action.add_argument("--data", action="append", default=[], help="覆盖表单字段 NAME=VALUE，可重复")
     action.add_argument("--file", action="append", default=[], help="multipart 文件字段 NAME=PATH，可重复")
-    action.add_argument("--fingerprint", required=True, help="web get 返回的页面指纹，防止操作序号对应到变化后的页面")
+    action.add_argument("--fingerprint", help="使用 --index 时校验 web get 返回的页面指纹")
     action.add_argument("--yes", action="store_true", help="确认执行网页动作")
     action.add_argument("--output", help="保存响应文件")
     action.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
@@ -1659,10 +1971,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     public_post.set_defaults(feature_runner=_run_public_post, feature_renderer=render)
     public_action = public_children.add_parser("action", help="按序号执行找回密码页面动作")
     public_action.add_argument("--path", required=True, choices=["/findmm.jsp", "/Logon.do"])
-    public_action.add_argument("--index", required=True, type=int)
+    public_action.add_argument("--index", type=int, help="兼容模式：页面动作序号")
+    public_action.add_argument("--ref", help="页面动作 ref")
     public_action.add_argument("--param", action="append", default=[])
     public_action.add_argument("--data", action="append", default=[])
-    public_action.add_argument("--fingerprint", required=True, help="public get 返回的页面指纹")
+    public_action.add_argument("--fingerprint", help="使用 --index 时校验页面指纹")
     public_action.add_argument("--yes", action="store_true")
     public_action.add_argument("--output")
     public_action.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
@@ -1697,4 +2010,4 @@ def render(data: dict[str, object]) -> None:
                 print("表单 " + "\t".join(_safe_terminal_text(form.get(key)) for key in ("index", "method", "action")))
         for action in page.get("actions", []):
             if isinstance(action, dict):
-                print(("动作 " + "\t".join(_safe_terminal_text(action.get(key)) for key in ("index", "text", "method", "target"))).rstrip())
+                print(("动作 " + "\t".join(_safe_terminal_text(action.get(key)) for key in ("ref", "index", "text", "method", "target"))).rstrip())

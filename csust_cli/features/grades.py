@@ -6,7 +6,7 @@ import argparse
 import re
 
 from ..core import DEFAULT_BASE_URL, Client, ParseError, _safe_terminal_text, _safe_url, _safe_urljoin, _table_rows, ensure_session, internal_url, parse_html
-from .academic import _query_response
+from .academic import _query_response, _table
 
 
 GRADE_FIELDS = (
@@ -83,7 +83,7 @@ def _grade_header(value: str) -> str:
 
 def parse_grades(source: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str, object]]:
     document = parse_html(source)
-    table = document.first("table", element_id="dataList")
+    table = _table(document, "dataList")
     if table is None:
         if "未查询到数据" in document.text(include_scripts=False):
             return []
@@ -139,7 +139,7 @@ def parse_grades(source: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
 
 def parse_grade_detail(source: str, page_url: str) -> dict[str, object]:
     document = parse_html(source)
-    table = document.first("table", element_id="dataList")
+    table = _table(document, "dataList")
     if table is None:
         raise ParseError("未找到成绩详情表")
     rows = _table_rows(table)
