@@ -137,15 +137,46 @@ class SiteClient(Client):
 
     allow_anonymous_pages = True
 
-    def __init__(self, url: str, cookie_file: Path | None = None, *, load_cookies: bool = True) -> None:
+    def __init__(self, url: str, cookie_file: Path | None = None, *, load_cookies: bool = True, allow_external: bool = False) -> None:
         normalized = _normalize_url(url)
         parsed = urlparse(normalized)
         base = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
         super().__init__(base, cookie_file or _cookie_path(base), load_cookies=load_cookies)
         self.set_redirect_origins({_url_origin(self.base_url), _url_origin(AUTHSERVER_BASE_URL)})
+        self.allow_external = allow_external
 
     def web_url(self, value: str) -> str:
-        return _normalize_url(self.url(value), base_url=self.base_url)
+        if not isinstance(value, str) or value.lstrip().lower().startswith(("javascript:", "mailto:", "data:")):
+            raise CsustError("site 动作目标不是可请求的 HTTP(S) 地址", code="invalid_path")
+        target = self.url(value)
+        try:
+            return _normalize_url(target, base_url=self.base_url)
+        except CsustError:
+            if not self.allow_external:
+                raise
+            try:
+                parsed = urlparse(target)
+                parsed.port
+                decoded_path = unquote(unquote(parsed.path))
+            except (TypeError, UnicodeError, ValueError) as exc:
+                raise CsustError("外部动作目标格式无效", code="invalid_path") from exc
+            if (
+                parsed.scheme.lower() not in {"http", "https"}
+                or not parsed.netloc
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or "\\" in decoded_path
+                or any(part in {".", ".."} for part in decoded_path.split("/"))
+            ):
+                raise CsustError("外部动作目标格式无效", code="invalid_path")
+            if urlparse(self.base_url).scheme.lower() == "https" and parsed.scheme.lower() == "http" and (parsed.hostname or "").lower() == (urlparse(self.base_url).hostname or "").lower():
+                raise CsustError("不允许 HTTPS 页面降级到 HTTP 动作", code="invalid_path")
+            target = parsed._replace(fragment="").geturl()
+            origins = set(self._redirect_origins or ())
+            origins.add(_url_origin(target))
+            self.set_redirect_origins(origins)
+            return target
 
     def ensure_web_session(self) -> None:
         # Generic services do not share a reliable probe path. Saved cookies
@@ -159,7 +190,7 @@ def _client(args: argparse.Namespace, url: str, *, load_cookies: bool = True) ->
         path = Path(cookie_file).expanduser() if cookie_file else None
     except (OSError, RuntimeError, ValueError) as exc:
         raise CsustError("site 会话文件路径无效", code="cookie_read_failed") from exc
-    return SiteClient(url, path, load_cookies=load_cookies)
+    return SiteClient(url, path, load_cookies=load_cookies, allow_external=bool(getattr(args, "allow_external", False)))
 
 
 def _target(client: SiteClient, value: str, params: list[tuple[str, str]] = ()) -> str:
@@ -430,6 +461,7 @@ def _common_page_args(parser: argparse.ArgumentParser) -> None:
     _session_args(parser)
     parser.add_argument("--output", help="原样保存响应文件")
     parser.add_argument("--require-login", action="store_true", help="把登录页视为会话失效")
+    parser.add_argument("--allow-external", action="store_true", help="允许执行页面明确指向的外部 HTTP(S) 动作")
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
 
 

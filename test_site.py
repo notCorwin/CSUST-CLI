@@ -17,6 +17,8 @@ class SiteTests(unittest.TestCase):
             client = SiteClient("https://www.csust.edu.cn/", Path(directory) / "cookies.txt", load_cookies=False)
             with self.assertRaises(CsustError):
                 client.web_url("https://ehall.csust.edu.cn/")
+            client = SiteClient("https://mail.csust.edu.cn/", Path(directory) / "mail-cookies.txt", load_cookies=False, allow_external=True)
+            self.assertEqual(client.web_url("https://entry.qiye.163.com/domain/domainEntLogin"), "https://entry.qiye.163.com/domain/domainEntLogin")
 
     def test_site_get_returns_the_same_structured_page_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
