@@ -23,6 +23,11 @@ class SiteTests(unittest.TestCase):
     def test_site_service_path_rejects_url_arguments(self):
         with self.assertRaises(CsustError):
             _service_path(SimpleNamespace(service="official", path="https://ehall.csust.edu.cn/"))
+        info, path = _service_path(SimpleNamespace(service="jtsysyy.csust.edu.cn", path="/Login/Index", scheme="http"))
+        self.assertEqual(info["url"], "http://jtsysyy.csust.edu.cn/")
+        self.assertEqual(path, "/Login/Index")
+        _info, path = _service_path(SimpleNamespace(service="union", path=None, scheme=None))
+        self.assertEqual(path, "/front/page.do?dispatch=proindex")
 
     def test_site_get_returns_the_same_structured_page_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -71,7 +76,7 @@ class SiteTests(unittest.TestCase):
                 {"Content-Type": "text/html"},
                 "<a href='https://ehall.csust.edu.cn/'>门户</a><a href='/info'>信息</a>",
             )
-            args = SimpleNamespace(service="official", path="/", depth=0, max_pages=1, cookie_file=None)
+            args = SimpleNamespace(service="official", path="/", scheme=None, param=[], depth=0, max_pages=1, cookie_file=None)
             with mock.patch.object(client, "get", return_value=response):
                 result = run_discover(args, client)
         self.assertEqual(result["page_count"], 1)

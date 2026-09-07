@@ -33,6 +33,7 @@ python3 csust.py web graduation-design --json
 python3 csust.py site catalog --json
 python3 csust.py site discover --service official --path / --depth 1 --json
 python3 csust.py site get --service sunshine --path / --json
+python3 csust.py site get --service legacy-host.csust.edu.cn --scheme http --path / --json
 python3 csust.py site scripts --service map --path / --json
 python3 csust.py site form --service mail --path / --form 1 --data name=value --yes --json
 python3 csust.py site action --service sunshine --path / --ref action:... --yes --json
@@ -119,7 +120,7 @@ python3 csust.py quality request --path /jsxsd/... --method POST \
 
 `csust site` 面向 `csust.edu.cn` 根域名和全部子域名开放，不把静态入口清单当作能力边界。`site catalog` 是已观察到的服务起点；`site discover` 从实时页面抓取链接、表单、动作、脚本端点并报告新出现的官方子域名；`site scripts` 读取同源 SPA 脚本并提取常见 API/页面端点。`site get` 返回与 `web get` 相同的结构化页面快照，`site form`、`site action`、`site request` 复用网页结构解析，支持 GET/POST/PUT/PATCH/DELETE、JSON、表单、multipart、文件下载和动作 ref。每个子域名使用独立 Cookie 文件；`site login` 使用统一身份认证建立该页面的 SSO 会话。
 
-默认只执行当前子域名动作；若网页表单明确把登录/提交目标放到外部 HTTP(S) 服务（例如邮箱门户），可在 `site form`/`site action` 加 `--allow-external`，仍会拒绝脚本、邮件协议、目录跳转和 HTTPS 降级。页面明确跳转到其他官方子域名时，使用对应服务名或官方主机名，再配合服务内 `--path` 调用。
+已观察服务使用目录内的传输方案；新服务默认 HTTPS，旧的 HTTP 子域名可显式加 `--scheme http`。默认只执行当前子域名动作；若网页表单明确把登录/提交目标放到外部 HTTP(S) 服务（例如邮箱门户），可在 `site form`/`site action` 加 `--allow-external`，仍会拒绝脚本、邮件协议、目录跳转和 HTTPS 降级。页面明确跳转到其他官方子域名时，使用对应服务名或官方主机名，再配合服务内 `--path` 调用。
 
 账号密码优先从 `CSUST_USERNAME`、`CSUST_PASSWORD` 读取；未设置时读取当前目录 `.env` 中的 `username`、`password`，不会交互询问或写入密码。`.env` 应保持 `600` 权限；权限过宽时默认拒绝读取，如需兼容旧环境可显式设置 `CSUST_ALLOW_INSECURE_ENV=1`。`login` 的 `--auth auto` 在标准 `xk.csust.edu.cn` 地址优先走统一身份认证，网络层失败才回退旧的教务登录；可用 `--auth sso` 强制统一认证，或 `--auth local` 强制旧登录。统一认证需要验证码时由 `ddddocr` 在本机识别，失败会自动重试 3 次；可用 `--captcha CODE` 做测试覆盖。
 
@@ -172,10 +173,10 @@ HTML 成功判定只使用直接执行的反馈语句或简短独立确认文本
 
 ## 安装与验证
 
-建议使用独立 Python 3.12 环境，安装声明的完整依赖后运行检查：
+建议使用独立 Python 3.14 环境，安装声明的完整依赖后运行检查：
 
 ```bash
-python3.12 -m venv .venv
+python3.14 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m unittest -q
 .venv/bin/csust --help
@@ -184,6 +185,6 @@ python3.12 -m venv .venv
 GitHub Actions 在每次 push 和 pull request 时执行安装、单元测试与命令入口检查。
 测试使用本地 HTTP 服务与模拟响应，不会提交学校账户数据。
 
-验证记录（2026-09-08）：本地 116 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱、图书馆远程访问、慕课、网络教学和招生录取入口；`site discover` 从学校主页发现掌上长理、工程训练、科研、慕课、网络教学、教学评价、招生录取等新官方子域名。
+验证记录（2026-09-08）：本地 116 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱、图书馆远程访问、慕课、网络教学和招生录取入口；`site discover` 深度 2 抓取 200 个页面，发现 38 个官方主机（其中目录已覆盖 46 个已观察服务），并记录了 2 个明确的 404/协议错误。
 线上尝试了教务登录、课表、成绩、教材列表、VPN 登录与状态、教学课程及质量保障状态和菜单；本机代理下旧教务站返回 HTTP 502，VPN 连接失败，直连探测也未成功。因此这轮没有线上业务验收通过记录，也未执行线上业务写操作。
 目录中的页面/API 数量表示已映射范围，不等同于每个端点已通过线上验证。
