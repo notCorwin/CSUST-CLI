@@ -111,6 +111,11 @@ func parseSiteCommand(args []string) (siteCommand, *siteError) {
 			command.request.Output = expandUserPath(value)
 		case "--require-login":
 			command.request.RequireLogin = true
+		case "--insecure":
+			if inline {
+				return siteCommand{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			command.request.InsecureTLS = true
 		case "--allow-external":
 			command.allowExternal = true
 		case "--username":
@@ -191,7 +196,7 @@ func parseSiteCommand(args []string) (siteCommand, *siteError) {
 			}
 			return siteCommand{}, &siteError{Code: "invalid_argument", Message: "site 子命令不接受位置参数"}
 		}
-		if !hasValue && arg != "--require-login" && arg != "--allow-external" && arg != "--yes" && arg != "--json" {
+		if !hasValue && arg != "--require-login" && arg != "--allow-external" && arg != "--insecure" && arg != "--yes" && arg != "--json" {
 			return siteCommand{}, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
 		}
 	}

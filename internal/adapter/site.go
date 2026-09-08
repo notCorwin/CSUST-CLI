@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,26 +30,28 @@ const (
 type NativeSite struct{}
 
 type siteRequest struct {
-	Service       string
-	Path          string
-	Scheme        string
-	Method        string
-	Params        []pair
-	Data          []pair
-	JSON          any
-	HasJSON       bool
-	Files         []filePart
-	Headers       []pair
-	Yes           bool
-	Output        string
-	CookieFile    string
-	RequireLogin  bool
-	Target        *url.URL
-	ReadOnly      bool
-	SessionTarget *url.URL
-	AllowSSO      bool
-	RawJSON       bool
-	mutating      bool
+	Service              string
+	Path                 string
+	Scheme               string
+	Method               string
+	Params               []pair
+	Data                 []pair
+	JSON                 any
+	HasJSON              bool
+	Files                []filePart
+	Headers              []pair
+	Yes                  bool
+	Output               string
+	CookieFile           string
+	RequireLogin         bool
+	Target               *url.URL
+	ReadOnly             bool
+	SessionTarget        *url.URL
+	AllowSSO             bool
+	AllowBusinessFailure bool
+	InsecureTLS          bool
+	RawJSON              bool
+	mutating             bool
 }
 
 type pair struct{ name, value string }
@@ -112,6 +115,23 @@ var knownSites = map[string]serviceInfo{
 	"trx":                    {host: "trx.csust.edu.cn", scheme: "http", path: "/"},
 	"v":                      {host: "v.csust.edu.cn", scheme: "http", path: "/"},
 	"live":                   {host: "live.csust.edu.cn", scheme: "http", path: "/"},
+	"graduate-notice":        {host: "yjsyzs.csust.edu.cn", scheme: "https", path: "/"},
+	"graduate-admissions":    {host: "yjszs.csust.edu.cn", scheme: "https", path: "/ksxt/login.aspx"},
+	"journal-transport":      {host: "jtkxygc.csust.edu.cn", scheme: "https", path: "/jtkxygc/home"},
+	"journal-highways":       {host: "glyqy.csust.edu.cn", scheme: "https", path: "/glyqy/home"},
+	"onlinejudge":            {host: "acm.csust.edu.cn", scheme: "https", path: "/"},
+	"library-personal":       {host: "book.csust.edu.cn", scheme: "https", path: "/ClientWeb/default.aspx"},
+	"employment":             {host: "csust.bysjy.com.cn", scheme: "https", path: "/"},
+	"student-record-query":   {host: "cs.luyinqingzhuhu.com", scheme: "http", path: "/?a=add&c=form&fid=2"},
+	"continuing-info":        {host: "10.255.196.10:8080", scheme: "http", path: "/"},
+	"party-school-exam":      {host: "10.255.195.65", scheme: "http", path: "/"},
+	"student-archive":        {host: "10.255.196.138:8060", scheme: "http", path: "/"},
+	"archive-management":     {host: "10.255.196.138:8080", scheme: "http", path: "/DAS/login.jsp"},
+	"virtual-lab":            {host: "10.21.20.244:8088", scheme: "http", path: "/"},
+	"legacy-mail":            {host: "txyj.csust.edu.cn", scheme: "http", path: "/mail/changepass"},
+	"security-admin":         {host: "baolei.csust.edu.cn", scheme: "https", path: "/"},
+	"cms-admin":              {host: "10.255.196.62:8080", scheme: "http", path: "/system/login.jsp"},
+	"cms-admin-legacy":       {host: "10.255.196.2:8080", scheme: "http", path: "/system/login.jsp"},
 }
 
 // Run dispatches every supported command through the native Go adapters.
@@ -143,6 +163,9 @@ func (a NativeSite) Run(ctx context.Context, args []string, jsonMode bool) (hand
 		return handled, stdout, stderr, code, err
 	}
 	if handled, stdout, stderr, code, err := a.runGatewayCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
+	if handled, stdout, stderr, code, err := a.runBusinessCommand(ctx, args, jsonMode); handled {
 		return handled, stdout, stderr, code, err
 	}
 	if handled, stdout, stderr, code, err := a.runSiteCommand(ctx, args, jsonMode); handled {
@@ -290,6 +313,11 @@ func parseSiteRequest(args []string) (siteRequest, *siteError) {
 				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
 			}
 			req.RequireLogin = true
+		case "--insecure":
+			if inline {
+				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			req.InsecureTLS = true
 		case "--allow-external":
 			if inline {
 				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
@@ -301,7 +329,7 @@ func parseSiteRequest(args []string) (siteRequest, *siteError) {
 			}
 			return siteRequest{}, &siteError{Code: "invalid_argument", Message: "site request 不接受位置参数"}
 		}
-		if !hasValue && arg != "--yes" && arg != "--require-login" && arg != "--allow-external" && arg != "--json" {
+		if !hasValue && arg != "--yes" && arg != "--require-login" && arg != "--allow-external" && arg != "--insecure" && arg != "--json" {
 			return siteRequest{}, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
 		}
 	}
@@ -471,17 +499,29 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		}
 		httpRequest.Header.Set(header.name, header.value)
 	}
+	transport, _ := http.DefaultTransport.(*http.Transport)
+	if transport != nil {
+		transport = transport.Clone()
+		if req.InsecureTLS {
+			// Explicitly requested for legacy services with an expired certificate.
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec -- command flag is explicit
+		}
+	}
 	httpClient := &http.Client{
-		Jar:     jar,
-		Timeout: 60 * time.Second,
+		Transport: transport,
+		Jar:       jar,
+		Timeout:   60 * time.Second,
 		CheckRedirect: func(clientRequest *http.Request, via []*http.Request) error {
 			previous := httpRequest.URL
 			if len(via) > 0 {
 				previous = via[len(via)-1].URL
 			}
-			redirectBase := httpRequest.URL
+			redirectBase := target
 			if req.SessionTarget != nil {
 				redirectBase = req.SessionTarget
+			}
+			if req.AllowSSO {
+				normalizeSSOHTTPRedirect(previous, clientRequest.URL, redirectBase)
 			}
 			if !safeSiteRedirect(previous, clientRequest.URL) && (!req.AllowSSO || !safeSiteSSORedirect(redirectBase, previous, clientRequest.URL)) {
 				return fmt.Errorf("已拒绝跨站或 HTTPS 降级重定向")
@@ -557,7 +597,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		}
 		return nil, requestFailure(req, requestInfo, code, fmt.Sprintf("HTTP %d %s", response.StatusCode, response.Status))
 	}
-	if knownState && !state {
+	if knownState && !state && !req.AllowBusinessFailure {
 		code := "business_rejected"
 		if mutating {
 			code = "mutation_rejected"
@@ -597,6 +637,19 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		"site":      origin(target),
 		"response":  payload,
 	}, nil
+}
+
+func normalizeSSOHTTPRedirect(previous, next, serviceTarget *url.URL) {
+	if previous == nil || next == nil || serviceTarget == nil || !strings.EqualFold(serviceTarget.Scheme, "https") {
+		return
+	}
+	if strings.EqualFold(previous.Host, serviceTarget.Host) && strings.EqualFold(next.Host, "authserver.csust.edu.cn") && strings.EqualFold(next.Scheme, "http") {
+		next.Scheme = "https"
+		return
+	}
+	if strings.EqualFold(previous.Host, "authserver.csust.edu.cn") && strings.EqualFold(next.Host, serviceTarget.Host) && strings.EqualFold(next.Scheme, "http") {
+		next.Scheme = "https"
+	}
 }
 
 func responsePayload(response *http.Response, content []byte, decoded any) map[string]any {
@@ -700,6 +753,17 @@ func jsonBusinessState(value any) (bool, bool) {
 			if value, ok := typed["ok"].(bool); ok {
 				states = append(states, value)
 			}
+			if value, exists := typed["error"]; exists {
+				switch value := value.(type) {
+				case nil:
+					// Several JSON APIs use {error:null,data:...} as their success envelope.
+					states = append(states, true)
+				case string:
+					if strings.TrimSpace(value) == "" {
+						states = append(states, true)
+					}
+				}
+			}
 			if code, ok := typed["code"]; ok {
 				switch numeric := code.(type) {
 				case float64:
@@ -714,6 +778,14 @@ func jsonBusinessState(value any) (bool, bool) {
 					} else if parsed, err := strconv.Atoi(numeric); err == nil && parsed >= 400 && parsed <= 599 {
 						states = append(states, false)
 					}
+				}
+			}
+			if state, ok := typed["state"].(string); ok {
+				switch strings.ToLower(strings.TrimSpace(state)) {
+				case "success", "ok", "1":
+					states = append(states, true)
+				case "error", "fail", "failed", "failure", "0":
+					states = append(states, false)
 				}
 			}
 			for _, key := range []string{"message", "messages", "msg", "error", "response"} {
@@ -747,7 +819,7 @@ func jsonBusinessState(value any) (bool, bool) {
 
 var successPattern = regexp.MustCompile(`^(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
 var sideEffectSitePattern = regexp.MustCompile(`(?i)(?:/(?:logout|delete|remove|add|join|bind|ignore|favorite|recommend|subscribe|unsubscribe|cancel|submit|save|update|sort)(?:[/?._]|$)|[?&](?:action|op|ACTION|operation)=)`)
-var sensitiveSiteParam = regexp.MustCompile(`(?i)pass|password|token|secret|sign|randomcode|ticket|cookie|session|csrf|nonce|execution|flowexecutionkey|state|lt`)
+var sensitiveSiteParam = regexp.MustCompile(`(?i)pass|password|pwd|encrypted|token|secret|sign|randomcode|ticket|cookie|session|csrf|nonce|execution|flowexecutionkey|(?:^|[_-])(?:state|lt)(?:$|[_-])`)
 var siteURLPattern = regexp.MustCompile(`https?://[^\s"']+`)
 
 func successMessage(value string) bool {

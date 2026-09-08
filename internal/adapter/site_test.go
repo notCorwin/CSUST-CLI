@@ -79,6 +79,11 @@ func TestSiteRedirectPolicy(t *testing.T) {
 	if safeSiteSSORedirect(base, auth, downgrade) {
 		t.Fatal("unexpected SSO HTTPS downgrade")
 	}
+	handoff, _ := url.Parse("http://authserver.csust.edu.cn/authserver/login")
+	normalizeSSOHTTPRedirect(service, handoff, base)
+	if handoff.Scheme != "https" {
+		t.Fatalf("expected HTTPS SSO handoff, got %s", handoff)
+	}
 }
 
 func TestSiteBusinessStateAndBinaryResponse(t *testing.T) {

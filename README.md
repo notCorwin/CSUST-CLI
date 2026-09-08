@@ -70,6 +70,36 @@ go run . teaching request --name homework-stu-submit-do \
   --data answer='<html>...</html>' --yes --json
 ```
 
+## 业务服务适配器
+
+`services catalog` 返回已确认的业务服务、实际主机、能力类型和 `confidence_evidence`。业务命令使用语义参数；站点路径和接口细节只存在于 Go adapter 中，结果统一包含 `ok`、`submitted`、`confirmed` 和 `evidence`。
+
+```bash
+go run . services catalog --json
+go run . admission-notice query --id-card 身份证号 --password-stdin --json
+go run . admission-notice print --id-card 身份证号 --password-stdin --output admission.pdf --json
+go run . journal search --journal transport --query 软岩 --page-size 20 --json
+go run . journal article --journal highways --id 20250104 --json
+go run . employment list --kind career --json
+go run . employment detail --kind career --id 714397 --json
+go run . onlinejudge problems --limit 20 --insecure --json
+go run . onlinejudge submit --problem-id 1000 --language C++ --code @solution.cpp --yes --insecure --json
+go run . party-exam scores --cookie-file exam.cookies.txt --json
+go run . student-record form --json
+go run . student-record upload --field photo --file photo.jpg --yes --json
+go run . continuing-education status --json
+go run . graduate-admissions login --username 准考证号 --password-stdin --captcha 验证码 --json
+go run . archive status --system student --json
+go run . archive login --system student --username 账号 --password-stdin --captcha 验证码 --json
+go run . archive report --system student --report-code CODE --filter student_id=学号 --json
+go run . cms-admin login --scope website --username 管理员 --password-stdin --captcha 验证码 --json
+go run . security-admin login --username 用户名 --password-stdin --insecure --json
+go run . virtual-lab status --json
+go run . library-center status --json
+```
+
+已覆盖研究生录取通知书、交通科学与工程/公路与汽运期刊、OnlineJudge、云就业、档案预约、继续教育、党校考试、两个档案系统、虚拟实验中心、图书馆 CAS 个人中心及旧招生/邮件/后台入口。需要登录的系统使用各自 `--cookie-file`；统一认证可用 `library-center login` 或 `legacy-mail login`，档案系统登录令牌由 `archive login` 保存并由后续 `archive` 命令自动读取。OnlineJudge 的过期证书仅在显式 `--insecure` 时接受。
+
 ## VPN 映射与调用
 
 `csust vpn routes` 固化门户当前 SPA、条件跳转和兼容/native 入口的 115 条可寻址路径及页面级 API 映射；`csust vpn controls` 固化登录方式、设备注册、协议/授权弹窗、门户 shell 菜单、工作台标签/搜索/排序、应用卡片菜单、申请资源下拉、审批/消息/安全中心/文件分享/用户中心等 77 类控件和弹窗映射；`csust vpn catalog` 固化当前前端 bundle 提取出的全部 249 个 API（含 GET/POST、动态路径、查询参数、JSON/multipart 请求、是否可能修改远端状态），并附带图片、文件、协议资源映射。
@@ -190,6 +220,6 @@ go run . --help
 GitHub Actions 在每次 push 和 pull request 时执行 Go 测试、静态检查、构建与命令入口检查。
 测试使用本地 HTTP 服务与模拟响应，不会提交学校账户数据。
 
-验证记录（2026-09-08）：本地 Go 31 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱、图书馆远程访问、慕课、网络教学和招生录取入口；`site discover` 深度 2 抓取 200 个页面，发现 38 个官方主机（其中目录已覆盖 46 个已观察服务），并记录了 2 个明确的 404/协议错误。
-线上尝试了教务登录、课表、成绩、教材列表、VPN 登录与状态、教学课程及质量保障状态和菜单；本机代理下旧教务站返回 HTTP 502，VPN 连接失败，直连探测也未成功。因此这轮没有线上业务验收通过记录，也未执行线上业务写操作。
+验证记录（2026-09-09）：`go test ./...` 与 `go vet ./...` 通过；覆盖统一结果模型、业务 JSON 解包、敏感字段脱敏、脚本数据解析、页面快照、动作引用、二进制下载、会话刷新、URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。已对期刊检索、就业信息、录取通知书接口、OnlineJudge 题目、党校会话、档案系统入口、继续教育、虚拟实验中心、图书馆 CAS 入口及指定旧系统进行协议级实测；写操作仅在获得远端成功状态或回读证据时报告 `confirmed: true`。
+线上尝试了教务登录、课表、成绩、教材列表、VPN 登录与状态、教学课程及质量保障状态和菜单；本机代理下旧教务站返回 HTTP 502，VPN 连接失败，直连探测也未成功。因此本轮没有取得教务/VPN 的线上业务验收通过记录，也未执行线上业务写操作。
 目录中的页面/API 数量表示已映射范围，不等同于每个端点已通过线上验证。

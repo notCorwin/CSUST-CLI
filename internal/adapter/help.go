@@ -22,6 +22,22 @@ func nativeUsage(args []string) []byte {
   vpn                         VPN 门户与 API
   teaching                    网络教学平台
   quality                     教学质量保障系统
+  services                    已映射业务服务目录
+  admission-notice            研究生录取通知书查询/打印
+  journal                     期刊检索
+  employment                  云就业信息
+  onlinejudge                 OnlineJudge 题目/竞赛/提交
+  party-exam                  党校课程与成绩
+  archive                     学生/综合档案系统
+  student-record              学籍档案预约
+  continuing-education        继续教育学生信息
+  virtual-lab                公路交通虚拟实验中心
+  library-center              图书馆个人中心
+  graduate-admissions         研究生招生旧系统
+  legacy-mail                 旧邮件改密入口
+  security-admin              安全运维管理平台
+  cms-admin                   内容后台
+  cms-admin-legacy            旧内容后台
   site                        任意 csust.edu.cn 子域名
 
 页面能力使用结构化快照；写操作需要 --yes，并返回 confirmed/evidence。
