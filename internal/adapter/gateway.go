@@ -51,13 +51,13 @@ func (a NativeSite) runGatewayCommand(ctx context.Context, args []string, jsonMo
 		return true, nil, []byte("错误: " + runErr.Error() + "\n"), 2, nil
 	}
 	if jsonMode {
-		encoded, err := json.Marshal(result)
+		encoded, err := json.Marshal(stripSiteInternal(result))
 		if err != nil {
 			return true, nil, nil, 2, err
 		}
 		return true, encoded, nil, 0, nil
 	}
-	return true, []byte(renderGatewayResult(result)), nil, 0, nil
+	return true, []byte(renderGatewayResult(stripSiteInternal(result).(map[string]any))), nil, 0, nil
 }
 
 func gatewayCanRecoverVPN(args []string) bool {
@@ -368,9 +368,9 @@ func (a NativeSite) executeGateway(ctx context.Context, service string, request 
 	}
 	if request.raw {
 		if response, ok := result["response"].(map[string]any); ok {
-			if body, ok := response["body"].(string); ok {
+			if body, ok := response["body_internal"].(string); ok {
 				result["raw_body"] = body
-				result["raw_url"] = response["url"]
+				result["raw_url"] = response["raw_url"]
 			}
 		}
 	}

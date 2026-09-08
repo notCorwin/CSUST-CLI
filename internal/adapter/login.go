@@ -7,8 +7,8 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -67,7 +67,10 @@ func (a NativeSite) logoutAcademic(ctx context.Context) (map[string]any, *siteEr
 	}
 	response, _ := result["response"].(map[string]any)
 	status, _ := response["status"].(int)
-	body, _ := response["body"].(string)
+	body, _ := response["body_internal"].(string)
+	if body == "" {
+		body, _ = response["body"].(string)
+	}
 	confirmed, evidence := false, "unknown"
 	switch {
 	case status == http.StatusNoContent:
@@ -146,8 +149,11 @@ func parseLoginOptions(args []string) (loginOptions, *siteError) {
 		return loginOptions{}, &siteError{Code: "invalid_argument", Message: "--auth 必须是 auto、sso 或 local"}
 	}
 	if options.passwordStdin {
-		password, err := io.ReadAll(os.Stdin)
+		password, err := readBoundedSiteInput(os.Stdin)
 		if err != nil {
+			if errors.Is(err, errSiteRequestTooLarge) {
+				return loginOptions{}, siteRequestTooLarge("标准输入密码")
+			}
 			return loginOptions{}, &siteError{Code: "credentials_required", Message: "无法读取标准输入密码: " + err.Error()}
 		}
 		options.password = strings.TrimRight(string(password), "\r\n")
@@ -168,7 +174,7 @@ func (a NativeSite) loginAcademic(ctx context.Context, options loginOptions) (ma
 		baseValue = "http://xk.csust.edu.cn/"
 	}
 	base, parseErr := url.Parse(baseValue)
-	if parseErr != nil || base == nil || base.Host == "" {
+	if parseErr != nil || base == nil || base.Host == "" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || (base.Scheme != "http" && base.Scheme != "https") {
 		return nil, &siteError{Code: "invalid_path", Message: "CSUST_BASE_URL 地址无效"}
 	}
 	base.Path, base.RawQuery, base.Fragment = "/", "", ""
@@ -416,8 +422,14 @@ func loginBody(result map[string]any) (string, string, *siteError) {
 	if !ok {
 		return "", "", &siteError{Code: "parse_error", Message: "认证响应不是文本页面"}
 	}
-	body, _ := response["body"].(string)
-	pageURL, _ := response["url"].(string)
+	body, _ := response["body_internal"].(string)
+	if body == "" {
+		body, _ = response["body"].(string)
+	}
+	pageURL, _ := response["raw_url"].(string)
+	if pageURL == "" {
+		pageURL, _ = response["url"].(string)
+	}
 	return body, pageURL, nil
 }
 

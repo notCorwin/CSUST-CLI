@@ -140,7 +140,7 @@ func pageEvent(value string) string {
 		}
 		return r
 	}, value)
-	return strings.TrimSpace(value)
+	return strings.TrimSpace(safeSiteErrorText(value))
 }
 
 func pageDisplayText(node *pageNode) string {
@@ -366,15 +366,16 @@ func pagePath(pageURL, target string) string {
 	if err != nil || baseErr != nil || parsed.Scheme != base.Scheme || !strings.EqualFold(parsed.Host, base.Host) {
 		return safeSiteURL(parsed)
 	}
-	path := parsed.EscapedPath()
+	safe := redactedURL(parsed)
+	path := safe.EscapedPath()
 	if path == "" {
 		path = "/"
 	}
-	if parsed.RawQuery != "" {
-		path += "?" + parsed.RawQuery
+	if safe.RawQuery != "" {
+		path += "?" + safe.RawQuery
 	}
-	if parsed.Fragment != "" {
-		path += "#" + parsed.Fragment
+	if safe.Fragment != "" {
+		path += "#" + safe.Fragment
 	}
 	return path
 }
@@ -388,10 +389,11 @@ func pageLink(node *pageNode, pageURL string) map[string]any {
 	}
 	target := pageURLValue(pageURL, href)
 	return map[string]any{
-		"text":    pageDisplayText(node),
-		"href":    pageSafeValue(href, pageURL),
-		"path":    pagePath(pageURL, target),
-		"onclick": pageEvent(node.attr("onclick")),
+		"text":     pageDisplayText(node),
+		"href":     pageSafeValue(href, pageURL),
+		"path":     pagePath(pageURL, target),
+		"raw_path": target,
+		"onclick":  pageEvent(node.attr("onclick")),
 	}
 }
 

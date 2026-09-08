@@ -47,7 +47,7 @@ func TestNativeAcademicEvaluationUsesDirectService(t *testing.T) {
 	if err := json.Unmarshal(stdout, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["ok"] != true || payload["confirmed"] != true || payload["operation"] != "save" {
+	if payload["ok"] != true || payload["submitted"] != true || payload["confirmed"] != true || payload["operation"] != "save" || payload["evidence"] != "save-response-confirmed" {
 		t.Fatalf("unexpected save result: %#v", payload)
 	}
 }

@@ -530,8 +530,14 @@ func (a NativeSite) runWebGraduation(ctx context.Context, args []string) (map[st
 		return nil, err
 	}
 	response, _ := landing["response"].(map[string]any)
-	source, _ := response["body"].(string)
-	pageURL, _ := response["url"].(string)
+	source, _ := response["body_internal"].(string)
+	if source == "" {
+		source, _ = response["body"].(string)
+	}
+	pageURL, _ := response["raw_url"].(string)
+	if pageURL == "" {
+		pageURL, _ = response["url"].(string)
+	}
 	document, parseErr := parsePage(source)
 	if parseErr != nil {
 		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}

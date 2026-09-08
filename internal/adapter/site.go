@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -17,14 +18,19 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
 const (
 	siteDomain = "csust.edu.cn"
 	// ponytail: keep printable responses bounded; binary downloads stream to disk.
-	maxSiteBody = 64 << 20
+	maxSiteBody        = 64 << 20
+	maxSiteRequestBody = 64 << 20
 )
+
+var errSiteRequestTooLarge = errors.New("site request body exceeds limit")
 
 // NativeSite handles the direct-protocol path for the generic site API.
 type NativeSite struct{}
@@ -58,6 +64,8 @@ type pair struct{ name, value string }
 
 type filePart struct {
 	name, filename string
+	path           string
+	size           int64
 	content        []byte
 }
 
@@ -194,7 +202,7 @@ func (a NativeSite) Run(ctx context.Context, args []string, jsonMode bool) (hand
 		return true, nil, []byte("错误: " + runErr.Error() + "\n"), 2, nil
 	}
 	if jsonMode {
-		encoded, encodeErr := json.Marshal(result)
+		encoded, encodeErr := json.Marshal(stripSiteInternal(result))
 		if encodeErr != nil {
 			return true, nil, nil, 2, encodeErr
 		}
@@ -380,13 +388,24 @@ func readJSONArgument(value string) (any, *siteError) {
 	var err error
 	switch {
 	case value == "-":
-		content, err = io.ReadAll(os.Stdin)
+		content, err = readBoundedSiteInput(os.Stdin)
 	case strings.HasPrefix(value, "@"):
-		content, err = os.ReadFile(expandUserPath(value[1:]))
+		file, openErr := openSiteInput(expandUserPath(value[1:]))
+		if openErr != nil {
+			return nil, &siteError{Code: "invalid_argument", Message: "无法读取 JSON 请求体: " + openErr.Error()}
+		}
+		content, err = readBoundedSiteInput(file)
+		_ = file.Close()
 	default:
 		content = []byte(value)
+		if len(content) > maxSiteRequestBody {
+			return nil, siteRequestTooLarge("JSON 请求体")
+		}
 	}
 	if err != nil {
+		if errors.Is(err, errSiteRequestTooLarge) {
+			return nil, siteRequestTooLarge("JSON 请求体")
+		}
 		return nil, &siteError{Code: "invalid_argument", Message: "无法读取 JSON 请求体: " + err.Error()}
 	}
 	var body any
@@ -401,11 +420,48 @@ func readFilePart(value string) (filePart, *siteError) {
 	if parseErr != nil {
 		return filePart{}, parseErr
 	}
-	content, err := os.ReadFile(expandUserPath(pairValue.value))
+	return siteFilePart(pairValue.name, pairValue.value, "上传文件")
+}
+
+func siteFilePart(name, filename, label string) (filePart, *siteError) {
+	filename = expandUserPath(filename)
+	info, err := os.Lstat(filename)
 	if err != nil {
-		return filePart{}, &siteError{Code: "invalid_argument", Message: "无法读取上传文件: " + err.Error()}
+		return filePart{}, &siteError{Code: "invalid_argument", Message: "无法读取" + label + ": " + err.Error()}
 	}
-	return filePart{name: pairValue.name, filename: filepath.Base(pairValue.value), content: content}, nil
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return filePart{}, &siteError{Code: "invalid_argument", Message: label + "必须是普通文件且不能是符号链接"}
+	}
+	if info.Size() > maxSiteRequestBody {
+		return filePart{}, siteRequestTooLarge(label)
+	}
+	return filePart{name: name, filename: filepath.Base(filename), path: filename, size: info.Size()}, nil
+}
+
+func openSiteInput(filename string) (*os.File, error) {
+	info, err := os.Lstat(filename)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("输入文件必须是普通文件且不能是符号链接")
+	}
+	return os.Open(filename)
+}
+
+func readBoundedSiteInput(source io.Reader) ([]byte, error) {
+	content, err := io.ReadAll(io.LimitReader(source, maxSiteRequestBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > maxSiteRequestBody {
+		return nil, errSiteRequestTooLarge
+	}
+	return content, nil
+}
+
+func siteRequestTooLarge(label string) *siteError {
+	return &siteError{Code: "request_too_large", Message: label + "超过 64 MiB 限制"}
 }
 
 func supportedSiteMethod(method string) bool {
@@ -429,15 +485,49 @@ type siteError struct {
 	Details map[string]any
 }
 
-func (e *siteError) Error() string { return e.Message }
+func (e *siteError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return safeSiteErrorText(e.Message)
+}
 
 func errorJSON(err *siteError) []byte {
-	payload := map[string]any{"error": err.Message, "code": err.Code}
+	payload := map[string]any{"error": safeSiteErrorText(err.Message), "code": err.Code}
 	if len(err.Details) > 0 {
-		payload["details"] = err.Details
+		payload["details"] = redactSiteJSON(stripSiteInternal(err.Details))
 	}
 	encoded, _ := json.Marshal(payload)
 	return encoded
+}
+
+func stripSiteInternal(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			switch key {
+			case "raw_url", "raw_path", "body_internal", "json_internal":
+				continue
+			}
+			result[key] = stripSiteInternal(item)
+		}
+		return result
+	case []any:
+		result := make([]any, len(typed))
+		for index, item := range typed {
+			result[index] = stripSiteInternal(item)
+		}
+		return result
+	case []map[string]any:
+		result := make([]map[string]any, len(typed))
+		for index, item := range typed {
+			result[index] = stripSiteInternal(item).(map[string]any)
+		}
+		return result
+	default:
+		return value
+	}
 }
 
 func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]any, *siteError) {
@@ -462,9 +552,12 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 	if mutating && !req.Yes {
 		return nil, &siteError{Code: "confirmation_required", Message: "site 请求可能修改远端数据，请加 --yes"}
 	}
-	body, contentType, bodyErr := requestBody(req)
+	body, contentType, contentLength, cleanupBody, bodyErr := requestBody(req)
 	if bodyErr != nil {
 		return nil, bodyErr
+	}
+	if cleanupBody != nil {
+		defer cleanupBody()
 	}
 	requestInfo := map[string]any{
 		"method": req.Method,
@@ -490,6 +583,9 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 	}
 	if contentType != "" {
 		httpRequest.Header.Set("Content-Type", contentType)
+	}
+	if body != nil {
+		httpRequest.ContentLength = contentLength
 	}
 	httpRequest.Header.Set("User-Agent", "csust-cli-go/0.4.0")
 	httpRequest.Header.Set("Accept", "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8")
@@ -532,6 +628,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 			return nil
 		},
 	}
+	warnHTTPTransport(target)
 	response, doErr := httpClient.Do(httpRequest)
 	if doErr != nil {
 		return nil, requestFailure(req, requestInfo, "network_error", "请求失败: "+doErr.Error())
@@ -654,12 +751,15 @@ func normalizeSSOHTTPRedirect(previous, next, serviceTarget *url.URL) {
 
 func responsePayload(response *http.Response, content []byte, decoded any) map[string]any {
 	responseURL := ""
+	rawURL := ""
 	if response.Request != nil && response.Request.URL != nil {
 		responseURL = safeSiteURL(response.Request.URL)
+		rawURL = response.Request.URL.String()
 	}
 	payload := map[string]any{
 		"status":       response.StatusCode,
 		"url":          responseURL,
+		"raw_url":      rawURL,
 		"content_type": response.Header.Get("Content-Type"),
 		"adapter":      "http-contract",
 		"contract":     "http-response-v1",
@@ -678,7 +778,8 @@ func responsePayload(response *http.Response, content []byte, decoded any) map[s
 				"bytes":        len(content),
 			}
 		}
-		payload["body"] = string(content)
+		payload["body"] = redactSiteText(string(content), payload["format"] == "html")
+		payload["body_internal"] = string(content)
 	}
 	return payload
 }
@@ -701,6 +802,8 @@ func redactSiteJSON(value any) any {
 			result[index] = redactSiteJSON(item)
 		}
 		return result
+	case string:
+		return redactSiteText(typed, false)
 	default:
 		return value
 	}
@@ -712,6 +815,17 @@ func isHTMLSiteResponse(response *http.Response, content []byte) bool {
 
 func origin(target *url.URL) string {
 	return (&url.URL{Scheme: target.Scheme, Host: target.Host}).String()
+}
+
+var httpTransportWarning sync.Once
+
+func warnHTTPTransport(target *url.URL) {
+	if target == nil || !strings.EqualFold(target.Scheme, "http") {
+		return
+	}
+	httpTransportWarning.Do(func() {
+		_, _ = fmt.Fprintf(os.Stderr, "警告: 目标 %s 使用 HTTP，不保证传输机密性\n", target.Host)
+	})
 }
 
 func requestFailure(req siteRequest, request map[string]any, code, message string) *siteError {
@@ -854,6 +968,11 @@ func safeSiteURL(target *url.URL) string {
 		return ""
 	}
 	copy := *target
+	return redactedURL(&copy).String()
+}
+
+func redactedURL(target *url.URL) *url.URL {
+	copy := *target
 	copy.User = nil
 	query := copy.Query()
 	for name, values := range query {
@@ -866,17 +985,96 @@ func safeSiteURL(target *url.URL) string {
 	}
 	copy.RawQuery = query.Encode()
 	copy.Fragment = ""
-	return copy.String()
+	return &copy
+}
+
+func safeSiteReference(value string) string {
+	if value == "" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "javascript:") {
+		return value
+	}
+	target, err := url.Parse(value)
+	if err != nil {
+		return "<redacted>"
+	}
+	return redactedURL(target).String()
+}
+
+func redactSiteText(value string, htmlResponse bool) string {
+	if !htmlResponse {
+		return safeSiteErrorText(value)
+	}
+	value = redactSiteHTML(value)
+	return safeSiteErrorText(value)
+}
+
+var (
+	siteHTMLInputTag   = regexp.MustCompile(`(?is)<input\b[^>]*>`)
+	siteHTMLTextArea   = regexp.MustCompile(`(?is)<textarea\b[^>]*>.*?</textarea>`)
+	siteHTMLTag        = regexp.MustCompile(`(?is)<[a-z][^>]*>`)
+	siteHTMLURLAttr    = regexp.MustCompile(`(?is)(\b(?:href|action|src|data-url|data-href)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	siteHTMLValueAttr  = regexp.MustCompile(`(?is)(\bvalue\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s>]+)`)
+	siteHTMLSecretAttr = regexp.MustCompile(`(?is)(\b(?:value|content|data-value|data-token|data-secret|data-csrf(?:-token)?|data-nonce)\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s>]+)`)
+	siteHTMLAttr       = regexp.MustCompile(`(?is)\b(?:name|id|type)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	siteSecretText     = regexp.MustCompile(`(?i)(\b(?:password|passwd|pwd|token|secret|csrf|nonce|execution|ticket|session)[\w-]*\b\s*[:=]\s*)["']?[^\s<"']+`)
+	siteInlineSecret   = regexp.MustCompile(`(?i)((?:[?&]|\b)(?:password|passwd|pwd|token|secret|csrf|nonce|execution|ticket|session)[\w-]*\s*=\s*)["']?[^&"'\s<>)]+`)
+)
+
+func redactSiteHTML(source string) string {
+	source = siteHTMLInputTag.ReplaceAllStringFunc(source, func(tag string) string {
+		if !siteHTMLSensitiveTag(tag) {
+			return tag
+		}
+		return siteHTMLValueAttr.ReplaceAllString(tag, `${1}"<redacted>"`)
+	})
+	source = siteHTMLTextArea.ReplaceAllStringFunc(source, func(tag string) string {
+		if !siteHTMLSensitiveTag(tag[:strings.Index(tag, ">")+1]) {
+			return tag
+		}
+		end := strings.Index(tag, ">")
+		close := strings.LastIndex(strings.ToLower(tag), "</textarea>")
+		if end < 0 || close < end {
+			return tag
+		}
+		return tag[:end+1] + "<redacted>" + tag[close:]
+	})
+	source = siteHTMLTag.ReplaceAllStringFunc(source, func(tag string) string {
+		if !siteHTMLSensitiveTag(tag) {
+			return tag
+		}
+		return siteHTMLSecretAttr.ReplaceAllString(tag, `${1}"<redacted>"`)
+	})
+	source = siteHTMLURLAttr.ReplaceAllStringFunc(source, func(attribute string) string {
+		matches := siteHTMLURLAttr.FindStringSubmatch(attribute)
+		if len(matches) < 5 {
+			return attribute
+		}
+		value := firstNonEmpty(matches[2], matches[3], matches[4])
+		return matches[1] + `"` + safeSiteReference(value) + `"`
+	})
+	source = siteSecretText.ReplaceAllString(source, `${1}<redacted>`)
+	return siteInlineSecret.ReplaceAllString(source, `${1}<redacted>`)
+}
+
+func siteHTMLSensitiveTag(tag string) bool {
+	for _, match := range siteHTMLAttr.FindAllStringSubmatch(tag, -1) {
+		value := strings.ToLower(firstNonEmpty(match[1], match[2], match[3]))
+		if sensitiveSiteParam.MatchString(value) || value == "password" {
+			return true
+		}
+	}
+	return false
 }
 
 func safeSiteErrorText(value string) string {
-	return siteURLPattern.ReplaceAllStringFunc(value, func(candidate string) string {
+	value = siteURLPattern.ReplaceAllStringFunc(value, func(candidate string) string {
 		target, err := url.Parse(candidate)
 		if err != nil {
 			return "<redacted-url>"
 		}
 		return safeSiteURL(target)
 	})
+	value = siteSecretText.ReplaceAllString(value, `${1}<redacted>`)
+	return siteInlineSecret.ReplaceAllString(value, `${1}<redacted>`)
 }
 
 func isBinarySiteResponse(response *http.Response) bool {
@@ -990,6 +1188,9 @@ func cookieFile(explicit string, target *url.URL) string {
 	if explicit != "" {
 		return explicit
 	}
+	if configured := os.Getenv("CSUST_COOKIE_FILE"); configured != "" {
+		return expandUserPath(configured)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".", ".csust-cookies", cookieHost(target)+".cookies.txt")
@@ -1066,6 +1267,29 @@ func loadCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
 }
 
 func saveCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
+	if err := validateSessionFile(filename); err != nil {
+		return err
+	}
+	return withSiteFileLock(filename, func() error {
+		latest, err := cookiejar.New(nil)
+		if err != nil {
+			return err
+		}
+		if err := loadCookies(latest, filename, target); err != nil {
+			return err
+		}
+		for _, cookie := range cookieSnapshot(jar, target) {
+			latest.SetCookies(target, []*http.Cookie{cookie})
+		}
+		content := cookieFileContent(latest, target)
+		if content == "" {
+			return nil
+		}
+		return writeCookieFileUnlocked(filename, content)
+	})
+}
+
+func validateSessionFile(filename string) error {
 	if info, err := os.Lstat(filename); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
@@ -1073,6 +1297,10 @@ func saveCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	return nil
+}
+
+func cookieSnapshot(jar *cookiejar.Jar, target *url.URL) []*http.Cookie {
 	root := *target
 	root.Path = "/"
 	cookies := append(jar.Cookies(&root), jar.Cookies(target)...)
@@ -1086,9 +1314,13 @@ func saveCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
 		seen[key] = true
 		unique = append(unique, cookie)
 	}
-	cookies = unique
+	return unique
+}
+
+func cookieFileContent(jar *cookiejar.Jar, target *url.URL) string {
+	cookies := cookieSnapshot(jar, target)
 	if len(cookies) == 0 {
-		return nil
+		return ""
 	}
 	lines := []string{"# Netscape HTTP Cookie File"}
 	for _, cookie := range cookies {
@@ -1106,10 +1338,14 @@ func saveCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
 		}
 		lines = append(lines, strings.Join([]string{domain, "TRUE", cookiePath, strconv.FormatBool(cookie.Secure), strconv.FormatInt(expires, 10), cookie.Name, cookie.Value}, "\t"))
 	}
-	return writeCookieFile(filename, strings.Join(lines, "\n")+"\n")
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func writeCookieFile(filename, content string) error {
+	return withSiteFileLock(filename, func() error { return writeCookieFileUnlocked(filename, content) })
+}
+
+func writeCookieFileUnlocked(filename, content string) error {
 	parent := filepath.Dir(filename)
 	if err := os.MkdirAll(parent, 0700); err != nil {
 		return err
@@ -1132,6 +1368,23 @@ func writeCookieFile(filename, content string) error {
 		return err
 	}
 	return os.Rename(temporaryName, filename)
+}
+
+func withSiteFileLock(filename string, action func() error) error {
+	parent := filepath.Dir(filename)
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filename+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	return action()
 }
 
 func renderSiteResult(result map[string]any) string {
@@ -1166,14 +1419,12 @@ func resolveSite(req siteRequest) (*url.URL, string, *siteError) {
 		}
 		info = serviceInfo{host: strings.ToLower(parsed.Host), scheme: "https", path: "/"}
 	}
-	if key == "academic" {
-		if base := os.Getenv("CSUST_BASE_URL"); base != "" {
-			parsedBase, parseErr := url.Parse(base)
-			if parseErr != nil || parsedBase.Host == "" || (parsedBase.Scheme != "http" && parsedBase.Scheme != "https") {
-				return nil, "", &siteError{Code: "invalid_path", Message: "CSUST_BASE_URL 地址无效"}
-			}
-			info.host, info.scheme, info.path = parsedBase.Host, parsedBase.Scheme, "/"
+	if base := os.Getenv("CSUST_BASE_URL"); base != "" {
+		parsedBase, parseErr := url.Parse(base)
+		if parseErr != nil || parsedBase.Host == "" || parsedBase.Hostname() == "" || parsedBase.User != nil || parsedBase.RawQuery != "" || parsedBase.Fragment != "" || (parsedBase.Scheme != "http" && parsedBase.Scheme != "https") {
+			return nil, "", &siteError{Code: "invalid_path", Message: "CSUST_BASE_URL 地址无效"}
 		}
+		info.host, info.scheme, info.path = parsedBase.Host, parsedBase.Scheme, "/"
 	}
 	if req.Scheme != "" {
 		info.scheme = req.Scheme
@@ -1212,44 +1463,132 @@ func resolveSite(req siteRequest) (*url.URL, string, *siteError) {
 	return target, cookieFile(req.CookieFile, target), nil
 }
 
-func requestBody(req siteRequest) (io.Reader, string, *siteError) {
+func requestBody(req siteRequest) (io.Reader, string, int64, func(), *siteError) {
 	if req.HasJSON {
 		var buffer bytes.Buffer
 		encoder := json.NewEncoder(&buffer)
 		encoder.SetEscapeHTML(false)
 		if err := encoder.Encode(req.JSON); err != nil {
-			return nil, "", &siteError{Code: "invalid_argument", Message: "JSON 请求体无效: " + err.Error()}
+			return nil, "", 0, nil, &siteError{Code: "invalid_argument", Message: "JSON 请求体无效: " + err.Error()}
 		}
-		return &buffer, "application/json", nil
+		if buffer.Len() > maxSiteRequestBody {
+			return nil, "", 0, nil, siteRequestTooLarge("JSON 请求体")
+		}
+		return bytes.NewReader(buffer.Bytes()), "application/json", int64(buffer.Len()), nil, nil
 	}
 	if len(req.Files) > 0 {
-		var buffer bytes.Buffer
-		writer := multipart.NewWriter(&buffer)
+		temporary, err := os.CreateTemp("", ".csust-request-*")
+		if err != nil {
+			return nil, "", 0, nil, &siteError{Code: "request_body_failed", Message: "无法创建临时请求体: " + err.Error()}
+		}
+		temporaryName := temporary.Name()
+		cleanup := func() {
+			_ = temporary.Close()
+			_ = os.Remove(temporaryName)
+		}
+		if err := temporary.Chmod(0600); err != nil {
+			cleanup()
+			return nil, "", 0, nil, &siteError{Code: "request_body_failed", Message: "无法设置临时请求体权限: " + err.Error()}
+		}
+		limited := &siteBodyWriter{writer: temporary, remaining: maxSiteRequestBody}
+		writer := multipart.NewWriter(limited)
 		for _, item := range req.Data {
 			if err := writer.WriteField(item.name, item.value); err != nil {
-				return nil, "", &siteError{Code: "invalid_argument", Message: "表单字段无效: " + err.Error()}
+				cleanup()
+				if errors.Is(err, errSiteRequestTooLarge) {
+					return nil, "", 0, nil, siteRequestTooLarge("multipart 请求体")
+				}
+				return nil, "", 0, nil, &siteError{Code: "invalid_argument", Message: "表单字段无效: " + err.Error()}
 			}
 		}
 		for _, item := range req.Files {
 			part, err := writer.CreateFormFile(item.name, item.filename)
 			if err != nil {
-				return nil, "", &siteError{Code: "invalid_argument", Message: "上传字段无效: " + err.Error()}
+				cleanup()
+				if errors.Is(err, errSiteRequestTooLarge) {
+					return nil, "", 0, nil, siteRequestTooLarge("multipart 请求体")
+				}
+				return nil, "", 0, nil, &siteError{Code: "invalid_argument", Message: "上传字段无效: " + err.Error()}
 			}
-			if _, err := part.Write(item.content); err != nil {
-				return nil, "", &siteError{Code: "invalid_argument", Message: "上传文件读取失败: " + err.Error()}
+			var source io.Reader = bytes.NewReader(item.content)
+			var file *os.File
+			if item.path != "" {
+				file, err = openSiteInput(item.path)
+				if err != nil {
+					cleanup()
+					return nil, "", 0, nil, &siteError{Code: "invalid_argument", Message: "无法读取上传文件: " + err.Error()}
+				}
+				source = file
+			}
+			_, copyErr := io.Copy(part, source)
+			if file != nil {
+				_ = file.Close()
+			}
+			if copyErr != nil {
+				cleanup()
+				if errors.Is(copyErr, errSiteRequestTooLarge) {
+					return nil, "", 0, nil, siteRequestTooLarge("multipart 请求体")
+				}
+				return nil, "", 0, nil, &siteError{Code: "invalid_argument", Message: "上传文件读取失败: " + copyErr.Error()}
 			}
 		}
 		if err := writer.Close(); err != nil {
-			return nil, "", &siteError{Code: "invalid_argument", Message: "multipart 请求无效: " + err.Error()}
+			cleanup()
+			if errors.Is(err, errSiteRequestTooLarge) {
+				return nil, "", 0, nil, siteRequestTooLarge("multipart 请求体")
+			}
+			return nil, "", 0, nil, &siteError{Code: "invalid_argument", Message: "multipart 请求无效: " + err.Error()}
 		}
-		return &buffer, writer.FormDataContentType(), nil
+		if err := temporary.Close(); err != nil {
+			cleanup()
+			return nil, "", 0, nil, &siteError{Code: "request_body_failed", Message: "无法关闭临时请求体: " + err.Error()}
+		}
+		reader, err := os.Open(temporaryName)
+		if err != nil {
+			cleanup()
+			return nil, "", 0, nil, &siteError{Code: "request_body_failed", Message: "无法打开临时请求体: " + err.Error()}
+		}
+		info, err := reader.Stat()
+		if err != nil {
+			_ = reader.Close()
+			cleanup()
+			return nil, "", 0, nil, &siteError{Code: "request_body_failed", Message: "无法检查临时请求体: " + err.Error()}
+		}
+		cleanup = func() {
+			_ = reader.Close()
+			_ = os.Remove(temporaryName)
+		}
+		return reader, writer.FormDataContentType(), info.Size(), cleanup, nil
 	}
 	if len(req.Data) > 0 {
 		values := url.Values{}
 		for _, item := range req.Data {
 			values.Add(item.name, item.value)
 		}
-		return strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", nil
+		encoded := values.Encode()
+		if len(encoded) > maxSiteRequestBody {
+			return nil, "", 0, nil, siteRequestTooLarge("表单请求体")
+		}
+		return strings.NewReader(encoded), "application/x-www-form-urlencoded", int64(len(encoded)), nil, nil
 	}
-	return nil, "", nil
+	return nil, "", 0, nil, nil
+}
+
+type siteBodyWriter struct {
+	writer    io.Writer
+	remaining int64
+}
+
+func (w *siteBodyWriter) Write(value []byte) (int, error) {
+	if int64(len(value)) > w.remaining {
+		if w.remaining > 0 {
+			written, _ := w.writer.Write(value[:w.remaining])
+			w.remaining -= int64(written)
+			return written, errSiteRequestTooLarge
+		}
+		return 0, errSiteRequestTooLarge
+	}
+	written, err := w.writer.Write(value)
+	w.remaining -= int64(written)
+	return written, err
 }

@@ -120,6 +120,9 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 			"message":   message,
 			"request":   map[string]any{"method": "POST", "path": actionPath, "fields": fieldNames(data)},
 			"response":  result["response"],
+			"submitted": true,
+			"confirmed": true,
+			"evidence":  operation + "-response-confirmed",
 		}), nil
 	default:
 		return nil, &siteError{Code: "invalid_argument", Message: "未知评价子命令: " + operation}

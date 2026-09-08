@@ -160,6 +160,8 @@ go run . quality request --path /jsxsd/... --method POST \
 
 会话 Cookie 保存在 `~/.config/csust-cli/cookies.txt`，权限为 `600`；验证码图片保存在同目录，权限为 `600`。可用 `CSUST_BASE_URL` 和 `CSUST_COOKIE_FILE` 覆盖站点与会话文件路径。现站点使用 HTTP 时每个进程的首次请求会向 stderr 发出安全警告。
 
+`--data-json`、`--file`、代码文件和标准输入请求体单项上限为 64 MiB；超过限制会在发送前返回 `request_too_large`，multipart 上传使用临时文件，不把整个文件载入内存。
+
 没有有效 Cookie 时，所有登录后查询和页面命令都会在凭据变量存在时自动登录。`routes` 会返回登录后主页清单；`web get` 或任一 69 个页面命令会输出结构化链接、表单、控件、选项、表格、动作和脚本函数。登录页/找回密码使用 `web public get|action|post`，条件显示的毕业设计使用 `web graduation-design`。
 
 教材、评价和通用 POST/网页动作等可能修改账号数据的操作始终要求 `--yes`。通用写请求会依据响应中的成功/失败信号确认结果；无法确认时返回未验证，不会自动重试。教材选订/退订还要求单条精确目标，并在提交后重新查询验证。

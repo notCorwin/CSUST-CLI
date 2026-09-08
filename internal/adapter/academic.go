@@ -99,7 +99,13 @@ func (a NativeSite) academicPage(ctx context.Context, method, path string, data 
 		return "", "", &siteError{Code: "parse_error", Message: "教务响应不是页面或 JSON"}
 	}
 	body, _ := response["body"].(string)
-	pageURL, _ := response["url"].(string)
+	if internal, ok := response["body_internal"].(string); ok {
+		body = internal
+	}
+	pageURL, _ := response["raw_url"].(string)
+	if pageURL == "" {
+		pageURL, _ = response["url"].(string)
+	}
 	if pageURL == "" {
 		target, _, resolveErr := resolveSite(request)
 		if resolveErr != nil {
@@ -180,8 +186,12 @@ func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[stri
 	if display != "all" && display != "best" {
 		return nil, &siteError{Code: "invalid_argument", Message: "--display 只能是 all 或 best"}
 	}
+	_, queryURL, queryErr := a.academicPage(ctx, "GET", "/jsxsd/kscj/cjcx_query", nil, nil)
+	if queryErr != nil {
+		return nil, queryErr
+	}
 	data := []pair{{"kksj", term}, {"kcxz", nature}, {"kcmc", course}, {"xsfs", map[bool]string{true: "max", false: "all"}[display == "best"]}, {"fxkc", study}}
-	body, pageURL, err := a.academicPage(ctx, "POST", "/jsxsd/kscj/cjcx_list", data, []pair{{"Referer", "http://xk.csust.edu.cn/jsxsd/kscj/cjcx_query"}})
+	body, pageURL, err := a.academicPage(ctx, "POST", "/jsxsd/kscj/cjcx_list", data, []pair{{"Referer", queryURL}})
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +347,7 @@ func academicWrap(value map[string]any) map[string]any {
 	return result
 }
 func mustJSON(value map[string]any) []byte {
-	encoded, _ := jsonMarshal(value)
+	encoded, _ := jsonMarshal(stripSiteInternal(value).(map[string]any))
 	return append(encoded, '\n')
 }
 func jsonMarshal(value any) ([]byte, error) { return json.Marshal(value) }

@@ -6,8 +6,8 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -41,7 +41,7 @@ func (a NativeSite) runVPNCommand(ctx context.Context, args []string, jsonMode b
 			return true, nil, []byte("错误: " + runErr.Error() + "\n"), 2, nil
 		}
 		if jsonMode {
-			encoded, err := json.Marshal(result)
+			encoded, err := json.Marshal(stripSiteInternal(result))
 			if err != nil {
 				return true, nil, nil, 2, err
 			}
@@ -57,13 +57,13 @@ func (a NativeSite) runVPNCommand(ctx context.Context, args []string, jsonMode b
 		return true, nil, []byte("错误: " + runErr.Error() + "\n"), 2, nil
 	}
 	if jsonMode {
-		encoded, err := json.Marshal(result)
+		encoded, err := json.Marshal(stripSiteInternal(result))
 		if err != nil {
 			return true, nil, nil, 2, err
 		}
 		return true, encoded, nil, 0, nil
 	}
-	return true, []byte(renderVPNResult(result)), nil, 0, nil
+	return true, []byte(renderVPNResult(stripSiteInternal(result).(map[string]any))), nil, 0, nil
 }
 
 func (a NativeSite) executeVPNCommand(ctx context.Context, args []string) (map[string]any, *siteError) {
@@ -139,8 +139,11 @@ func parseVPNLoginOptions(args []string) (vpnLoginOptions, *siteError) {
 		return vpnLoginOptions{}, &siteError{Code: "invalid_argument", Message: "--auth 必须是 auto、cas 或 local"}
 	}
 	if options.passwordStdin {
-		password, err := io.ReadAll(os.Stdin)
+		password, err := readBoundedSiteInput(os.Stdin)
 		if err != nil {
+			if errors.Is(err, errSiteRequestTooLarge) {
+				return vpnLoginOptions{}, siteRequestTooLarge("标准输入密码")
+			}
 			return vpnLoginOptions{}, &siteError{Code: "credentials_required", Message: "无法读取标准输入密码: " + err.Error()}
 		}
 		options.password = strings.TrimRight(string(password), "\r\n")
@@ -282,11 +285,28 @@ func encryptVPNPassword(password, key string) (string, *siteError) {
 }
 
 func saveVPNSession(path string, session map[string]any) *siteError {
-	content, err := json.MarshalIndent(session, "", "  ")
-	if err != nil {
-		return &siteError{Code: "session_write_failed", Message: "无法序列化 VPN 会话"}
+	if err := validateSessionFile(path); err != nil {
+		return &siteError{Code: "session_write_failed", Message: "无法保存 VPN 会话: " + err.Error()}
 	}
-	if err := writeCookieFile(path, string(content)+"\n"); err != nil {
+	err := withSiteFileLock(path, func() error {
+		merged := map[string]any{}
+		if content, readErr := os.ReadFile(path); readErr == nil && strings.TrimSpace(string(content)) != "" {
+			if jsonErr := json.Unmarshal(content, &merged); jsonErr != nil {
+				return fmt.Errorf("VPN 会话文件不是有效 JSON: %w", jsonErr)
+			}
+		} else if readErr != nil && !os.IsNotExist(readErr) {
+			return readErr
+		}
+		for key, value := range session {
+			merged[key] = value
+		}
+		content, marshalErr := json.MarshalIndent(merged, "", "  ")
+		if marshalErr != nil {
+			return fmt.Errorf("无法序列化 VPN 会话: %w", marshalErr)
+		}
+		return writeCookieFileUnlocked(path, string(content)+"\n")
+	})
+	if err != nil {
 		return &siteError{Code: "session_write_failed", Message: "无法保存 VPN 会话: " + err.Error()}
 	}
 	return nil

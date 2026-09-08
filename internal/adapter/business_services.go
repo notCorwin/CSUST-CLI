@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -96,6 +97,9 @@ func (a NativeSite) runBusinessCommand(ctx context.Context, args []string, jsonM
 }
 
 func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (map[string]any, *siteError) {
+	if err := validateBusinessArgs(args); err != nil {
+		return nil, err
+	}
 	switch args[0] {
 	case "services", "service":
 		return businessCatalog(), nil
@@ -132,6 +136,169 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 	default:
 		return nil, &siteError{Code: "invalid_argument", Message: "未知业务命令: " + args[0]}
 	}
+}
+
+func validateBusinessArgs(args []string) *siteError {
+	if len(args) == 0 {
+		return &siteError{Code: "invalid_argument", Message: "缺少业务命令"}
+	}
+	service := args[0]
+	switch service {
+	case "admission":
+		service = "admission-notice"
+	case "judge":
+		service = "onlinejudge"
+	case "records":
+		service = "student-record"
+	}
+	operation := "catalog"
+	if len(args) > 1 && !strings.HasPrefix(args[1], "--") {
+		operation = args[1]
+	}
+	allowed := businessAllowedFlags(service, operation)
+	for _, arg := range args[1:] {
+		if !strings.HasPrefix(arg, "--") {
+			continue
+		}
+		name := strings.SplitN(arg, "=", 2)[0]
+		if name == "--json" {
+			continue
+		}
+		if !allowed[name] {
+			return &siteError{Code: "invalid_argument", Message: service + " " + operation + " 不支持参数: " + name}
+		}
+	}
+	return nil
+}
+
+func businessAllowedFlags(service, operation string) map[string]bool {
+	allowed := make(map[string]bool)
+	add := func(values ...string) {
+		for _, value := range values {
+			allowed[value] = true
+		}
+	}
+	common := func() { add("--cookie-file") }
+	switch service {
+	case "services":
+	case "admission-notice":
+		switch operation {
+		case "query":
+			common()
+			add("--code", "--id-card", "--password", "--password-stdin")
+		case "print":
+			common()
+			add("--id-card", "--output", "--password", "--password-stdin")
+		}
+	case "journal":
+		switch operation {
+		case "search":
+			common()
+			add("--journal", "--query", "--author", "--year", "--keyword", "--field", "--page", "--page-size")
+		case "article":
+			common()
+			add("--journal", "--id")
+		case "login":
+			common()
+			add("--journal", "--role", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			common()
+			add("--journal")
+		}
+	case "employment":
+		switch operation {
+		case "home":
+			common()
+		case "list":
+			common()
+			add("--kind")
+		case "detail":
+			common()
+			add("--kind", "--id")
+		}
+	case "onlinejudge":
+		common()
+		add("--insecure")
+		switch operation {
+		case "problems":
+			add("--page", "--limit", "--keyword", "--difficulty", "--tag")
+		case "problem", "contest", "submission":
+			add("--id")
+		case "contests":
+			add("--page", "--limit")
+		case "submissions":
+			add("--page", "--limit", "--username", "--problem-id", "--contest-id", "--language", "--result", "--myself")
+		case "user":
+			add("--username")
+		case "submit":
+			add("--problem-id", "--language", "--code", "--contest-id", "--yes")
+		}
+	case "party-school-exam":
+		common()
+		if operation == "login" {
+			add("--username", "--password", "--password-stdin", "--checkcode")
+		}
+	case "archive":
+		common()
+		add("--system", "--access-token")
+		switch operation {
+		case "login":
+			add("--username", "--password", "--password-stdin", "--check-key", "--captcha", "--captcha-image", "--remember")
+		case "report":
+			add("--report-code", "--page", "--page-size", "--filter", "--sort")
+		}
+	case "student-record":
+		common()
+		switch operation {
+		case "upload":
+			add("--yes", "--field", "--file")
+		case "request":
+			add("--yes", "--type", "--name", "--id-card", "--phone", "--education", "--enroll", "--graduate", "--class", "--origin", "--college", "--major", "--recipient-phone", "--recipient-email", "--captcha", "--purpose", "--content", "--school", "--work", "--unit-letter-token", "--photo-token", "--recipient-address", "--recipient-name", "--notes")
+		}
+	case "continuing-education":
+		common()
+		if operation == "login" {
+			add("--username", "--password", "--password-stdin")
+		}
+	case "virtual-lab":
+		common()
+		switch operation {
+		case "resources":
+			add("--discipline")
+		case "messages":
+			add("--keyword")
+		case "login":
+			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "register":
+			add("--yes", "--username", "--real-name", "--phone", "--password", "--question", "--answer", "--photo-token", "--captcha", "--captcha-image")
+		case "forgot":
+			add("--yes", "--username", "--question", "--answer", "--new-password", "--captcha", "--captcha-image")
+		case "upload-photo":
+			add("--yes", "--file")
+		}
+	case "library-center", "legacy-mail":
+		common()
+		if operation == "login" {
+			add("--username", "--password-stdin", "--auth", "--captcha", "--captcha-image")
+		}
+	case "graduate-admissions":
+		common()
+		if operation == "login" {
+			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		}
+	case "security-admin":
+		common()
+		add("--insecure")
+		if operation == "login" {
+			add("--username", "--password", "--password-stdin")
+		}
+	case "cms-admin", "cms-admin-legacy":
+		common()
+		if operation == "login" {
+			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image", "--scope")
+		}
+	}
+	return allowed
 }
 
 func businessCatalog() map[string]any {
@@ -213,8 +380,11 @@ func businessSecret(args []string, flag, envName string) (string, *siteError) {
 		return value, nil
 	}
 	if businessBool(args, flag+"-stdin") {
-		value, err := io.ReadAll(os.Stdin)
+		value, err := readBoundedSiteInput(os.Stdin)
 		if err != nil {
+			if errors.Is(err, errSiteRequestTooLarge) {
+				return "", siteRequestTooLarge("标准输入秘密")
+			}
 			return "", &siteError{Code: "credentials_required", Message: "无法读取标准输入秘密: " + err.Error()}
 		}
 		return strings.TrimRight(string(value), "\r\n"), nil
@@ -232,8 +402,11 @@ func businessCredentials(args []string, passwordEnv string) (string, string, *si
 		return "", "", err
 	}
 	if !found && businessBool(args, "--password-stdin") {
-		value, readErr := io.ReadAll(os.Stdin)
+		value, readErr := readBoundedSiteInput(os.Stdin)
 		if readErr != nil {
+			if errors.Is(readErr, errSiteRequestTooLarge) {
+				return "", "", siteRequestTooLarge("标准输入密码")
+			}
 			return "", "", &siteError{Code: "credentials_required", Message: "无法读取标准输入秘密: " + readErr.Error()}
 		}
 		password = strings.TrimRight(string(value), "\r\n")
@@ -259,6 +432,20 @@ func businessRequest(ctx context.Context, service, method, path string, params, 
 func (a NativeSite) businessGet(ctx context.Context, service, path string, params []pair, options businessRequestOptions) (map[string]any, *siteError) {
 	request := siteRequest{Service: service, Method: "GET", Path: path, Params: params, Headers: options.headers, CookieFile: options.cookieFile, AllowSSO: options.allowSSO, AllowBusinessFailure: options.allowBusinessFailure, RequireLogin: options.require, ReadOnly: true, Yes: true, InsecureTLS: options.insecure}
 	return a.execute(ctx, request)
+}
+
+func (a NativeSite) businessPostJSON(ctx context.Context, service, path string, body any, options businessRequestOptions) (map[string]any, *siteError) {
+	return a.execute(ctx, siteRequest{
+		Service: service, Method: "POST", Path: path, JSON: body, HasJSON: true, RawJSON: true,
+		Headers: options.headers, CookieFile: options.cookieFile, AllowSSO: options.allowSSO,
+		AllowBusinessFailure: options.allowBusinessFailure, RequireLogin: options.require, ReadOnly: true, Yes: true, InsecureTLS: options.insecure,
+	})
+}
+
+func removeInternalResponseJSON(result map[string]any) {
+	if response, ok := result["response"].(map[string]any); ok {
+		delete(response, "json_internal")
+	}
 }
 
 func businessData(result map[string]any) (any, bool) {
@@ -316,11 +503,15 @@ func businessJSONMap(result map[string]any) (map[string]any, *siteError) {
 
 func businessBody(result map[string]any) string {
 	response, _ := result["response"].(map[string]any)
+	if body, ok := response["body_internal"].(string); ok {
+		return body
+	}
 	body, _ := response["body"].(string)
 	return body
 }
 
 func renderBusinessResult(result map[string]any) string {
+	result = stripSiteInternal(result).(map[string]any)
 	if articles, ok := result["articles"].([]map[string]any); ok {
 		var builder strings.Builder
 		for _, article := range articles {
@@ -362,10 +553,11 @@ func (a NativeSite) executeAdmissionNotice(ctx context.Context, args []string) (
 		if secretErr != nil {
 			return nil, secretErr
 		}
-		result, requestErr := a.businessGet(ctx, "graduate-notice", "/api/print/admissionnotice/query/idcard", []pair{{"idCard", idCard}, {"password", password}}, businessRequestOptions{cookieFile: cookie})
+		result, requestErr := a.businessPostJSON(ctx, "graduate-notice", "/api/print/admissionnotice/query/idcard", map[string]string{"idCard": idCard, "password": password}, businessRequestOptions{cookieFile: cookie})
 		if requestErr != nil {
 			return nil, requestErr
 		}
+		removeInternalResponseJSON(result)
 		return businessResult(result, "graduate-notice", "query"), nil
 	}
 	idCard, requiredErr := businessRequired(args[1:], "--id-card", "print 必须提供 --id-card")
@@ -380,7 +572,7 @@ func (a NativeSite) executeAdmissionNotice(ctx context.Context, args []string) (
 	if secretErr != nil {
 		return nil, secretErr
 	}
-	query, requestErr := a.businessGet(ctx, "graduate-notice", "/api/print/admissionnotice/query/idcard", []pair{{"idCard", idCard}, {"password", password}}, businessRequestOptions{cookieFile: cookie})
+	query, requestErr := a.businessPostJSON(ctx, "graduate-notice", "/api/print/admissionnotice/query/idcard", map[string]string{"idCard": idCard, "password": password}, businessRequestOptions{cookieFile: cookie})
 	if requestErr != nil {
 		return nil, requestErr
 	}
@@ -394,6 +586,7 @@ func (a NativeSite) executeAdmissionNotice(ctx context.Context, args []string) (
 			token = nestedString(data, "token")
 		}
 	}
+	removeInternalResponseJSON(query)
 	if token == "" {
 		return nil, &siteError{Code: "business_rejected", Message: "查询成功响应缺少打印令牌", Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "rejected"}}
 	}
@@ -510,6 +703,10 @@ func journalRole(value string) string {
 	}
 }
 
+func journalLoginPage(body string) bool {
+	return strings.Contains(body, "EtUserName") && strings.Contains(body, "EtPwd")
+}
+
 func journalEncryptedPassword(password string) (string, *siteError) {
 	return journalEncryptedPasswordWithRandom(password, cryptorand.Reader)
 }
@@ -596,14 +793,19 @@ func (a NativeSite) journalLogin(ctx context.Context, args []string, prefix, ser
 	}
 	body := strings.TrimSpace(businessBody(result))
 	if strings.HasPrefix(strings.ToLower(body), "error:") {
-		return nil, &siteError{Code: "authentication_failed", Message: strings.TrimSpace(strings.TrimPrefix(body, "error:")), Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "rejected"}}
+		return nil, &siteError{Code: "authentication_failed", Message: strings.TrimSpace(strings.TrimPrefix(body, "error:")), Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "rejected"}}
 	}
-	if strings.Contains(body, "EtUserName") && strings.Contains(body, "EtPwd") {
-		return nil, &siteError{Code: "authentication_failed", Message: "期刊登录失败，服务仍返回登录表单", Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "login_form"}}
+	if failure := businessLoginResponseFailure(result); failure != nil {
+		return nil, failure
 	}
-	result["service"], result["operation"], result["role"], result["username"] = service, "login", role, username
-	result["confirmed"], result["evidence"] = true, "login_submit-non-error-and-login-form-absent"
-	return result, nil
+	if evidence, probeErr := a.confirmBusinessLogin(ctx, service, loginPath, cookie, journalLoginPage); probeErr != nil {
+		return nil, probeErr
+	} else {
+		result["submitted"], result["confirmed"] = true, true
+		result["service"], result["operation"], result["role"], result["username"] = service, "login", role, username
+		result["evidence"] = "login-response-and-" + evidence
+		return result, nil
+	}
 }
 
 func (a NativeSite) journalSearch(ctx context.Context, args []string, prefix, service string) (map[string]any, *siteError) {
@@ -682,6 +884,9 @@ func journalArticle(row map[string]any, service, prefix string) map[string]any {
 
 func safeResponseURL(result map[string]any) string {
 	response, _ := result["response"].(map[string]any)
+	if value, ok := response["raw_url"].(string); ok && value != "" {
+		return value
+	}
 	value, _ := response["url"].(string)
 	return value
 }
@@ -875,11 +1080,11 @@ func (a NativeSite) studentRecordUpload(ctx context.Context, args []string) (map
 		return nil, err
 	}
 	filePath = expandUserPath(filePath)
-	content, readErr := os.ReadFile(filePath)
-	if readErr != nil {
-		return nil, &siteError{Code: "invalid_argument", Message: "无法读取上传文件: " + readErr.Error()}
+	file, fileErr := siteFilePart("file", filePath, "上传文件")
+	if fileErr != nil {
+		return nil, fileErr
 	}
-	if len(content) == 0 {
+	if file.size == 0 {
 		return nil, &siteError{Code: "invalid_argument", Message: "上传文件不能为空"}
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
@@ -892,7 +1097,7 @@ func (a NativeSite) studentRecordUpload(ctx context.Context, args []string) (map
 	}
 	result, requestErr := a.execute(ctx, siteRequest{
 		Service: "student-record-query", Method: "POST", Path: "/?c=upload&a=upfile&type=1", CookieFile: cookie,
-		Headers: []pair{{"Referer", safeResponseURL(form)}}, Files: []filePart{{name: "file", filename: filepath.Base(filePath), content: content}},
+		Headers: []pair{{"Referer", safeResponseURL(form)}}, Files: []filePart{file},
 		ReadOnly: false, Yes: true, RawJSON: true,
 	})
 	if requestErr != nil {
@@ -1243,14 +1448,25 @@ func businessCode(args []string) (string, *siteError) {
 		return "", err
 	}
 	if value == "-" {
-		content, readErr := io.ReadAll(os.Stdin)
+		content, readErr := readBoundedSiteInput(os.Stdin)
 		if readErr != nil {
+			if errors.Is(readErr, errSiteRequestTooLarge) {
+				return "", siteRequestTooLarge("代码输入")
+			}
 			return "", &siteError{Code: "invalid_argument", Message: "无法读取标准输入代码: " + readErr.Error()}
 		}
 		value = string(content)
 	} else if strings.HasPrefix(value, "@") {
-		content, readErr := os.ReadFile(expandUserPath(strings.TrimPrefix(value, "@")))
+		file, openErr := openSiteInput(expandUserPath(strings.TrimPrefix(value, "@")))
+		if openErr != nil {
+			return "", &siteError{Code: "invalid_argument", Message: "无法读取代码文件: " + openErr.Error()}
+		}
+		content, readErr := readBoundedSiteInput(file)
+		_ = file.Close()
 		if readErr != nil {
+			if errors.Is(readErr, errSiteRequestTooLarge) {
+				return "", siteRequestTooLarge("代码文件")
+			}
 			return "", &siteError{Code: "invalid_argument", Message: "无法读取代码文件: " + readErr.Error()}
 		}
 		value = string(content)
@@ -1361,8 +1577,8 @@ func (a NativeSite) executePartyExam(ctx context.Context, args []string) (map[st
 func (a NativeSite) executeArchive(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "frontend bundles and live login pages", "service": "archive", "systems": []map[string]any{
-			{"name": "student", "service": "student-archive", "label": "学生档案管理", "capabilities": []string{"login", "report", "record-query", "person-archive", "attachment", "volume", "export"}},
-			{"name": "management", "service": "archive-management", "label": "综合档案管理", "capabilities": []string{"login", "report", "collection", "query", "file-statistics", "user-management", "role-management", "import-export"}},
+			{"name": "student", "service": "student-archive", "label": "学生档案管理", "capabilities": []string{"status", "login", "logout", "report"}},
+			{"name": "management", "service": "archive-management", "label": "综合档案管理", "capabilities": []string{"status", "login", "logout", "report"}},
 		}}, nil
 	}
 	system, err := businessRequired(args[1:], "--system", "archive 必须提供 --system student 或 management")
@@ -1717,18 +1933,16 @@ func (a NativeSite) graduateAdmissionsLogin(ctx context.Context, args []string, 
 	if requestErr != nil {
 		return nil, requestErr
 	}
-	body := businessBody(result)
-	if graduateAdmissionsLoginPage(body) {
-		if failure := loginFailure(body); failure != nil {
-			return nil, failure
-		}
-		return nil, &siteError{Code: "authentication_failed", Message: "研究生招生系统登录失败，服务仍返回登录表单", Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "login_form"}}
-	}
-	if failure := loginFailure(body); failure != nil {
+	if failure := businessLoginResponseFailure(result); failure != nil {
 		return nil, failure
 	}
+	evidence, probeErr := a.confirmBusinessLogin(ctx, "graduate-admissions", "/ksxt/login.aspx", cookie, graduateAdmissionsLoginPage)
+	if probeErr != nil {
+		return nil, probeErr
+	}
 	result["service"], result["operation"], result["username"] = "graduate-admissions", "login", account
-	result["confirmed"], result["evidence"] = true, "ASP.NET login-form-absent-after-post"
+	result["submitted"], result["confirmed"] = true, true
+	result["evidence"] = "login-response-and-" + evidence
 	return result, nil
 }
 
@@ -1897,18 +2111,16 @@ func (a NativeSite) cmsLogin(ctx context.Context, args []string, service, cookie
 	if requestErr != nil {
 		return nil, requestErr
 	}
-	body := businessBody(result)
-	if cmsLoginPage(body) {
-		if failure := loginFailure(body); failure != nil {
-			return nil, failure
-		}
-		return nil, &siteError{Code: "authentication_failed", Message: "CMS 登录失败，服务仍返回登录表单", Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "login_form"}}
-	}
-	if failure := loginFailure(body); failure != nil {
+	if failure := businessLoginResponseFailure(result); failure != nil {
 		return nil, failure
 	}
+	evidence, probeErr := a.confirmBusinessLogin(ctx, service, "/system/login.jsp", cookie, cmsLoginPage)
+	if probeErr != nil {
+		return nil, probeErr
+	}
 	result["service"], result["operation"], result["username"], result["scope"] = service, "login", account, scope
-	result["confirmed"], result["evidence"] = true, "CMS login-form-absent-after-post"
+	result["submitted"], result["confirmed"] = true, true
+	result["evidence"] = "login-response-and-" + evidence
 	return result, nil
 }
 
@@ -2193,14 +2405,14 @@ func (a NativeSite) virtualLabUploadPhoto(ctx context.Context, args []string, co
 		return nil, err
 	}
 	filePath = expandUserPath(filePath)
-	content, readErr := os.ReadFile(filePath)
-	if readErr != nil {
-		return nil, &siteError{Code: "invalid_argument", Message: "无法读取证照文件: " + readErr.Error()}
+	file, fileErr := siteFilePart("file", filePath, "证照文件")
+	if fileErr != nil {
+		return nil, fileErr
 	}
-	if len(content) == 0 {
+	if file.size == 0 {
 		return nil, &siteError{Code: "invalid_argument", Message: "证照文件不能为空"}
 	}
-	result, requestErr := a.execute(ctx, siteRequest{Service: "virtual-lab", Method: "POST", Path: "/Home/UpdateImg", CookieFile: cookie, Files: []filePart{{name: "file", filename: filepath.Base(filePath), content: content}}, ReadOnly: true, Yes: true, RawJSON: true, AllowBusinessFailure: true})
+	result, requestErr := a.execute(ctx, siteRequest{Service: "virtual-lab", Method: "POST", Path: "/Home/UpdateImg", CookieFile: cookie, Files: []filePart{file}, ReadOnly: true, Yes: true, RawJSON: true, AllowBusinessFailure: true})
 	if requestErr != nil {
 		return nil, requestErr
 	}
@@ -2349,14 +2561,16 @@ func (a NativeSite) securityLogin(ctx context.Context, args []string, cookie str
 	if requestErr != nil {
 		return nil, requestErr
 	}
-	if securityLoginForm(businessBody(result)) {
-		if failure := loginFailure(businessBody(result)); failure != nil {
-			return nil, failure
-		}
-		return nil, &siteError{Code: "authentication_failed", Message: "安全运维平台登录失败，服务仍返回登录表单", Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "login_form"}}
+	if failure := businessLoginResponseFailure(result); failure != nil {
+		return nil, failure
+	}
+	evidence, probeErr := a.confirmBusinessLogin(ctx, "security-admin", "/user/requireLogin", cookie, securityLoginForm)
+	if probeErr != nil {
+		return nil, probeErr
 	}
 	result["service"], result["operation"], result["username"] = "security-admin", "login", account
-	result["confirmed"], result["evidence"] = true, "RSA-login-and-login-form-absent"
+	result["submitted"], result["confirmed"] = true, true
+	result["evidence"] = "RSA-login-and-" + evidence
 	return result, nil
 }
 
@@ -2385,6 +2599,68 @@ func hiddenFormFields(body, formID string) ([]pair, *siteError) {
 		fields = append(fields, pair{input.attr("name"), input.attr("value")})
 	}
 	return fields, nil
+}
+
+func businessLoginFailure(body string) *siteError {
+	if strings.TrimSpace(body) == "" {
+		return &siteError{Code: "authentication_failed", Message: "登录响应为空，无法确认业务会话", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "empty-login-response"}}
+	}
+	if failure := loginFailure(body); failure != nil {
+		failure.Details = map[string]any{"submitted": true, "confirmed": false, "evidence": "login-response"}
+		return failure
+	}
+	if state, known, _ := businessState([]byte(body), "text/html"); known && !state {
+		return &siteError{Code: "authentication_failed", Message: "登录响应明确报告失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "login-response-business-failure"}}
+	}
+	if document, err := parsePage(body); err == nil && pageFailureMessage.MatchString(strings.TrimSpace(pageDisplayText(document))) {
+		return &siteError{Code: "authentication_failed", Message: "登录响应包含业务错误", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "login-response-error-text"}}
+	}
+	return nil
+}
+
+func businessLoginResponseFailure(result map[string]any) *siteError {
+	if response, ok := result["response"].(map[string]any); ok {
+		for _, key := range []string{"json_internal", "json"} {
+			if value, exists := response[key]; exists {
+				if state, known := jsonBusinessState(value); known && !state {
+					return &siteError{Code: "authentication_failed", Message: "登录响应明确报告失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "login-response-business-failure"}}
+				}
+				return nil
+			}
+		}
+	}
+	return businessLoginFailure(businessBody(result))
+}
+
+func (a NativeSite) confirmBusinessLogin(ctx context.Context, service, path, cookie string, loginPage func(string) bool) (string, *siteError) {
+	result, requestErr := a.businessGet(ctx, service, path, nil, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return "", &siteError{Code: "authentication_failed", Message: "登录请求已发送，但业务会话探针失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "probe-error", "cause": requestErr.Code}}
+	}
+	if response, ok := result["response"].(map[string]any); ok {
+		for _, key := range []string{"json_internal", "json"} {
+			if value, exists := response[key]; exists {
+				if state, known := jsonBusinessState(value); known {
+					if !state {
+						return "", &siteError{Code: "authentication_failed", Message: "业务会话探针明确返回失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "probe-business-failure"}}
+					}
+					return "probe-json-success", nil
+				}
+			}
+		}
+	}
+	body := businessBody(result)
+	if strings.TrimSpace(body) == "" {
+		return "", &siteError{Code: "authentication_failed", Message: "登录请求已发送，但业务会话探针为空", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "probe-empty"}}
+	}
+	if loginPage(body) {
+		return "", &siteError{Code: "authentication_failed", Message: "登录请求已发送，但业务会话仍返回登录表单", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "probe-login-form"}}
+	}
+	if failure := businessLoginFailure(body); failure != nil {
+		failure.Details["evidence"] = "probe-business-failure"
+		return "", failure
+	}
+	return "probe-page-without-login-form", nil
 }
 
 func continuingLoginPage(body string) bool {
@@ -2431,15 +2707,16 @@ func (a NativeSite) continuingLogin(ctx context.Context, args []string, cookie s
 	if requestErr != nil {
 		return nil, requestErr
 	}
-	body := businessBody(result)
-	if continuingLoginPage(body) {
-		return nil, &siteError{Code: "authentication_failed", Message: "继续教育登录失败，服务仍返回登录表单", Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "login_form"}}
-	}
-	if failure := loginFailure(body); failure != nil {
+	if failure := businessLoginResponseFailure(result); failure != nil {
 		return nil, failure
 	}
+	evidence, probeErr := a.confirmBusinessLogin(ctx, "continuing-info", "/", cookie, continuingLoginPage)
+	if probeErr != nil {
+		return nil, probeErr
+	}
 	result["service"], result["operation"], result["username"] = "continuing-info", "login", account
-	result["confirmed"], result["evidence"] = true, "ASP.NET login form absent after POST"
+	result["submitted"], result["confirmed"] = true, true
+	result["evidence"] = "login-response-and-" + evidence
 	return result, nil
 }
 

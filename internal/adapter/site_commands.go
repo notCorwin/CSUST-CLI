@@ -51,13 +51,13 @@ func (a NativeSite) runSiteCommand(ctx context.Context, args []string, jsonMode 
 		return true, nil, []byte("错误: " + runErr.Error() + "\n"), 2, nil
 	}
 	if jsonMode {
-		encoded, encodeErr := json.Marshal(result)
+		encoded, encodeErr := json.Marshal(stripSiteInternal(result))
 		if encodeErr != nil {
 			return true, nil, nil, 2, encodeErr
 		}
 		return true, encoded, nil, 0, nil
 	}
-	return true, []byte(renderSiteCommand(result)), nil, 0, nil
+	return true, []byte(renderSiteCommand(stripSiteInternal(result).(map[string]any))), nil, 0, nil
 }
 
 func parseSiteCommand(args []string) (siteCommand, *siteError) {
@@ -301,8 +301,14 @@ func sitePageResult(result map[string]any) map[string]any {
 		}
 		return result
 	}
-	body, _ := response["body"].(string)
-	pageURL, _ := response["url"].(string)
+	body, _ := response["body_internal"].(string)
+	if body == "" {
+		body, _ = response["body"].(string)
+	}
+	pageURL, _ := response["raw_url"].(string)
+	if pageURL == "" {
+		pageURL, _ = response["url"].(string)
+	}
 	if body == "" {
 		return result
 	}
@@ -331,7 +337,10 @@ func (a NativeSite) loadSitePage(ctx context.Context, command siteCommand) (*pag
 	if !ok {
 		return nil, "", "", "", &siteError{Code: "parse_error", Message: "页面响应不是可操作的 HTML 页面"}
 	}
-	source, _ := response["body"].(string)
+	source, _ := response["body_internal"].(string)
+	if source == "" {
+		source, _ = response["body"].(string)
+	}
 	var target *url.URL
 	var cookiePath string
 	if request.Target != nil {
@@ -510,7 +519,10 @@ func (a NativeSite) scanSiteScripts(ctx context.Context, command siteCommand) (m
 			continue
 		}
 		response, _ := result["response"].(map[string]any)
-		body, _ := response["body"].(string)
+		body, _ := response["body_internal"].(string)
+		if body == "" {
+			body, _ = response["body"].(string)
+		}
 		found := scriptEndpoints(body, target)
 		for _, endpoint := range found {
 			endpoints[endpoint] = true
@@ -584,7 +596,10 @@ func (a NativeSite) discoverSite(ctx context.Context, command siteCommand) (map[
 			continue
 		}
 		response, _ := result["response"].(map[string]any)
-		source, _ := response["body"].(string)
+		source, _ := response["body_internal"].(string)
+		if source == "" {
+			source, _ = response["body"].(string)
+		}
 		page, pageErr := pageInspect(source, item.target)
 		if pageErr != nil {
 			errors = append(errors, map[string]any{"url": safeSiteURL(parsed), "code": pageErr.Code, "error": pageErr.Message})
@@ -592,7 +607,10 @@ func (a NativeSite) discoverSite(ctx context.Context, command siteCommand) (map[
 		}
 		pages = append(pages, map[string]any{"url": page["url"], "title": page["title"], "kind": page["kind"], "links": page["links"], "forms": page["forms"], "actions": page["actions"], "endpoints": page["endpoints"]})
 		for _, link := range page["links"].([]map[string]any) {
-			value, _ := link["path"].(string)
+			value, _ := link["raw_path"].(string)
+			if value == "" {
+				value, _ = link["path"].(string)
+			}
 			child := resolvePageURL(item.target, value)
 			childURL, childErr := url.Parse(child)
 			if childErr != nil || childURL.Hostname() == "" || !strings.HasSuffix(strings.ToLower(childURL.Hostname()), "."+siteDomain) && !strings.EqualFold(childURL.Hostname(), siteDomain) {
@@ -628,17 +646,19 @@ func crawlableSitePath(path string) bool {
 }
 
 func removeCookieFile(path string) error {
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
-	}
-	return os.Remove(path)
+	return withSiteFileLock(path, func() error {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
+		}
+		return os.Remove(path)
+	})
 }
 
 func renderSiteCommand(result map[string]any) string {
