@@ -29,7 +29,10 @@ func run(args []string) int {
 		return 0
 	}
 	jsonMode := has(args, "--json") && !hasHelp(args)
-	stdout, stderr, code, err := (adapter.Legacy{Files: legacyFiles}).Run(context.Background(), args, jsonMode)
+	handled, stdout, stderr, code, err := (adapter.NativeSite{}).Run(context.Background(), args, jsonMode)
+	if !handled {
+		stdout, stderr, code, err = (adapter.Legacy{Files: legacyFiles}).Run(context.Background(), args, jsonMode)
+	}
 	if len(stderr) > 0 {
 		_, _ = os.Stderr.Write(stderr)
 	}

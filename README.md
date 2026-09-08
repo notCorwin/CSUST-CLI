@@ -1,6 +1,6 @@
 # csust-cli
 
-面向智能体的长沙理工大学服务 CLI，Go 是正式入口；教务、VPN、网络教学和质量保障能力继续由现有协议适配器承载。教务系统命令仍访问旧的 `xk.csust.edu.cn`，登录默认优先通过 `authserver.csust.edu.cn` 统一身份认证；`vpn` 命令对应当前 `vpn.csust.edu.cn` 的 EnUES Vue SPA。
+面向智能体的长沙理工大学服务 CLI，Go 是正式入口；教务、VPN、网络教学和质量保障能力继续由现有协议适配器承载，`site request` 由 Go 原生 HTTP 适配器直接调用服务协议。教务系统命令仍访问旧的 `xk.csust.edu.cn`，登录默认优先通过 `authserver.csust.edu.cn` 统一身份认证；`vpn` 命令对应当前 `vpn.csust.edu.cn` 的 EnUES Vue SPA。
 
 开发阶段的站点探索命令需要显式设置 `CSUST_EXPLORATION=1`；正式业务命令不执行爬取。
 
@@ -120,7 +120,7 @@ go run . quality request --path /jsxsd/... --method POST \
 
 ## 全站通用映射
 
-`csust site` 面向 `csust.edu.cn` 根域名和全部子域名开放，不把静态入口清单当作能力边界。`site catalog` 是已观察到的服务起点；开发阶段设置 `CSUST_EXPLORATION=1` 后，`site discover` 才从实时页面抓取链接、表单、动作、脚本端点并报告新出现的官方子域名，`site scripts` 才读取同源 SPA 脚本并提取常见 API/页面端点。`site get` 返回与 `web get` 相同的结构化页面快照，`site form`、`site action`、`site request` 复用网页结构解析，支持 GET/POST/PUT/PATCH/DELETE、JSON、表单、multipart、文件下载和动作 ref。每个子域名使用独立 Cookie 文件；`site login` 使用统一身份认证建立该页面的 SSO 会话。
+`csust site` 面向 `csust.edu.cn` 根域名和全部子域名开放，不把静态入口清单当作能力边界。`site catalog` 是已观察到的服务起点；开发阶段设置 `CSUST_EXPLORATION=1` 后，`site discover` 才从实时页面抓取链接、表单、动作、脚本端点并报告新出现的官方子域名，`site scripts` 才读取同源 SPA 脚本并提取常见 API/页面端点。`site get` 返回与 `web get` 相同的结构化页面快照，`site form`、`site action` 复用网页结构解析；`site request` 通过 Go 原生 HTTP 适配器支持 GET/POST/PUT/PATCH/DELETE、JSON、表单、multipart 和文件下载，并对写请求返回明确的确认或未验证结果。原始 HTML 响应使用 `http-response-v1` 合约并附带低置信度依据；需要页面结构时使用 `site get`。每个子域名使用独立 Cookie 文件；`site login` 使用统一身份认证建立该页面的 SSO 会话。
 
 已观察服务使用目录内的传输方案；新服务默认 HTTPS，旧的 HTTP 子域名可显式加 `--scheme http`。默认只执行当前子域名动作；若网页表单明确把登录/提交目标放到外部 HTTP(S) 服务（例如邮箱门户），可在 `site form`/`site action` 加 `--allow-external`，仍会拒绝脚本、邮件协议、目录跳转和 HTTPS 降级。页面明确跳转到其他官方子域名时，使用对应服务名或官方主机名，再配合服务内 `--path` 调用。
 

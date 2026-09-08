@@ -1,0 +1,1094 @@
+package adapter
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	siteDomain = "csust.edu.cn"
+	// ponytail: keep printable responses bounded; binary downloads stream to disk.
+	maxSiteBody = 64 << 20
+)
+
+// NativeSite handles the direct-protocol path for the generic site API.
+type NativeSite struct{}
+
+type siteRequest struct {
+	Service      string
+	Path         string
+	Scheme       string
+	Method       string
+	Params       []pair
+	Data         []pair
+	JSON         any
+	HasJSON      bool
+	Files        []filePart
+	Headers      []pair
+	Yes          bool
+	Output       string
+	CookieFile   string
+	RequireLogin bool
+	mutating     bool
+}
+
+type pair struct{ name, value string }
+
+type filePart struct {
+	name, filename string
+	content        []byte
+}
+
+type serviceInfo struct {
+	host   string
+	scheme string
+	path   string
+}
+
+var knownSites = map[string]serviceInfo{
+	"official":               {host: "www.csust.edu.cn", scheme: "https", path: "/"},
+	"ehall":                  {host: "ehall.csust.edu.cn", scheme: "https", path: "/"},
+	"auth":                   {host: "authserver.csust.edu.cn", scheme: "https", path: "/authserver/login"},
+	"academic":               {host: "xk.csust.edu.cn", scheme: "http", path: "/"},
+	"vpn":                    {host: "vpn.csust.edu.cn", scheme: "https", path: "/enclient/start.html"},
+	"sunshine":               {host: "fuwu.csust.edu.cn", scheme: "https", path: "/"},
+	"map":                    {host: "gis.csust.edu.cn", scheme: "https", path: "/"},
+	"mail":                   {host: "mail.csust.edu.cn", scheme: "https", path: "/"},
+	"library":                {host: "lib.csust.edu.cn", scheme: "https", path: "/"},
+	"theol":                  {host: "pt.csust.edu.cn", scheme: "http", path: "/meol/homepage/common/"},
+	"mooc":                   {host: "mooc.csust.edu.cn", scheme: "http", path: "/portal"},
+	"quality":                {host: "zbxt.csust.edu.cn", scheme: "https", path: "/login"},
+	"recruitment":            {host: "rczpw.csust.edu.cn", scheme: "https", path: "/zp.html"},
+	"jxjy":                   {host: "jxjy.csust.edu.cn", scheme: "https", path: "/"},
+	"zyjx":                   {host: "zyjx.csust.edu.cn", scheme: "https", path: "/"},
+	"research":               {host: "ky.csust.edu.cn", scheme: "http", path: "/"},
+	"legacy-portal":          {host: "my.csust.edu.cn", scheme: "http", path: "/"},
+	"journal":                {host: "cslgqk.csust.edu.cn", scheme: "https", path: "/"},
+	"journal-social":         {host: "cslgxbsk.csust.edu.cn", scheme: "https", path: "/"},
+	"journal-science":        {host: "cslgxbzk.csust.edu.cn", scheme: "https", path: "/"},
+	"journal-experiment":     {host: "syjx.csust.edu.cn", scheme: "https", path: "/"},
+	"admissions":             {host: "zslq.csust.edu.cn", scheme: "https", path: "/"},
+	"finance-query":          {host: "cwcx.csust.edu.cn", scheme: "https", path: "/"},
+	"union":                  {host: "gonghui.csust.edu.cn", scheme: "https", path: "/front/page.do?dispatch=proindex"},
+	"transport-lab":          {host: "jtsysyy.csust.edu.cn", scheme: "http", path: "/Login/Index"},
+	"transport-info":         {host: "jtxxgl.csust.edu.cn", scheme: "https", path: "/"},
+	"transport-mobile":       {host: "jtyxxh.csust.edu.cn", scheme: "https", path: "/"},
+	"academic-affairs":       {host: "jwc.csust.edu.cn", scheme: "http", path: "/"},
+	"continuing-education":   {host: "xwwy.csust.edu.cn", scheme: "https", path: "/"},
+	"graduate-management":    {host: "yjsgl.csust.edu.cn", scheme: "https", path: "/"},
+	"admissions-system":      {host: "zs.csust.edu.cn", scheme: "https", path: "/"},
+	"training-platform":      {host: "peixun.csust.edu.cn", scheme: "http", path: "/"},
+	"alumni":                 {host: "xy.csust.edu.cn", scheme: "https", path: "/"},
+	"app":                    {host: "app.csust.edu.cn:8087", scheme: "http", path: "/magus/appapi/downloadpage"},
+	"library-remote":         {host: "tsgvpn2.csust.edu.cn", scheme: "https", path: "/"},
+	"equipment":              {host: "cslgdygx.csust.edu.cn", scheme: "https", path: "/"},
+	"highway":                {host: "highwayexperiment.csust.edu.cn", scheme: "https", path: "/"},
+	"training":               {host: "gcxljxgl.csust.edu.cn", scheme: "http", path: "/"},
+	"journal-highway":        {host: "zwgl.csust.edu.cn", scheme: "https", path: "/"},
+	"journal-highway-legacy": {host: "zwgl1980.csust.edu.cn", scheme: "https", path: "/"},
+	"fcmg":                   {host: "fcmg.csust.edu.cn", scheme: "https", path: "/"},
+	"sqyrjd":                 {host: "sqyrjd.csust.edu.cn", scheme: "https", path: "/"},
+	"srv":                    {host: "srv.csust.edu.cn", scheme: "http", path: "/"},
+	"icsai2003":              {host: "icsai2003.csust.edu.cn", scheme: "http", path: "/"},
+	"trx":                    {host: "trx.csust.edu.cn", scheme: "http", path: "/"},
+	"v":                      {host: "v.csust.edu.cn", scheme: "http", path: "/"},
+	"live":                   {host: "live.csust.edu.cn", scheme: "http", path: "/"},
+}
+
+// Run returns handled=false for site commands that still use the richer page adapter.
+func (a NativeSite) Run(ctx context.Context, args []string, jsonMode bool) (handled bool, stdout, stderr []byte, code int, err error) {
+	start := siteRequestStart(args)
+	if start < 0 {
+		return false, nil, nil, 0, nil
+	}
+	if containsHelp(args[start+2:]) {
+		return false, nil, nil, 0, nil
+	}
+	req, parseErr := parseSiteRequest(args[start+2:])
+	if parseErr != nil {
+		if jsonMode {
+			return true, errorJSON(parseErr), nil, 2, nil
+		}
+		return true, nil, []byte("错误: " + parseErr.Error() + "\n"), 2, nil
+	}
+	result, runErr := a.execute(ctx, req)
+	if runErr != nil {
+		if jsonMode {
+			return true, errorJSON(runErr), nil, 2, nil
+		}
+		return true, nil, []byte("错误: " + runErr.Error() + "\n"), 2, nil
+	}
+	if jsonMode {
+		encoded, encodeErr := json.Marshal(result)
+		if encodeErr != nil {
+			return true, nil, nil, 2, encodeErr
+		}
+		return true, encoded, nil, 0, nil
+	}
+	return true, []byte(renderSiteResult(result)), nil, 0, nil
+}
+
+func siteRequestStart(args []string) int {
+	if len(args) < 2 || args[1] != "request" {
+		return -1
+	}
+	switch args[0] {
+	case "site", "domain", "portal":
+		return 0
+	default:
+		return -1
+	}
+}
+
+func containsHelp(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSiteRequest(args []string) (siteRequest, *siteError) {
+	req := siteRequest{Method: "GET"}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		inlineValue := ""
+		inline := false
+		if strings.HasPrefix(arg, "--") {
+			if name, value, found := strings.Cut(arg, "="); found {
+				arg, inlineValue, inline = name, value, true
+			}
+		}
+		if arg == "--json" {
+			if inline {
+				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			continue
+		}
+		if arg == "--yes" {
+			if inline {
+				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			req.Yes = true
+			continue
+		}
+		value, next, hasValue := inlineValue, index, inline
+		if !inline {
+			value, next, hasValue = nextValue(args, index)
+		}
+		if hasValue && !inline {
+			index = next
+		}
+		switch arg {
+		case "--service":
+			req.Service = value
+		case "--path":
+			req.Path = value
+		case "--scheme":
+			req.Scheme = value
+		case "--method":
+			req.Method = strings.ToUpper(value)
+		case "--param":
+			pairValue, parseErr := splitPair(value, "--param")
+			if parseErr != nil {
+				return siteRequest{}, parseErr
+			}
+			req.Params = append(req.Params, pairValue)
+		case "--data":
+			pairValue, parseErr := splitPair(value, "--data")
+			if parseErr != nil {
+				return siteRequest{}, parseErr
+			}
+			req.Data = append(req.Data, pairValue)
+		case "--data-json":
+			body, parseErr := readJSONArgument(value)
+			if parseErr != nil {
+				return siteRequest{}, parseErr
+			}
+			req.JSON, req.HasJSON = body, true
+		case "--file":
+			part, parseErr := readFilePart(value)
+			if parseErr != nil {
+				return siteRequest{}, parseErr
+			}
+			req.Files = append(req.Files, part)
+		case "--header":
+			pairValue, parseErr := splitPair(value, "--header")
+			if parseErr != nil {
+				return siteRequest{}, parseErr
+			}
+			req.Headers = append(req.Headers, pairValue)
+		case "--output":
+			req.Output = expandUserPath(value)
+		case "--cookie-file":
+			req.CookieFile = expandUserPath(value)
+		case "--require-login":
+			if inline {
+				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			req.RequireLogin = true
+		case "--allow-external":
+			if inline {
+				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			// Generic requests stay same-origin; retain the shared page CLI flag for compatibility.
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "site request 参数无效: " + arg}
+			}
+			return siteRequest{}, &siteError{Code: "invalid_argument", Message: "site request 不接受位置参数"}
+		}
+		if !hasValue && arg != "--yes" && arg != "--require-login" && arg != "--allow-external" && arg != "--json" {
+			return siteRequest{}, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
+		}
+	}
+	if req.Service == "" {
+		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "必须提供 --service"}
+	}
+	if req.Method == "" {
+		req.Method = "GET"
+	}
+	if !supportedSiteMethod(req.Method) {
+		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "不支持的 HTTP 方法: " + req.Method}
+	}
+	if req.Scheme != "" && req.Scheme != "http" && req.Scheme != "https" {
+		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "服务传输方案只能是 http 或 https"}
+	}
+	if req.HasJSON && (len(req.Data) > 0 || len(req.Files) > 0) {
+		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "--data-json 不能与 --data/--file 同时使用"}
+	}
+	if readOnlyMethod(req.Method) && (req.HasJSON || len(req.Data) > 0 || len(req.Files) > 0) {
+		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "GET/HEAD/OPTIONS 请使用 --param"}
+	}
+	if mutatingMethod(req.Method) && !req.Yes {
+		return siteRequest{}, &siteError{Code: "confirmation_required", Message: "site 请求可能修改远端数据，请加 --yes"}
+	}
+	return req, nil
+}
+
+func nextValue(args []string, index int) (string, int, bool) {
+	if index+1 < len(args) && !strings.HasPrefix(args[index+1], "--") {
+		return args[index+1], index + 1, true
+	}
+	return "", index, false
+}
+
+func splitPair(value, flag string) (pair, *siteError) {
+	name, item, found := strings.Cut(value, "=")
+	if !found || name == "" || strings.ContainsAny(name, "\r\n") {
+		return pair{}, &siteError{Code: "invalid_argument", Message: flag + " 必须是 NAME=VALUE"}
+	}
+	return pair{name: name, value: item}, nil
+}
+
+func readJSONArgument(value string) (any, *siteError) {
+	if value == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "--data-json 不能为空"}
+	}
+	var content []byte
+	var err error
+	switch {
+	case value == "-":
+		content, err = io.ReadAll(os.Stdin)
+	case strings.HasPrefix(value, "@"):
+		content, err = os.ReadFile(expandUserPath(value[1:]))
+	default:
+		content = []byte(value)
+	}
+	if err != nil {
+		return nil, &siteError{Code: "invalid_argument", Message: "无法读取 JSON 请求体: " + err.Error()}
+	}
+	var body any
+	if err := json.Unmarshal(content, &body); err != nil {
+		return nil, &siteError{Code: "invalid_argument", Message: "JSON 请求体无效: " + err.Error()}
+	}
+	return body, nil
+}
+
+func readFilePart(value string) (filePart, *siteError) {
+	pairValue, parseErr := splitPair(value, "--file")
+	if parseErr != nil {
+		return filePart{}, parseErr
+	}
+	content, err := os.ReadFile(expandUserPath(pairValue.value))
+	if err != nil {
+		return filePart{}, &siteError{Code: "invalid_argument", Message: "无法读取上传文件: " + err.Error()}
+	}
+	return filePart{name: pairValue.name, filename: filepath.Base(pairValue.value), content: content}, nil
+}
+
+func supportedSiteMethod(method string) bool {
+	switch method {
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+		return true
+	default:
+		return false
+	}
+}
+
+func readOnlyMethod(method string) bool {
+	return method == "GET" || method == "HEAD" || method == "OPTIONS"
+}
+
+func mutatingMethod(method string) bool { return !readOnlyMethod(method) }
+
+type siteError struct {
+	Code    string
+	Message string
+	Details map[string]any
+}
+
+func (e *siteError) Error() string { return e.Message }
+
+func errorJSON(err *siteError) []byte {
+	payload := map[string]any{"error": err.Message, "code": err.Code}
+	if len(err.Details) > 0 {
+		payload["details"] = err.Details
+	}
+	encoded, _ := json.Marshal(payload)
+	return encoded
+}
+
+func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]any, *siteError) {
+	target, cookieFile, resolveErr := resolveSite(req)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	if req.Output != "" {
+		if outputErr := validateOutput(req.Output); outputErr != nil {
+			return nil, outputErr
+		}
+	}
+	mutating := mutatingMethod(req.Method) || sideEffectSiteURL(target)
+	req.mutating = mutating
+	if mutating && !req.Yes {
+		return nil, &siteError{Code: "confirmation_required", Message: "site 请求可能修改远端数据，请加 --yes"}
+	}
+	body, contentType, bodyErr := requestBody(req)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	requestInfo := map[string]any{
+		"method": req.Method,
+		"url":    safeSiteURL(target),
+		"fields": fieldNames(req.Data),
+		"json":   req.HasJSON,
+	}
+	jar, jarErr := cookiejar.New(nil)
+	if jarErr != nil {
+		return nil, &siteError{Code: "session_error", Message: "无法创建 Cookie 会话: " + jarErr.Error()}
+	}
+	if loadErr := loadCookies(jar, cookieFile, target); loadErr != nil {
+		return nil, &siteError{Code: "session_error", Message: "无法读取 Cookie 会话: " + loadErr.Error()}
+	}
+	httpRequest, requestErr := http.NewRequestWithContext(ctx, req.Method, target.String(), body)
+	if requestErr != nil {
+		return nil, &siteError{Code: "invalid_argument", Message: "请求地址无效: " + requestErr.Error()}
+	}
+	if contentType != "" {
+		httpRequest.Header.Set("Content-Type", contentType)
+	}
+	httpRequest.Header.Set("User-Agent", "csust-cli-go/0.4.0")
+	httpRequest.Header.Set("Accept", "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8")
+	for _, header := range req.Headers {
+		if strings.ContainsAny(header.name, "\r\n") || strings.ContainsAny(header.value, "\r\n") || header.name == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "请求头格式无效"}
+		}
+		httpRequest.Header.Set(header.name, header.value)
+	}
+	httpClient := &http.Client{
+		Jar:     jar,
+		Timeout: 60 * time.Second,
+		CheckRedirect: func(clientRequest *http.Request, via []*http.Request) error {
+			previous := httpRequest.URL
+			if len(via) > 0 {
+				previous = via[len(via)-1].URL
+			}
+			if !safeSiteRedirect(previous, clientRequest.URL) && !safeSiteSSORedirect(httpRequest.URL, previous, clientRequest.URL) {
+				return fmt.Errorf("已拒绝跨站或 HTTPS 降级重定向")
+			}
+			if !strings.EqualFold(previous.Host, clientRequest.URL.Host) && mutatingMethod(clientRequest.Method) {
+				return fmt.Errorf("已拒绝把写请求重定向到其他站点")
+			}
+			return nil
+		},
+	}
+	response, doErr := httpClient.Do(httpRequest)
+	if doErr != nil {
+		return nil, requestFailure(req, requestInfo, "network_error", "请求失败: "+doErr.Error())
+	}
+	defer response.Body.Close()
+	mutating = req.mutating || mutatingMethod(req.Method)
+	if req.Output != "" && !mutating && !req.RequireLogin && response.StatusCode >= 200 && response.StatusCode < 300 && isBinarySiteContent(response) {
+		written, writeErr := atomicStreamWrite(req.Output, response.Body)
+		if writeErr != nil {
+			return nil, writeErr
+		}
+		if saveErr := saveCookies(jar, cookieFile, target); saveErr != nil {
+			return nil, &siteError{Code: "session_error", Message: "无法保存 Cookie 会话: " + saveErr.Error()}
+		}
+		return map[string]any{
+			"ok":           true,
+			"submitted":    false,
+			"confirmed":    true,
+			"evidence":     "confirmed",
+			"request":      requestInfo,
+			"site":         origin(target),
+			"downloaded":   true,
+			"output":       req.Output,
+			"bytes":        written,
+			"content_type": response.Header.Get("Content-Type"),
+		}, nil
+	}
+	content, readErr := io.ReadAll(io.LimitReader(response.Body, maxSiteBody+1))
+	if readErr != nil {
+		return nil, requestFailure(req, requestInfo, "network_error", "读取响应失败: "+readErr.Error())
+	}
+	if len(content) > maxSiteBody {
+		return nil, requestFailure(req, requestInfo, "response_too_large", "响应超过 64 MiB 限制")
+	}
+	if req.Output == "" && isBinarySiteResponse(response) {
+		return nil, requestFailure(req, requestInfo, "binary_output_required", "响应是二进制内容，请使用 --output 保存文件")
+	}
+	if saveErr := saveCookies(jar, cookieFile, target); saveErr != nil {
+		if mutating {
+			return nil, requestFailure(req, requestInfo, "mutation_unverified", "请求已发送但会话保存失败: "+saveErr.Error())
+		}
+		return nil, &siteError{Code: "session_error", Message: "无法保存 Cookie 会话: " + saveErr.Error()}
+	}
+	if req.RequireLogin && looksLikeLogin(response, content) {
+		if mutating {
+			return nil, requestFailure(req, requestInfo, "mutation_unverified", "请求已发送但返回登录页，结果未知")
+		}
+		return nil, &siteError{Code: "login_required", Message: "响应是登录页，会话可能已失效", Details: map[string]any{"request": requestInfo}}
+	}
+	state, knownState, decoded := businessState(content, response.Header.Get("Content-Type"))
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		code := "http_error"
+		if mutating {
+			code = "mutation_unverified"
+		}
+		return nil, requestFailure(req, requestInfo, code, fmt.Sprintf("HTTP %d %s", response.StatusCode, response.Status))
+	}
+	if knownState && !state {
+		code := "business_rejected"
+		if mutating {
+			code = "mutation_rejected"
+		}
+		return nil, requestFailure(req, requestInfo, code, "远端明确报告操作失败")
+	}
+	if mutating && !knownState {
+		return nil, requestFailure(req, requestInfo, "mutation_unverified", "请求已提交但未取得成功证据")
+	}
+	if req.Output != "" {
+		if writeErr := atomicWrite(req.Output, content); writeErr != nil {
+			return nil, writeErr
+		}
+		return map[string]any{
+			"ok":           true,
+			"submitted":    mutating,
+			"confirmed":    true,
+			"evidence":     "confirmed",
+			"request":      requestInfo,
+			"site":         origin(target),
+			"downloaded":   true,
+			"output":       req.Output,
+			"bytes":        len(content),
+			"content_type": response.Header.Get("Content-Type"),
+		}, nil
+	}
+	return map[string]any{
+		"ok":        true,
+		"submitted": mutating,
+		"confirmed": true,
+		"evidence":  "confirmed",
+		"request":   requestInfo,
+		"site":      origin(target),
+		"response":  responsePayload(response, content, decoded),
+	}, nil
+}
+
+func responsePayload(response *http.Response, content []byte, decoded any) map[string]any {
+	responseURL := ""
+	if response.Request != nil && response.Request.URL != nil {
+		responseURL = safeSiteURL(response.Request.URL)
+	}
+	payload := map[string]any{
+		"status":       response.StatusCode,
+		"url":          responseURL,
+		"content_type": response.Header.Get("Content-Type"),
+		"adapter":      "http-contract",
+		"contract":     "http-response-v1",
+	}
+	if decoded != nil {
+		payload["format"] = "json"
+		payload["json"] = redactSiteJSON(decoded)
+	} else {
+		payload["format"] = "text"
+		if isHTMLSiteResponse(response, content) {
+			payload["format"] = "html"
+			payload["confidence"] = "low"
+			payload["confidence_evidence"] = map[string]any{
+				"reason":       "通用 HTTP 适配器保留原始 HTML；页面结构请使用 site get",
+				"content_type": response.Header.Get("Content-Type"),
+				"bytes":        len(content),
+			}
+		}
+		payload["body"] = string(content)
+	}
+	return payload
+}
+
+func redactSiteJSON(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if sensitiveSiteParam.MatchString(key) {
+				result[key] = "<redacted>"
+				continue
+			}
+			result[key] = redactSiteJSON(item)
+		}
+		return result
+	case []any:
+		result := make([]any, len(typed))
+		for index, item := range typed {
+			result[index] = redactSiteJSON(item)
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+func isHTMLSiteResponse(response *http.Response, content []byte) bool {
+	return strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "html") || bytes.HasPrefix(bytes.TrimSpace(content), []byte("<"))
+}
+
+func origin(target *url.URL) string {
+	return (&url.URL{Scheme: target.Scheme, Host: target.Host}).String()
+}
+
+func requestFailure(req siteRequest, request map[string]any, code, message string) *siteError {
+	details := map[string]any{"request": request, "submitted": req.mutating || mutatingMethod(req.Method), "confirmed": false, "evidence": "unknown"}
+	return &siteError{Code: code, Message: safeSiteErrorText(message), Details: details}
+}
+
+func businessState(content []byte, contentType string) (bool, bool, any) {
+	trimmed := bytes.TrimSpace(content)
+	var decoded any
+	looksJSON := strings.Contains(strings.ToLower(contentType), "json") || bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("["))
+	if looksJSON && json.Unmarshal(trimmed, &decoded) == nil {
+		state, known := jsonBusinessState(decoded)
+		return state, known, decoded
+	}
+	text := strings.TrimSpace(string(content))
+	if failureMessage(text) {
+		return false, true, nil
+	}
+	if successMessage(text) {
+		return true, true, nil
+	}
+	return false, false, nil
+}
+
+func jsonBusinessState(value any) (bool, bool) {
+	states := []bool{}
+	var visit func(any)
+	visit = func(item any) {
+		switch typed := item.(type) {
+		case map[string]any:
+			if value, ok := typed["success"].(bool); ok {
+				states = append(states, value)
+			}
+			if value, ok := typed["ok"].(bool); ok {
+				states = append(states, value)
+			}
+			if code, ok := typed["code"]; ok {
+				switch numeric := code.(type) {
+				case float64:
+					if numeric == 0 || numeric == 200 {
+						states = append(states, true)
+					} else if numeric >= 400 {
+						states = append(states, false)
+					}
+				case string:
+					if numeric == "0" || numeric == "200" {
+						states = append(states, true)
+					} else if parsed, err := strconv.Atoi(numeric); err == nil && parsed >= 400 && parsed <= 599 {
+						states = append(states, false)
+					}
+				}
+			}
+			for _, key := range []string{"message", "messages", "msg", "error", "response"} {
+				if nested, exists := typed[key]; exists {
+					visit(nested)
+				}
+			}
+		case []any:
+			for _, nested := range typed {
+				visit(nested)
+			}
+		case string:
+			if failureMessage(typed) {
+				states = append(states, false)
+			} else if successMessage(typed) {
+				states = append(states, true)
+			}
+		}
+	}
+	visit(value)
+	for _, state := range states {
+		if !state {
+			return false, true
+		}
+	}
+	if len(states) > 0 {
+		return true, true
+	}
+	return false, false
+}
+
+var successPattern = regexp.MustCompile(`^(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
+var sideEffectSitePattern = regexp.MustCompile(`(?i)(?:/(?:logout|delete|remove|add|join|bind|ignore|favorite|recommend|subscribe|unsubscribe|cancel|submit|save|update|sort)(?:[/?._]|$)|[?&](?:action|op|ACTION|operation)=)`)
+var sensitiveSiteParam = regexp.MustCompile(`(?i)pass|password|token|secret|sign|randomcode|ticket|cookie|session|csrf|nonce|execution|flowexecutionkey|state|lt`)
+var siteURLPattern = regexp.MustCompile(`https?://[^\s"']+`)
+
+func successMessage(value string) bool {
+	text := strings.TrimSpace(value)
+	return successPattern.MatchString(text)
+}
+
+func failureMessage(value string) bool {
+	text := strings.TrimSpace(value)
+	// ponytail: inspect short plain-text acknowledgements only; structural HTML uses site get.
+	if text == "" || len(text) > 4096 || (strings.Contains(text, "<") && strings.Contains(text, ">")) {
+		return false
+	}
+	for _, signal := range []string{"失败", "错误", "拒绝", "无效", "异常", "未授权", "禁止", "failed", "failure", "error", "denied", "invalid", "unauthorized", "forbidden"} {
+		if strings.Contains(strings.ToLower(text), strings.ToLower(signal)) {
+			return true
+		}
+	}
+	return false
+}
+
+func sideEffectSiteURL(target *url.URL) bool {
+	value := target.Path
+	if target.RawQuery != "" {
+		value += "?" + target.RawQuery
+	}
+	return sideEffectSitePattern.MatchString(value)
+}
+
+func safeSiteURL(target *url.URL) string {
+	if target == nil {
+		return ""
+	}
+	copy := *target
+	copy.User = nil
+	query := copy.Query()
+	for name, values := range query {
+		for index, value := range values {
+			if sensitiveSiteParam.MatchString(name) || len(value) >= 18 {
+				values[index] = "<redacted>"
+			}
+		}
+		query[name] = values
+	}
+	copy.RawQuery = query.Encode()
+	copy.Fragment = ""
+	return copy.String()
+}
+
+func safeSiteErrorText(value string) string {
+	return siteURLPattern.ReplaceAllStringFunc(value, func(candidate string) string {
+		target, err := url.Parse(candidate)
+		if err != nil {
+			return "<redacted-url>"
+		}
+		return safeSiteURL(target)
+	})
+}
+
+func isBinarySiteResponse(response *http.Response) bool {
+	if strings.Contains(strings.ToLower(response.Header.Get("Content-Disposition")), "attachment") {
+		return true
+	}
+	return isBinarySiteContent(response)
+}
+
+func isBinarySiteContent(response *http.Response) bool {
+	contentType := strings.ToLower(strings.SplitN(response.Header.Get("Content-Type"), ";", 2)[0])
+	if strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "audio/") || strings.HasPrefix(contentType, "video/") {
+		return contentType != "image/svg+xml"
+	}
+	switch contentType {
+	case "application/octet-stream", "application/pdf", "application/zip", "application/gzip", "application/x-7z-compressed", "application/x-rar-compressed", "application/vnd.rar":
+		return true
+	default:
+		return false
+	}
+}
+
+func looksLikeLogin(response *http.Response, content []byte) bool {
+	if !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "html") {
+		return false
+	}
+	text := strings.ToLower(string(content))
+	return strings.Contains(text, "<form") && (strings.Contains(text, "login") || strings.Contains(text, "登录"))
+}
+
+func safeSiteRedirect(previous, next *url.URL) bool {
+	if previous == nil || next == nil || !strings.EqualFold(previous.Host, next.Host) {
+		return false
+	}
+	if strings.EqualFold(previous.Scheme, next.Scheme) {
+		return strings.EqualFold(next.Scheme, "http") || strings.EqualFold(next.Scheme, "https")
+	}
+	return strings.EqualFold(previous.Scheme, "http") && strings.EqualFold(next.Scheme, "https")
+}
+
+func safeSiteSSORedirect(base, previous, next *url.URL) bool {
+	if base == nil || previous == nil || next == nil || strings.EqualFold(base.Host, "authserver.csust.edu.cn") {
+		return false
+	}
+	if strings.EqualFold(previous.Host, base.Host) && strings.EqualFold(next.Host, "authserver.csust.edu.cn") {
+		return strings.EqualFold(next.Scheme, "https")
+	}
+	return strings.EqualFold(previous.Host, "authserver.csust.edu.cn") && strings.EqualFold(next.Host, base.Host) && strings.EqualFold(next.Scheme, base.Scheme)
+}
+
+func validateOutput(filename string) *siteError {
+	if strings.TrimSpace(filename) == "" {
+		return &siteError{Code: "invalid_argument", Message: "下载路径不能为空"}
+	}
+	info, err := os.Lstat(filename)
+	if err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular()) {
+		return &siteError{Code: "invalid_argument", Message: "输出路径必须是普通文件"}
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return &siteError{Code: "invalid_argument", Message: "输出路径无效: " + err.Error()}
+	}
+	return nil
+}
+
+func atomicWrite(filename string, content []byte) *siteError {
+	_, writeErr := atomicStreamWrite(filename, bytes.NewReader(content))
+	return writeErr
+}
+
+func atomicStreamWrite(filename string, source io.Reader) (int64, *siteError) {
+	if outputErr := validateOutput(filename); outputErr != nil {
+		return 0, outputErr
+	}
+	parent := filepath.Dir(filename)
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		return 0, &siteError{Code: "output_write_failed", Message: "无法创建输出目录: " + err.Error()}
+	}
+	temporary, err := os.CreateTemp(parent, ".csust-output-*")
+	if err != nil {
+		return 0, &siteError{Code: "output_write_failed", Message: "无法创建临时文件: " + err.Error()}
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(0600); err != nil {
+		_ = temporary.Close()
+		return 0, &siteError{Code: "output_write_failed", Message: "无法设置输出权限: " + err.Error()}
+	}
+	written, err := io.Copy(temporary, source)
+	if err != nil {
+		_ = temporary.Close()
+		return 0, &siteError{Code: "output_write_failed", Message: "无法写入输出文件: " + err.Error()}
+	}
+	if err := temporary.Close(); err != nil {
+		return 0, &siteError{Code: "output_write_failed", Message: "无法关闭输出文件: " + err.Error()}
+	}
+	if err := os.Rename(temporaryName, filename); err != nil {
+		return 0, &siteError{Code: "output_write_failed", Message: "无法提交输出文件: " + err.Error()}
+	}
+	return written, nil
+}
+
+func fieldNames(items []pair) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.name)
+	}
+	return result
+}
+
+func cookieFile(explicit string, target *url.URL) string {
+	if explicit != "" {
+		return explicit
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".csust-cookies", cookieHost(target)+".cookies.txt")
+	}
+	return filepath.Join(home, ".config", "csust-cli", "sites", cookieHost(target)+".cookies.txt")
+}
+
+func expandUserPath(value string) string {
+	if value != "~" && !strings.HasPrefix(value, "~/") {
+		return value
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return value
+	}
+	if value == "~" {
+		return home
+	}
+	return filepath.Join(home, value[2:])
+}
+
+func cookieHost(target *url.URL) string {
+	host := strings.ReplaceAll(target.Hostname(), ".", "_")
+	if port := target.Port(); port != "" {
+		host += "_" + port
+	}
+	return host
+}
+
+func loadCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
+	info, err := os.Lstat(filename)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
+	}
+	_ = os.Chmod(filename, 0600)
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#HttpOnly_") {
+			line = strings.TrimPrefix(line, "#HttpOnly_")
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 7 {
+			continue
+		}
+		expires, _ := strconv.ParseInt(fields[4], 10, 64)
+		cookie := &http.Cookie{
+			Domain: fields[0],
+			Path:   fields[2],
+			Secure: fields[3] == "TRUE",
+			Name:   fields[5],
+			Value:  fields[6],
+		}
+		if expires > 0 {
+			cookie.Expires = time.Unix(expires, 0)
+		}
+		jar.SetCookies(target, []*http.Cookie{cookie})
+	}
+	return scanner.Err()
+}
+
+func saveCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
+	if info, err := os.Lstat(filename); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	root := *target
+	root.Path = "/"
+	cookies := append(jar.Cookies(&root), jar.Cookies(target)...)
+	seen := make(map[string]bool, len(cookies))
+	unique := cookies[:0]
+	for _, cookie := range cookies {
+		key := strings.Join([]string{cookie.Domain, cookie.Path, cookie.Name}, "\x00")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, cookie)
+	}
+	cookies = unique
+	if len(cookies) == 0 {
+		return nil
+	}
+	lines := []string{"# Netscape HTTP Cookie File"}
+	for _, cookie := range cookies {
+		domain := cookie.Domain
+		if domain == "" {
+			domain = target.Hostname()
+		}
+		expires := int64(0)
+		if !cookie.Expires.IsZero() {
+			expires = cookie.Expires.Unix()
+		}
+		cookiePath := cookie.Path
+		if cookiePath == "" {
+			cookiePath = "/"
+		}
+		lines = append(lines, strings.Join([]string{domain, "TRUE", cookiePath, strconv.FormatBool(cookie.Secure), strconv.FormatInt(expires, 10), cookie.Name, cookie.Value}, "\t"))
+	}
+	return writeCookieFile(filename, strings.Join(lines, "\n")+"\n")
+}
+
+func writeCookieFile(filename, content string) error {
+	parent := filepath.Dir(filename)
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(parent, ".csust-cookie-*")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(0600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.WriteString(content); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryName, filename)
+}
+
+func renderSiteResult(result map[string]any) string {
+	if result["downloaded"] == true {
+		return fmt.Sprintf("已保存：%v（%v bytes）\n", result["output"], result["bytes"])
+	}
+	if response, ok := result["response"].(map[string]any); ok {
+		if body, ok := response["body"].(string); ok {
+			return body
+		}
+		if value, ok := response["json"]; ok {
+			encoded, _ := json.MarshalIndent(value, "", "  ")
+			return string(encoded) + "\n"
+		}
+	}
+	return "请求已确认\n"
+}
+
+func resolveSite(req siteRequest) (*url.URL, string, *siteError) {
+	key := strings.ToLower(strings.TrimSpace(req.Service))
+	if key == "" || strings.ContainsAny(key, "/?#") {
+		return nil, "", &siteError{Code: "invalid_argument", Message: "服务必须是目录名或官方主机名，不是 URL"}
+	}
+	info, known := knownSites[key]
+	if !known {
+		parsed, parseErr := url.Parse("//" + key)
+		if parseErr != nil || parsed.User != nil || parsed.Hostname() == "" {
+			return nil, "", &siteError{Code: "invalid_argument", Message: "服务主机名格式无效"}
+		}
+		if parsed.Hostname() != siteDomain && !strings.HasSuffix(strings.ToLower(parsed.Hostname()), "."+siteDomain) {
+			return nil, "", &siteError{Code: "invalid_argument", Message: "服务必须是 csust.edu.cn 及其子域名"}
+		}
+		info = serviceInfo{host: strings.ToLower(parsed.Host), scheme: "https", path: "/"}
+	}
+	if req.Scheme != "" {
+		info.scheme = req.Scheme
+	}
+	requestedPath := req.Path
+	if requestedPath == "" {
+		requestedPath = info.path
+	}
+	parsedPath, parseErr := url.Parse(requestedPath)
+	if parseErr != nil || parsedPath.IsAbs() || parsedPath.Host != "" || strings.Contains(parsedPath.Path, "\\") {
+		return nil, "", &siteError{Code: "invalid_path", Message: "服务路径必须是当前服务内的相对路径"}
+	}
+	decodedPath := parsedPath.Path
+	for i := 0; i < 2; i++ {
+		decodedPath, _ = url.PathUnescape(decodedPath)
+	}
+	for _, segment := range strings.Split(decodedPath, "/") {
+		if segment == "." || segment == ".." {
+			return nil, "", &siteError{Code: "invalid_path", Message: "服务路径不能包含目录跳转"}
+		}
+	}
+	if !strings.HasPrefix(parsedPath.Path, "/") {
+		parsedPath.Path = "/" + parsedPath.Path
+	}
+	parsedPath.Fragment = ""
+	base := &url.URL{Scheme: info.scheme, Host: info.host}
+	target := base.ResolveReference(parsedPath)
+	for _, item := range req.Params {
+		query := target.Query()
+		query.Add(item.name, item.value)
+		target.RawQuery = query.Encode()
+	}
+	if target.Path == "" {
+		target.Path = "/"
+	}
+	return target, cookieFile(req.CookieFile, target), nil
+}
+
+func requestBody(req siteRequest) (io.Reader, string, *siteError) {
+	if req.HasJSON {
+		var buffer bytes.Buffer
+		encoder := json.NewEncoder(&buffer)
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(req.JSON); err != nil {
+			return nil, "", &siteError{Code: "invalid_argument", Message: "JSON 请求体无效: " + err.Error()}
+		}
+		return &buffer, "application/json", nil
+	}
+	if len(req.Files) > 0 {
+		var buffer bytes.Buffer
+		writer := multipart.NewWriter(&buffer)
+		for _, item := range req.Data {
+			if err := writer.WriteField(item.name, item.value); err != nil {
+				return nil, "", &siteError{Code: "invalid_argument", Message: "表单字段无效: " + err.Error()}
+			}
+		}
+		for _, item := range req.Files {
+			part, err := writer.CreateFormFile(item.name, item.filename)
+			if err != nil {
+				return nil, "", &siteError{Code: "invalid_argument", Message: "上传字段无效: " + err.Error()}
+			}
+			if _, err := part.Write(item.content); err != nil {
+				return nil, "", &siteError{Code: "invalid_argument", Message: "上传文件读取失败: " + err.Error()}
+			}
+		}
+		if err := writer.Close(); err != nil {
+			return nil, "", &siteError{Code: "invalid_argument", Message: "multipart 请求无效: " + err.Error()}
+		}
+		return &buffer, writer.FormDataContentType(), nil
+	}
+	if len(req.Data) > 0 {
+		values := url.Values{}
+		for _, item := range req.Data {
+			values.Add(item.name, item.value)
+		}
+		return strings.NewReader(values.Encode()), "application/x-www-form-urlencoded", nil
+	}
+	return nil, "", nil
+}
