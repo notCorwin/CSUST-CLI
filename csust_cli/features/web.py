@@ -1118,6 +1118,20 @@ def _inspect_document(document: Element, source: str, page_url: str) -> dict[str
     text = _display_text(document)[:12000]
     script_sources = [_safe_url(node.attr("src"), page_url) for node in document.find_all("script") if node.attr("src")]
     kind = "dynamic" if document.find_all("script") and not any((links, forms, tables, actions)) and not text else "html"
+    confidence = "low" if kind == "dynamic" else "high"
+    confidence_evidence = {
+        "reason": (
+            "页面只有脚本且没有静态业务内容，无法从 HTML 确认功能"
+            if kind == "dynamic"
+            else "页面包含可解析的静态页面内容或业务控件"
+        ),
+        "script_count": len(document.find_all("script")),
+        "link_count": len(links),
+        "form_count": len(forms),
+        "table_count": len(tables),
+        "action_count": len(actions),
+        "visible_text_length": len(text),
+    }
     capabilities = [
         name
         for name, present in (
@@ -1132,7 +1146,11 @@ def _inspect_document(document: Element, source: str, page_url: str) -> dict[str
     ]
     return {
         "schema_version": PAGE_SNAPSHOT_SCHEMA,
+        "adapter": "html-contract",
+        "contract": "page-snapshot-v1",
         "kind": kind,
+        "confidence": confidence,
+        "confidence_evidence": confidence_evidence,
         "url": _safe_url(page_url),
         "fingerprint": hashlib.sha256(source.encode("utf-8", errors="replace")).hexdigest(),
         "shape_fingerprint": _shape_fingerprint(document),

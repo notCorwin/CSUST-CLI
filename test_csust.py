@@ -1241,6 +1241,8 @@ class CsustParserTests(unittest.TestCase):
             "https://example.test/jsxsd/page",
         )
         self.assertEqual(original["schema_version"], 1)
+        self.assertEqual(original["adapter"], "html-contract")
+        self.assertEqual(original["confidence"], "high")
         self.assertEqual(original["kind"], "html")
         self.assertTrue({"forms", "tables", "actions"} <= set(original["capabilities"]))
         self.assertEqual(original["shape_fingerprint"], redesigned["shape_fingerprint"])
@@ -1248,6 +1250,11 @@ class CsustParserTests(unittest.TestCase):
         self.assertEqual(original["tables"][0]["headers"], ["课程", "成绩"])
         self.assertEqual(original["tables"][0]["data_rows"], [["线代", "95"]])
         self.assertTrue(original["actions"][0]["ref"].startswith("action:"))
+
+        dynamic = inspect_page("<script>mountApp()</script>", "https://example.test/jsxsd/page")
+        self.assertEqual(dynamic["confidence"], "low")
+        self.assertEqual(dynamic["confidence_evidence"]["script_count"], 1)
+        self.assertIn("无法从 HTML 确认", dynamic["confidence_evidence"]["reason"])
 
     def test_action_ref_reselects_after_action_reordering(self):
         url = "https://example.test/jsxsd/page"

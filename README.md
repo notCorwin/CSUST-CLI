@@ -1,67 +1,69 @@
 # csust-cli
 
-面向智能体的长沙理工大学教务系统与 VPN 门户 CLI。教务系统命令仍访问旧的 `xk.csust.edu.cn`，登录默认优先通过 `authserver.csust.edu.cn` 统一身份认证；`vpn` 命令对应当前 `vpn.csust.edu.cn` 的 EnUES Vue SPA。
+面向智能体的长沙理工大学服务 CLI，Go 是正式入口；教务、VPN、网络教学和质量保障能力继续由现有协议适配器承载。教务系统命令仍访问旧的 `xk.csust.edu.cn`，登录默认优先通过 `authserver.csust.edu.cn` 统一身份认证；`vpn` 命令对应当前 `vpn.csust.edu.cn` 的 EnUES Vue SPA。
+
+开发阶段的站点探索命令需要显式设置 `CSUST_EXPLORATION=1`；正式业务命令不执行爬取。
 
 ```bash
-CSUST_USERNAME=学号 CSUST_PASSWORD=密码 python3 csust.py login --auth sso --json
-python3 csust.py schedule --json
-python3 csust.py grades --term 2025-2026-1 --json
-python3 csust.py profile --json
-python3 csust.py exams --json
-python3 csust.py classrooms --campus yuntang --week 1 --weekday 1 --section 1 --json
-python3 csust.py selections --term 2025-2026-1 --json
-python3 csust.py textbooks list --json
-python3 csust.py textbooks account --json
-python3 csust.py textbooks subscribe --index 1 --yes --json
-python3 csust.py textbooks unsubscribe --index 1 --yes --json
-python3 csust.py evaluation batches --json
-python3 csust.py terms --scope schedule --json
-python3 csust.py semester-start --json
-python3 csust.py routes --json
-python3 csust.py web get --path /jsxsd/xsxk/xklc_list --json
-python3 csust.py web get --name course-selection-center --json
-python3 csust.py web action --path /jsxsd/xsxk/xklc_list --ref action:... --yes --json
-python3 csust.py web catalog
-python3 csust.py web course-selection-center --json
-python3 csust.py web course-selection-center --form 1 --data xnxq01id=2026-2027-1 --yes --json
-python3 csust.py web semester-timetable --output timetable.html --json
-python3 csust.py web public get --path /findmm.jsp --json
-python3 csust.py web public get --path /css/images/codeFrame.png --output csust-app-qr.png --json
-python3 csust.py web graduation-design --json
+CSUST_USERNAME=学号 CSUST_PASSWORD=密码 go run . login --auth sso --json
+go run . schedule --json
+go run . grades --term 2025-2026-1 --json
+go run . profile --json
+go run . exams --json
+go run . classrooms --campus yuntang --week 1 --weekday 1 --section 1 --json
+go run . selections --term 2025-2026-1 --json
+go run . textbooks list --json
+go run . textbooks account --json
+go run . textbooks subscribe --index 1 --yes --json
+go run . textbooks unsubscribe --index 1 --yes --json
+go run . evaluation batches --json
+go run . terms --scope schedule --json
+go run . semester-start --json
+go run . routes --json
+go run . web get --path /jsxsd/xsxk/xklc_list --json
+go run . web get --name course-selection-center --json
+go run . web action --path /jsxsd/xsxk/xklc_list --ref action:... --yes --json
+go run . web catalog
+go run . web course-selection-center --json
+go run . web course-selection-center --form 1 --data xnxq01id=2026-2027-1 --yes --json
+go run . web semester-timetable --output timetable.html --json
+go run . web public get --path /findmm.jsp --json
+go run . web public get --path /css/images/codeFrame.png --output csust-app-qr.png --json
+go run . web graduation-design --json
 
-# 任意 csust.edu.cn 子域名：实时发现、页面快照、表单/动作和通用接口
-python3 csust.py site catalog --json
-python3 csust.py site discover --service official --path / --depth 1 --json
-python3 csust.py site get --service sunshine --path / --json
-python3 csust.py site get --service legacy-host.csust.edu.cn --scheme http --path / --json
-python3 csust.py site scripts --service map --path / --json
-python3 csust.py site form --service mail --path / --form 1 --data name=value --yes --json
-python3 csust.py site action --service sunshine --path / --ref action:... --yes --json
-python3 csust.py site request --service sunshine --path /api \
+# 任意 csust.edu.cn 子域名：页面快照、表单/动作和通用接口；探索命令仅限开发阶段
+go run . site catalog --json
+CSUST_EXPLORATION=1 go run . site discover --service official --path / --depth 1 --json
+go run . site get --service sunshine --path / --json
+go run . site get --service legacy-host.csust.edu.cn --scheme http --path / --json
+CSUST_EXPLORATION=1 go run . site scripts --service map --path / --json
+go run . site form --service mail --path / --form 1 --data name=value --yes --json
+go run . site action --service sunshine --path / --ref action:... --yes --json
+go run . site request --service sunshine --path /api \
   --method POST --data-json @request.json --yes --json
-python3 csust.py site login --service ehall --path / --auth sso --json
+go run . site login --service ehall --path / --auth sso --json
 
 # VPN 门户：完整路由、控件和 bundle API 清单
-python3 csust.py vpn routes --json
-python3 csust.py vpn controls --json
-python3 csust.py vpn catalog --json
-python3 csust.py vpn login --auth cas --json
-python3 csust.py vpn status --json
-python3 csust.py vpn api --name users-info --json
-python3 csust.py vpn api --name users-message-page --data-json '{"pageNum":1,"pageSize":20}' --json
-python3 csust.py vpn api --name client-public-files-download-filepath --param filePath=/path/to/file --output download.bin --json
-python3 csust.py vpn api --path /api/new-endpoint --method POST --data-json @request.json --yes --json
-python3 csust.py vpn api --name users-center-uploadPicture --file file=avatar.png --yes --json
+go run . vpn routes --json
+go run . vpn controls --json
+go run . vpn catalog --json
+go run . vpn login --auth cas --json
+go run . vpn status --json
+go run . vpn api --name users-info --json
+go run . vpn api --name users-message-page --data-json '{"pageNum":1,"pageSize":20}' --json
+go run . vpn api --name client-public-files-download-filepath --param filePath=/path/to/file --output download.bin --json
+go run . vpn api --path /api/new-endpoint --method POST --data-json @request.json --yes --json
+go run . vpn api --name users-center-uploadPicture --file file=avatar.png --yes --json
 
 # 网络教学平台：沿用 VPN 的 CAS 统一认证会话
-python3 csust.py teaching catalog --json
-python3 csust.py teaching service --json
-python3 csust.py teaching courses --json
-python3 csust.py teaching course --course-id 61184 --json
-python3 csust.py teaching get --name personal --json
-python3 csust.py teaching request --name homework-stu-list \
+go run . teaching catalog --json
+go run . teaching service --json
+go run . teaching courses --json
+go run . teaching course --course-id 61184 --json
+go run . teaching get --name personal --json
+go run . teaching request --name homework-stu-list \
   --param courseId=61184 --param title= --param pagingNumberPer=30 --param um=307941 --json
-python3 csust.py teaching request --name homework-stu-submit-do \
+go run . teaching request --name homework-stu-submit-do \
   --data courseId=61184 --data um=307941 --data hwtId=105915 \
   --data answer='<html>...</html>' --yes --json
 ```
@@ -83,19 +85,19 @@ VPN 会话保存在 `~/.config/csust-cli/vpn-session.json`，Cookie 保存在 `~
 `csust quality` 通过 VPN 的 CAS 统一认证会话进入“教学一体化”网关，再登录旧版教学质量保障门户；不会把网关前缀或服务令牌固化到配置。`quality catalog` 映射网页端当前可见的 69 个学生页面，`quality routes` 读取登录后的实时菜单，`quality get` 输出页面中的表单、控件、表格、动作和脚本端点。未固化的网页路径或接口可直接用 `quality request --path` 调用，因此页面清单不会限制实际能力覆盖。
 
 ```bash
-python3 csust.py quality login --vpn-captcha-info '{"captcha":"CODE"}' --json
-python3 csust.py quality status --json
-python3 csust.py quality catalog --json
-python3 csust.py quality routes --json
-python3 csust.py quality graduation-design --json
-python3 csust.py quality public get --path /findmm.jsp --json
-python3 csust.py quality get --name student-evaluation --json
-python3 csust.py quality form --path /jsxsd/... --form 1 --data NAME=VALUE --yes --json
-python3 csust.py quality action --path /jsxsd/... --ref action:... --data NAME=VALUE --yes --json
-python3 csust.py quality evaluation batches --json
-python3 csust.py quality evaluation courses --path PATH --json
-python3 csust.py quality evaluation form --path PATH --json
-python3 csust.py quality request --path /jsxsd/... --method POST \
+go run . quality login --vpn-captcha-info '{"captcha":"CODE"}' --json
+go run . quality status --json
+go run . quality catalog --json
+go run . quality routes --json
+go run . quality graduation-design --json
+go run . quality public get --path /findmm.jsp --json
+go run . quality get --name student-evaluation --json
+go run . quality form --path /jsxsd/... --form 1 --data NAME=VALUE --yes --json
+go run . quality action --path /jsxsd/... --ref action:... --data NAME=VALUE --yes --json
+go run . quality evaluation batches --json
+go run . quality evaluation courses --path PATH --json
+go run . quality evaluation form --path PATH --json
+go run . quality request --path /jsxsd/... --method POST \
   --data NAME=VALUE --yes --json
 ```
 
@@ -118,7 +120,7 @@ python3 csust.py quality request --path /jsxsd/... --method POST \
 
 ## 全站通用映射
 
-`csust site` 面向 `csust.edu.cn` 根域名和全部子域名开放，不把静态入口清单当作能力边界。`site catalog` 是已观察到的服务起点；`site discover` 从实时页面抓取链接、表单、动作、脚本端点并报告新出现的官方子域名；`site scripts` 读取同源 SPA 脚本并提取常见 API/页面端点。`site get` 返回与 `web get` 相同的结构化页面快照，`site form`、`site action`、`site request` 复用网页结构解析，支持 GET/POST/PUT/PATCH/DELETE、JSON、表单、multipart、文件下载和动作 ref。每个子域名使用独立 Cookie 文件；`site login` 使用统一身份认证建立该页面的 SSO 会话。
+`csust site` 面向 `csust.edu.cn` 根域名和全部子域名开放，不把静态入口清单当作能力边界。`site catalog` 是已观察到的服务起点；开发阶段设置 `CSUST_EXPLORATION=1` 后，`site discover` 才从实时页面抓取链接、表单、动作、脚本端点并报告新出现的官方子域名，`site scripts` 才读取同源 SPA 脚本并提取常见 API/页面端点。`site get` 返回与 `web get` 相同的结构化页面快照，`site form`、`site action`、`site request` 复用网页结构解析，支持 GET/POST/PUT/PATCH/DELETE、JSON、表单、multipart、文件下载和动作 ref。每个子域名使用独立 Cookie 文件；`site login` 使用统一身份认证建立该页面的 SSO 会话。
 
 已观察服务使用目录内的传输方案；新服务默认 HTTPS，旧的 HTTP 子域名可显式加 `--scheme http`。默认只执行当前子域名动作；若网页表单明确把登录/提交目标放到外部 HTTP(S) 服务（例如邮箱门户），可在 `site form`/`site action` 加 `--allow-external`，仍会拒绝脚本、邮件协议、目录跳转和 HTTPS 降级。页面明确跳转到其他官方子域名时，使用对应服务名或官方主机名，再配合服务内 `--path` 调用。
 
@@ -130,16 +132,17 @@ python3 csust.py quality request --path /jsxsd/... --method POST \
 
 教材、评价和通用 POST/网页动作等可能修改账号数据的操作始终要求 `--yes`。通用写请求会依据响应中的成功/失败信号确认结果；无法确认时返回未验证，不会自动重试。教材选订/退订还要求单条精确目标，并在提交后重新查询验证。
 
-安装为 `csust` 命令：
+构建 Go 入口：
 
 ```bash
-python3 -m pip install -e .
-csust schedule --json
+go build -o csust .
+./csust schedule --json
 ```
 
 运行检查：
 
 ```bash
+go test ./...
 python3 -m unittest -q
 ```
 
@@ -173,18 +176,19 @@ HTML 成功判定只使用直接执行的反馈语句或简短独立确认文本
 
 ## 安装与验证
 
-建议使用独立 Python 3.14 环境，安装声明的完整依赖后运行检查：
+Go 入口会调用现有协议适配器，因此运行完整业务前仍需安装 Python 适配依赖：
 
 ```bash
 python3.14 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m unittest -q
-.venv/bin/csust --help
+go test ./...
+go run . --help
 ```
 
 GitHub Actions 在每次 push 和 pull request 时执行安装、单元测试与命令入口检查。
 测试使用本地 HTTP 服务与模拟响应，不会提交学校账户数据。
 
-验证记录（2026-09-08）：本地 116 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱、图书馆远程访问、慕课、网络教学和招生录取入口；`site discover` 深度 2 抓取 200 个页面，发现 38 个官方主机（其中目录已覆盖 46 个已观察服务），并记录了 2 个明确的 404/协议错误。
+验证记录（2026-09-08）：本地 117 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱、图书馆远程访问、慕课、网络教学和招生录取入口；`site discover` 深度 2 抓取 200 个页面，发现 38 个官方主机（其中目录已覆盖 46 个已观察服务），并记录了 2 个明确的 404/协议错误。
 线上尝试了教务登录、课表、成绩、教材列表、VPN 登录与状态、教学课程及质量保障状态和菜单；本机代理下旧教务站返回 HTTP 502，VPN 连接失败，直连探测也未成功。因此这轮没有线上业务验收通过记录，也未执行线上业务写操作。
 目录中的页面/API 数量表示已映射范围，不等同于每个端点已通过线上验证。

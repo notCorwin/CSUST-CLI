@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import deque
@@ -286,7 +287,7 @@ def run_catalog(_args: argparse.Namespace, _client: Client | None = None) -> dic
         "source": "https://www.csust.edu.cn/",
         "catalog": [{"service": service, "host": host, "name": name, "url": url} for service, host, name, url in SITE_CATALOG],
         "domain": CSUST_ROOT_DOMAIN,
-        "note": "清单是已观察到的入口；site discover 才是实时发现，site 命令接受新子域名。",
+        "note": "清单是已观察到的入口；开发阶段可用 CSUST_EXPLORATION=1 实时发现，site 命令接受新子域名。",
     }
 
 
@@ -587,26 +588,27 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     action.add_argument("--yes", action="store_true", help="确认可能产生远端变更的操作")
     action.set_defaults(feature_runner=run_action, feature_renderer=render)
 
-    scripts = children.add_parser("scripts", help="读取同源脚本并提取常见 API/页面端点")
-    scripts.add_argument("--service", required=True, help="服务目录名或官方主机名")
-    scripts.add_argument("--path", help="脚本所在服务内路径；默认使用目录入口")
-    scripts.add_argument("--scheme", choices=("http", "https"), help="覆盖服务传输方案；默认使用目录配置或 HTTPS")
-    scripts.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
-    _session_args(scripts)
-    scripts.add_argument("--max-scripts", type=int, default=30)
-    scripts.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    scripts.set_defaults(feature_runner=run_scripts, feature_renderer=render)
+    if os.environ.get("CSUST_EXPLORATION") == "1":
+        scripts = children.add_parser("scripts", help="开发阶段读取同源脚本并提取 API/页面端点")
+        scripts.add_argument("--service", required=True, help="服务目录名或官方主机名")
+        scripts.add_argument("--path", help="脚本所在服务内路径；默认使用目录入口")
+        scripts.add_argument("--scheme", choices=("http", "https"), help="覆盖服务传输方案；默认使用目录配置或 HTTPS")
+        scripts.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
+        _session_args(scripts)
+        scripts.add_argument("--max-scripts", type=int, default=30)
+        scripts.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        scripts.set_defaults(feature_runner=run_scripts, feature_renderer=render)
 
-    discover = children.add_parser("discover", help="实时抓取页面并发现同站链接和官方子域名")
-    discover.add_argument("--service", required=True, help="服务目录名或官方主机名")
-    discover.add_argument("--path", help="起始服务内路径；默认使用目录入口")
-    discover.add_argument("--scheme", choices=("http", "https"), help="覆盖服务传输方案；默认使用目录配置或 HTTPS")
-    _session_args(discover)
-    discover.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
-    discover.add_argument("--depth", type=int, default=1)
-    discover.add_argument("--max-pages", type=int, default=30)
-    discover.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    discover.set_defaults(feature_runner=run_discover, feature_renderer=render)
+        discover = children.add_parser("discover", help="开发阶段抓取页面并发现同站链接和官方子域名")
+        discover.add_argument("--service", required=True, help="服务目录名或官方主机名")
+        discover.add_argument("--path", help="起始服务内路径；默认使用目录入口")
+        discover.add_argument("--scheme", choices=("http", "https"), help="覆盖服务传输方案；默认使用目录配置或 HTTPS")
+        _session_args(discover)
+        discover.add_argument("--param", action="append", default=[], help="查询参数 NAME=VALUE，可重复")
+        discover.add_argument("--depth", type=int, default=1)
+        discover.add_argument("--max-pages", type=int, default=30)
+        discover.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        discover.set_defaults(feature_runner=run_discover, feature_renderer=render)
 
     login = children.add_parser("login", help="通过统一身份认证登录指定子域名")
     login.add_argument("--service", required=True, help="服务目录名或官方主机名")

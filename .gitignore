@@ -3,5 +3,6 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+csust
 
 .venv/

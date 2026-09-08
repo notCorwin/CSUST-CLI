@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,10 +6,20 @@ from types import SimpleNamespace
 from unittest import mock
 
 from csust_cli.core import CsustError, Response
+from csust_cli import cli
 from csust_cli.features.site import SiteClient, _normalize_url, _script_endpoints, _service_path, run_discover, run_get, run_request
 
 
 class SiteTests(unittest.TestCase):
+    def test_exploration_commands_are_opt_in(self):
+        with mock.patch.dict(os.environ, {"CSUST_EXPLORATION": "0"}):
+            parser = cli.build_parser()
+            with self.assertRaises(CsustError):
+                parser.parse_args(["site", "discover", "--service", "official"])
+        with mock.patch.dict(os.environ, {"CSUST_EXPLORATION": "1"}):
+            parser = cli.build_parser()
+            self.assertEqual(parser.parse_args(["site", "discover", "--service", "official"]).site_command, "discover")
+
     def test_site_urls_are_official_and_same_origin(self):
         self.assertEqual(_normalize_url("www.csust.edu.cn/news"), "https://www.csust.edu.cn/news")
         with self.assertRaises(CsustError):
