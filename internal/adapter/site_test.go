@@ -120,8 +120,8 @@ func TestNativeSiteRunReturnsContractReadyParseErrors(t *testing.T) {
 	if result["code"] != "confirmation_required" {
 		t.Fatalf("unexpected error: %#v", result)
 	}
-	if handled, _, _, _, _ := (NativeSite{}).Run(context.Background(), []string{"site", "request", "--help"}, false); handled {
-		t.Fatal("help should use the legacy parser")
+	if handled, stdout, _, code, _ := (NativeSite{}).Run(context.Background(), []string{"site", "request", "--help"}, false); !handled || code != 0 || !strings.Contains(string(stdout), "Go 原生协议 CLI") {
+		t.Fatalf("help should be handled by Go: handled=%v code=%d output=%q", handled, code, stdout)
 	}
 }
 

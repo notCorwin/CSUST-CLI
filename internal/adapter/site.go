@@ -29,21 +29,26 @@ const (
 type NativeSite struct{}
 
 type siteRequest struct {
-	Service      string
-	Path         string
-	Scheme       string
-	Method       string
-	Params       []pair
-	Data         []pair
-	JSON         any
-	HasJSON      bool
-	Files        []filePart
-	Headers      []pair
-	Yes          bool
-	Output       string
-	CookieFile   string
-	RequireLogin bool
-	mutating     bool
+	Service       string
+	Path          string
+	Scheme        string
+	Method        string
+	Params        []pair
+	Data          []pair
+	JSON          any
+	HasJSON       bool
+	Files         []filePart
+	Headers       []pair
+	Yes           bool
+	Output        string
+	CookieFile    string
+	RequireLogin  bool
+	Target        *url.URL
+	ReadOnly      bool
+	SessionTarget *url.URL
+	AllowSSO      bool
+	RawJSON       bool
+	mutating      bool
 }
 
 type pair struct{ name, value string }
@@ -109,14 +114,47 @@ var knownSites = map[string]serviceInfo{
 	"live":                   {host: "live.csust.edu.cn", scheme: "http", path: "/"},
 }
 
-// Run returns handled=false for site commands that still use the richer page adapter.
+// Run dispatches every supported command through the native Go adapters.
 func (a NativeSite) Run(ctx context.Context, args []string, jsonMode bool) (handled bool, stdout, stderr []byte, code int, err error) {
+	args = withoutGlobalJSON(args)
+	if len(args) == 0 {
+		if jsonMode {
+			missing := &siteError{Code: "invalid_argument", Message: "缺少命令"}
+			return true, errorJSON(missing), nil, 2, nil
+		}
+		return true, nativeUsage(args), nil, 0, nil
+	}
+	if containsHelp(args) {
+		return true, nativeUsage(args), nil, 0, nil
+	}
+	if handled, stdout, stderr, code, err := a.runLoginCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
+	if handled, stdout, stderr, code, err := a.runTextbookCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
+	if handled, stdout, stderr, code, err := a.runAcademicCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
+	if handled, stdout, stderr, code, err := a.runWebCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
+	if handled, stdout, stderr, code, err := a.runVPNCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
+	if handled, stdout, stderr, code, err := a.runGatewayCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
+	if handled, stdout, stderr, code, err := a.runSiteCommand(ctx, args, jsonMode); handled {
+		return handled, stdout, stderr, code, err
+	}
 	start := siteRequestStart(args)
 	if start < 0 {
-		return false, nil, nil, 0, nil
-	}
-	if containsHelp(args[start+2:]) {
-		return false, nil, nil, 0, nil
+		unknown := &siteError{Code: "unknown_command", Message: "未知命令: " + strings.Join(args, " ")}
+		if jsonMode {
+			return true, errorJSON(unknown), nil, 2, nil
+		}
+		return true, nil, []byte("错误: " + unknown.Message + "\n"), 2, nil
 	}
 	req, parseErr := parseSiteRequest(args[start+2:])
 	if parseErr != nil {
@@ -140,6 +178,16 @@ func (a NativeSite) Run(ctx context.Context, args []string, jsonMode bool) (hand
 		return true, encoded, nil, 0, nil
 	}
 	return true, []byte(renderSiteResult(result)), nil, 0, nil
+}
+
+func withoutGlobalJSON(args []string) []string {
+	result := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg != "--json" {
+			result = append(result, arg)
+		}
+	}
+	return result
 }
 
 func siteRequestStart(args []string) int {
@@ -365,16 +413,23 @@ func errorJSON(err *siteError) []byte {
 }
 
 func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]any, *siteError) {
-	target, cookieFile, resolveErr := resolveSite(req)
-	if resolveErr != nil {
-		return nil, resolveErr
+	target := req.Target
+	cookiePath := req.CookieFile
+	if target == nil {
+		var resolveErr *siteError
+		target, cookiePath, resolveErr = resolveSite(req)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+	} else if cookiePath == "" {
+		cookiePath = cookieFile("", target)
 	}
 	if req.Output != "" {
 		if outputErr := validateOutput(req.Output); outputErr != nil {
 			return nil, outputErr
 		}
 	}
-	mutating := mutatingMethod(req.Method) || sideEffectSiteURL(target)
+	mutating := !req.ReadOnly && (mutatingMethod(req.Method) || sideEffectSiteURL(target))
 	req.mutating = mutating
 	if mutating && !req.Yes {
 		return nil, &siteError{Code: "confirmation_required", Message: "site 请求可能修改远端数据，请加 --yes"}
@@ -393,8 +448,13 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 	if jarErr != nil {
 		return nil, &siteError{Code: "session_error", Message: "无法创建 Cookie 会话: " + jarErr.Error()}
 	}
-	if loadErr := loadCookies(jar, cookieFile, target); loadErr != nil {
+	if loadErr := loadCookies(jar, cookiePath, target); loadErr != nil {
 		return nil, &siteError{Code: "session_error", Message: "无法读取 Cookie 会话: " + loadErr.Error()}
+	}
+	if req.SessionTarget != nil && req.SessionTarget.Host != target.Host {
+		if loadErr := loadCookies(jar, cookiePath, req.SessionTarget); loadErr != nil {
+			return nil, &siteError{Code: "session_error", Message: "无法读取服务会话: " + loadErr.Error()}
+		}
 	}
 	httpRequest, requestErr := http.NewRequestWithContext(ctx, req.Method, target.String(), body)
 	if requestErr != nil {
@@ -419,7 +479,11 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 			if len(via) > 0 {
 				previous = via[len(via)-1].URL
 			}
-			if !safeSiteRedirect(previous, clientRequest.URL) && !safeSiteSSORedirect(httpRequest.URL, previous, clientRequest.URL) {
+			redirectBase := httpRequest.URL
+			if req.SessionTarget != nil {
+				redirectBase = req.SessionTarget
+			}
+			if !safeSiteRedirect(previous, clientRequest.URL) && (!req.AllowSSO || !safeSiteSSORedirect(redirectBase, previous, clientRequest.URL)) {
 				return fmt.Errorf("已拒绝跨站或 HTTPS 降级重定向")
 			}
 			if !strings.EqualFold(previous.Host, clientRequest.URL.Host) && mutatingMethod(clientRequest.Method) {
@@ -433,13 +497,17 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		return nil, requestFailure(req, requestInfo, "network_error", "请求失败: "+doErr.Error())
 	}
 	defer response.Body.Close()
-	mutating = req.mutating || mutatingMethod(req.Method)
+	mutating = req.mutating || (!req.ReadOnly && mutatingMethod(req.Method))
 	if req.Output != "" && !mutating && !req.RequireLogin && response.StatusCode >= 200 && response.StatusCode < 300 && isBinarySiteContent(response) {
 		written, writeErr := atomicStreamWrite(req.Output, response.Body)
 		if writeErr != nil {
 			return nil, writeErr
 		}
-		if saveErr := saveCookies(jar, cookieFile, target); saveErr != nil {
+		saveTarget := target
+		if req.SessionTarget != nil {
+			saveTarget = req.SessionTarget
+		}
+		if saveErr := saveCookies(jar, cookiePath, saveTarget); saveErr != nil {
 			return nil, &siteError{Code: "session_error", Message: "无法保存 Cookie 会话: " + saveErr.Error()}
 		}
 		return map[string]any{
@@ -465,7 +533,11 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 	if req.Output == "" && isBinarySiteResponse(response) {
 		return nil, requestFailure(req, requestInfo, "binary_output_required", "响应是二进制内容，请使用 --output 保存文件")
 	}
-	if saveErr := saveCookies(jar, cookieFile, target); saveErr != nil {
+	saveTarget := target
+	if req.SessionTarget != nil {
+		saveTarget = req.SessionTarget
+	}
+	if saveErr := saveCookies(jar, cookiePath, saveTarget); saveErr != nil {
 		if mutating {
 			return nil, requestFailure(req, requestInfo, "mutation_unverified", "请求已发送但会话保存失败: "+saveErr.Error())
 		}
@@ -512,6 +584,10 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 			"content_type": response.Header.Get("Content-Type"),
 		}, nil
 	}
+	payload := responsePayload(response, content, decoded)
+	if req.RawJSON && decoded != nil {
+		payload["json_internal"] = decoded
+	}
 	return map[string]any{
 		"ok":        true,
 		"submitted": mutating,
@@ -519,7 +595,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		"evidence":  "confirmed",
 		"request":   requestInfo,
 		"site":      origin(target),
-		"response":  responsePayload(response, content, decoded),
+		"response":  payload,
 	}, nil
 }
 
@@ -597,6 +673,10 @@ func businessState(content []byte, contentType string) (bool, bool, any) {
 	if looksJSON && json.Unmarshal(trimmed, &decoded) == nil {
 		state, known := jsonBusinessState(decoded)
 		return state, known, decoded
+	}
+	if strings.Contains(strings.ToLower(contentType), "html") || bytes.HasPrefix(trimmed, []byte("<")) {
+		state, known := pageFeedback(string(trimmed), contentType)
+		return state, known, nil
 	}
 	text := strings.TrimSpace(string(content))
 	if failureMessage(text) {
@@ -1013,6 +1093,15 @@ func resolveSite(req siteRequest) (*url.URL, string, *siteError) {
 			return nil, "", &siteError{Code: "invalid_argument", Message: "服务必须是 csust.edu.cn 及其子域名"}
 		}
 		info = serviceInfo{host: strings.ToLower(parsed.Host), scheme: "https", path: "/"}
+	}
+	if key == "academic" {
+		if base := os.Getenv("CSUST_BASE_URL"); base != "" {
+			parsedBase, parseErr := url.Parse(base)
+			if parseErr != nil || parsedBase.Host == "" || (parsedBase.Scheme != "http" && parsedBase.Scheme != "https") {
+				return nil, "", &siteError{Code: "invalid_path", Message: "CSUST_BASE_URL 地址无效"}
+			}
+			info.host, info.scheme, info.path = parsedBase.Host, parsedBase.Scheme, "/"
+		}
 	}
 	if req.Scheme != "" {
 		info.scheme = req.Scheme

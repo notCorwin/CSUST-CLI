@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,11 +12,6 @@ import (
 )
 
 const version = "0.4.0"
-
-// Keep the compatibility adapters available when the Go binary is installed elsewhere.
-//
-//go:embed csust.py csust_cli/*.py csust_cli/features/*.py
-var legacyFiles embed.FS
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -31,7 +25,12 @@ func run(args []string) int {
 	jsonMode := has(args, "--json") && !hasHelp(args)
 	handled, stdout, stderr, code, err := (adapter.NativeSite{}).Run(context.Background(), args, jsonMode)
 	if !handled {
-		stdout, stderr, code, err = (adapter.Legacy{Files: legacyFiles}).Run(context.Background(), args, jsonMode)
+		if jsonMode {
+			writeError("unknown_command", "未知命令")
+			return 2
+		}
+		fmt.Fprintln(os.Stderr, "错误: 未知命令")
+		return 2
 	}
 	if len(stderr) > 0 {
 		_, _ = os.Stderr.Write(stderr)
