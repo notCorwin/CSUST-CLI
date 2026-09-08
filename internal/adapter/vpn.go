@@ -965,7 +965,8 @@ func (a NativeSite) runVPNLogout(ctx context.Context, args []string) (map[string
 	if removeErr := removeCookieFile(sessionPath(native)); removeErr != nil {
 		return nil, &siteError{Code: "session_write_failed", Message: removeErr.Error()}
 	}
-	return map[string]any{"ok": true, "submitted": remote["submitted"], "confirmed": true, "evidence": "confirmed", "logged_out": true, "native": native, "remote": remote}, nil
+	submitted, _ := remote["submitted"].(bool)
+	return map[string]any{"ok": true, "submitted": submitted, "confirmed": true, "evidence": "confirmed", "logged_out": true, "native": native, "remote": remote}, nil
 }
 
 func sessionPath(native bool) string {

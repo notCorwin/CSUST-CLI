@@ -97,6 +97,39 @@ var webPublicRoutes = []map[string]string{
 	{"command": "app-qr", "name": "APP 下载/返回登录", "path": "/css/images/codeFrame.png"},
 }
 
+var webMainMenus = []map[string]string{
+	{"command": "desktop", "name": "我的桌面", "code": "NEW_XSD_WDZM"},
+	{"command": "student-records", "name": "学籍成绩", "code": "NEW_XSD_XJCJ"},
+	{"command": "training", "name": "培养管理", "code": "NEW_XSD_PYGL"},
+	{"command": "exams", "name": "考试报名", "code": "NEW_XSD_KSBM"},
+	{"command": "practice", "name": "实践环节", "code": "NEW_XSD_SJHJ"},
+	{"command": "evaluation", "name": "教学评价", "code": "NEW_XSD_JXPJ"},
+}
+
+var webSecondLevelMenus = []map[string]string{
+	{"name": "教学评价", "menu": "教学评价", "code": "NEW_XSD_JXPJ_JXPJ"},
+	{"name": "我的申请", "menu": "考试报名", "code": "NEW_XSD_KSBM_WDSQ"},
+	{"name": "我的考试", "menu": "考试报名", "code": "NEW_XSD_KSBM_WDKS"},
+	{"name": "成绩管理", "menu": "考试报名", "code": "NEW_XSD_KSBM_CJGL"},
+	{"name": "培养方案", "menu": "培养管理", "code": "NEW_XSD_PYGL_PYFA"},
+	{"name": "我的课表", "menu": "培养管理", "code": "NEW_XSD_PYGL_WDKB"},
+	{"name": "选课管理", "menu": "培养管理", "code": "NEW_XSD_PYGL_XKGL"},
+	{"name": "教材管理", "menu": "培养管理", "code": "NEW_XSD_PYGL_JCGL"},
+	{"name": "辅修管理", "menu": "培养管理", "code": "NEW_XSD_PYGL_FXGL"},
+	{"name": "实验教学", "menu": "实践环节", "code": "NEW_XSD_SJHJ_SYJX"},
+	{"name": "第二课堂学分", "menu": "实践环节", "code": "NEW_XSD_SJHJ_CXXF"},
+	{"name": "毕业设计", "menu": "实践环节", "code": "NEW_XSD_KSBM_BYSJ"},
+	{"name": "学科竞赛", "menu": "实践环节", "code": "NEW_XSD_SJHJ_XKJS"},
+	{"name": "创新创业", "menu": "实践环节", "code": "NEW_XSD_SJHJ_CXCY"},
+	{"name": "公告留言", "menu": "我的桌面", "code": "NEW_XSD_WDZM_GGLY"},
+	{"name": "个人信息", "menu": "我的桌面", "code": "NEW_XSD_WDZM_GRXX"},
+	{"name": "在线问答", "menu": "我的桌面", "code": "NEW_XSD_WDZM_ZXWD"},
+	{"name": "教学周历", "menu": "我的桌面", "code": "NEW_XSD_WDZM_JXZL"},
+	{"name": "学籍管理", "menu": "学籍成绩", "code": "NEW_XSD_XJCJ_XJGL"},
+	{"name": "我的成绩", "menu": "学籍成绩", "code": "NEW_XSD_XJCJ_WDCJ"},
+	{"name": "毕业管理", "menu": "学籍成绩", "code": "NEW_XSD_BYGL_BYGL"},
+}
+
 func (a NativeSite) runWebCommand(ctx context.Context, args []string, jsonMode bool) (bool, []byte, []byte, int, error) {
 	if len(args) == 0 || (args[0] != "web" && args[0] != "routes" && args[0] != "menu" && args[0] != "discover") {
 		return false, nil, nil, 0, nil
@@ -111,10 +144,56 @@ func (a NativeSite) runWebCommand(ctx context.Context, args []string, jsonMode b
 		}
 		return true, nil, []byte("错误: " + parseErr.Error() + "\n"), 2, nil
 	}
+	if command.kind == "routes" {
+		result, routeErr := a.runWebRoutes(ctx, command.path)
+		if routeErr != nil {
+			if jsonMode {
+				return true, errorJSON(routeErr), nil, 2, nil
+			}
+			return true, nil, []byte("错误: " + routeErr.Error() + "\n"), 2, nil
+		}
+		if jsonMode {
+			encoded, encodeErr := json.Marshal(result)
+			if encodeErr != nil {
+				return true, nil, nil, 2, encodeErr
+			}
+			return true, encoded, nil, 0, nil
+		}
+		return true, []byte(renderWebResult(result)), nil, 0, nil
+	}
+	if command.kind == "graduation-design" {
+		result, graduationErr := a.runWebGraduation(ctx, command.siteArgs)
+		if graduationErr != nil {
+			if jsonMode {
+				return true, errorJSON(graduationErr), nil, 2, nil
+			}
+			return true, nil, []byte("错误: " + graduationErr.Error() + "\n"), 2, nil
+		}
+		if jsonMode {
+			encoded, encodeErr := json.Marshal(result)
+			if encodeErr != nil {
+				return true, nil, nil, 2, encodeErr
+			}
+			return true, encoded, nil, 0, nil
+		}
+		return true, []byte(renderWebResult(result)), nil, 0, nil
+	}
+
+	if command.name != "" {
+		resolved, resolveErr := a.resolveWebRoute(ctx, command.name)
+		if resolveErr != nil {
+			if jsonMode {
+				return true, errorJSON(resolveErr), nil, 2, nil
+			}
+			return true, nil, []byte("错误: " + resolveErr.Error() + "\n"), 2, nil
+		}
+		command.siteArgs = append([]string{"get", "--service", "academic", "--cookie-file", academicCookiePath(), "--require-login", "--path", resolved}, command.siteArgs...)
+	}
+
 	var result map[string]any
 	var err *siteError
 	switch command.kind {
-	case "catalog", "routes":
+	case "catalog":
 		result = webCatalogResult()
 	case "request":
 		request, parseRequestErr := parseSiteRequest(command.siteArgs[1:])
@@ -122,7 +201,7 @@ func (a NativeSite) runWebCommand(ctx context.Context, args []string, jsonMode b
 			err = parseRequestErr
 			break
 		}
-		result, err = a.execute(ctx, request)
+		result, err = a.executeAcademicRequestWithRecovery(ctx, request)
 		if err == nil {
 			result = webPageResult(result)
 		}
@@ -132,7 +211,9 @@ func (a NativeSite) runWebCommand(ctx context.Context, args []string, jsonMode b
 			err = siteErr
 			break
 		}
-		result, err = a.executeSiteCommand(ctx, parsed)
+		result, err = a.executeAcademicRunWithRecovery(ctx, func() (map[string]any, *siteError) {
+			return a.executeSiteCommand(ctx, parsed)
+		})
 	}
 	if err != nil {
 		if jsonMode {
@@ -153,18 +234,40 @@ func (a NativeSite) runWebCommand(ctx context.Context, args []string, jsonMode b
 type parsedWebCommand struct {
 	kind     string
 	siteArgs []string
+	path     string
+	name     string
 }
 
 func parseWebCommand(args []string) (parsedWebCommand, *siteError) {
 	if args[0] != "web" {
-		return parsedWebCommand{kind: "routes"}, nil
+		path, err := parseWebRoutesPath(args[1:])
+		if err != nil {
+			return parsedWebCommand{}, err
+		}
+		return parsedWebCommand{kind: "routes", path: path}, nil
 	}
 	if len(args) < 2 {
 		return parsedWebCommand{}, &siteError{Code: "invalid_argument", Message: "缺少 web 子命令"}
 	}
 	child := args[1]
 	if child == "catalog" || child == "routes" {
-		return parsedWebCommand{kind: child}, nil
+		if child == "catalog" {
+			if err := onlyJSONArgs(args[2:]); err != nil {
+				return parsedWebCommand{}, err
+			}
+			return parsedWebCommand{kind: child}, nil
+		}
+		parsedPath, parseErr := parseWebRoutesPath(args[2:])
+		if parseErr != nil {
+			return parsedWebCommand{}, parseErr
+		}
+		return parsedWebCommand{kind: child, path: parsedPath}, nil
+	}
+	if child == "graduation-design" {
+		return parsedWebCommand{kind: child, siteArgs: append([]string(nil), args[2:]...)}, nil
+	}
+	if child == "run" {
+		child = "action"
 	}
 	public := false
 	start := 2
@@ -201,16 +304,16 @@ func parseWebCommand(args []string) (parsedWebCommand, *siteError) {
 		if err != nil {
 			return parsedWebCommand{}, err
 		}
-		route, found := findWebRoute(name)
-		if !found {
-			return parsedWebCommand{}, &siteError{Code: "route_not_found", Message: "未找到页面入口: " + name}
-		}
 		if flagPresent(remaining, "--path") {
 			return parsedWebCommand{}, &siteError{Code: "invalid_argument", Message: "--name 与 --path 互斥"}
 		}
-		rest = append([]string{"--path", route.path}, remaining...)
+		if route, found := findWebRoute(name); found {
+			rest = append([]string{"--path", route.path}, remaining...)
+		} else {
+			return parsedWebCommand{kind: "get", name: name, siteArgs: remaining}, nil
+		}
 	}
-	if child == "get" && public {
+	if (child == "get" || child == "action") && public {
 		if err := validatePublicPath(rest); err != nil {
 			return parsedWebCommand{}, err
 		}
@@ -236,8 +339,33 @@ func parseWebCommand(args []string) (parsedWebCommand, *siteError) {
 		// Public pages intentionally use the same host but never require a login.
 	}
 	siteArgs := []string{child, "--service", service, "--cookie-file", cookie}
+	if !public {
+		siteArgs = append(siteArgs, "--require-login")
+	}
 	siteArgs = append(siteArgs, rest...)
 	return parsedWebCommand{kind: child, siteArgs: siteArgs}, nil
+}
+
+func parseWebRoutesPath(args []string) (string, *siteError) {
+	path := "/jsxsd/framework/xsMain.jsp"
+	for index := 0; index < len(args); index++ {
+		arg, value, inline := splitInline(args[index])
+		if arg == "--json" {
+			continue
+		}
+		if arg != "--path" {
+			return "", &siteError{Code: "invalid_argument", Message: "routes 参数无效: " + arg}
+		}
+		if !inline {
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return "", &siteError{Code: "invalid_argument", Message: "--path 缺少参数值"}
+			}
+			index++
+			value = args[index]
+		}
+		path = value
+	}
+	return path, nil
 }
 
 func webPageResult(result map[string]any) map[string]any {
@@ -259,10 +387,185 @@ func findWebRoute(value string) (webRoute, bool) {
 
 func webCatalogResult() map[string]any {
 	catalog := make([]map[string]any, 0, len(webRoutes))
-	for _, route := range webRoutes {
-		catalog = append(catalog, map[string]any{"command": route.command, "group": route.group, "name": route.name, "path": route.path})
+	groupCodes := make(map[string]map[string]string, len(webSecondLevelMenus))
+	for _, group := range webSecondLevelMenus {
+		groupCodes[group["name"]] = group
 	}
-	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "catalog": catalog, "route_count": len(catalog), "public": webPublicRoutes, "conditional": []map[string]string{{"command": "graduation-design", "name": "毕业设计", "kind": "external-sso", "path": "https://oauth.fanyu.com/sso/cas/10536/1004"}}}
+	known := make([]map[string]any, 0, len(webRoutes))
+	for _, route := range webRoutes {
+		group := groupCodes[route.group]
+		catalog = append(catalog, map[string]any{"command": route.command, "group": route.group, "group_code": group["code"], "menu": group["menu"], "name": route.name, "path": route.path})
+		known = append(known, map[string]any{"name": route.command, "title": route.name, "path": route.path})
+	}
+	conditional := []map[string]string{{"command": "graduation-design", "name": "毕业设计", "kind": "external-sso", "path": "https://oauth.fanyu.com/sso/cas/10536/1004"}}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"menus": webMainMenus, "groups": webSecondLevelMenus, "catalog": catalog, "known": known,
+		"route_count": len(catalog), "public": webPublicRoutes, "conditional": conditional,
+	}
+}
+
+func (a NativeSite) runWebRoutes(ctx context.Context, path string) (map[string]any, *siteError) {
+	if path == "" {
+		path = "/jsxsd/framework/xsMain.jsp"
+	}
+	result, err := a.executeAcademicRequestWithRecovery(ctx, siteRequest{
+		Service: "academic", Path: path, Method: "GET", CookieFile: academicCookiePath(), RequireLogin: true, ReadOnly: true, Yes: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	pageResult := sitePageResult(result)
+	page, _ := pageResult["response"].(map[string]any)
+	discovered := discoveredWebRoutes(page)
+	catalog := webCatalogResult()
+	catalog["url"] = page["url"]
+	catalog["discovered"] = discovered
+	catalog["page"] = page
+	return catalog, nil
+}
+
+func discoveredWebRoutes(page map[string]any) []map[string]any {
+	result := make([]map[string]any, 0)
+	seen := map[string]bool{}
+	pageURL := fmt.Sprint(page["url"])
+	if links, ok := page["links"].([]map[string]any); ok {
+		for _, link := range links {
+			path := fmt.Sprint(link["path"])
+			if !strings.HasPrefix(path, "/jsxsd/") {
+				continue
+			}
+			key := fmt.Sprint(link["text"]) + "\x1f" + path
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, map[string]any{"name": link["text"], "path": path, "method": "GET", "source": "link"})
+			}
+		}
+	}
+	if actions, ok := page["actions"].([]map[string]any); ok {
+		for _, action := range actions {
+			if strings.ToUpper(fmt.Sprint(action["method"])) != "GET" {
+				continue
+			}
+			path := fmt.Sprint(action["target"])
+			if !strings.HasPrefix(path, "/jsxsd/") || pageURL == "" {
+				continue
+			}
+			key := fmt.Sprint(action["text"]) + "\x1f" + path
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, map[string]any{"name": action["text"], "path": path, "method": "GET", "ref": action["ref"], "source": "action"})
+			}
+		}
+	}
+	return result
+}
+
+func (a NativeSite) resolveWebRoute(ctx context.Context, name string) (string, *siteError) {
+	requested := strings.TrimSpace(name)
+	if requested == "" {
+		return "", &siteError{Code: "invalid_argument", Message: "页面名称不能为空"}
+	}
+	result, err := a.runWebRoutes(ctx, "/jsxsd/framework/xsMain.jsp")
+	if err != nil {
+		return "", err
+	}
+	discovered, _ := result["discovered"].([]map[string]any)
+	needle := strings.ToLower(requested)
+	if route, found := findWebRoute(requested); found {
+		needle = strings.ToLower(route.name)
+	}
+	candidates := make([]map[string]any, 0)
+	for _, item := range discovered {
+		if strings.ToLower(strings.TrimSpace(fmt.Sprint(item["name"]))) == needle {
+			candidates = append(candidates, item)
+		}
+	}
+	if len(candidates) == 0 && needle != strings.ToLower(requested) {
+		for _, item := range discovered {
+			if strings.Contains(strings.ToLower(strings.TrimSpace(fmt.Sprint(item["name"]))), needle) {
+				candidates = append(candidates, item)
+			}
+		}
+	}
+	if len(candidates) == 1 {
+		return fmt.Sprint(candidates[0]["path"]), nil
+	}
+	if len(candidates) > 1 {
+		return "", &siteError{Code: "ambiguous_target", Message: "页面名称对应多个入口，请改用 --path", Details: map[string]any{"name": name, "candidates": candidates}}
+	}
+	return "", &siteError{Code: "route_not_found", Message: "当前页面未发现该入口", Details: map[string]any{"name": name}}
+}
+
+func (a NativeSite) runWebGraduation(ctx context.Context, args []string) (map[string]any, *siteError) {
+	fetch, output := false, ""
+	for index := 0; index < len(args); index++ {
+		arg, value, inline := splitInline(args[index])
+		switch arg {
+		case "--json":
+			continue
+		case "--fetch":
+			if inline {
+				return nil, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			fetch = true
+		case "--output":
+			if !inline {
+				if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+					return nil, &siteError{Code: "invalid_argument", Message: "--output 缺少参数值"}
+				}
+				index++
+				value = args[index]
+			}
+			output = expandUserPath(value)
+		default:
+			return nil, &siteError{Code: "invalid_argument", Message: "web graduation-design 参数无效: " + arg}
+		}
+	}
+	if output != "" && !fetch {
+		return nil, &siteError{Code: "invalid_argument", Message: "--output 需要同时指定 --fetch"}
+	}
+	landing, err := a.executeAcademicRequestWithRecovery(ctx, siteRequest{Service: "academic", Path: "/jsxsd/framework/xsMain.jsp", Method: "GET", CookieFile: academicCookiePath(), RequireLogin: true, ReadOnly: true, Yes: true})
+	if err != nil {
+		return nil, err
+	}
+	response, _ := landing["response"].(map[string]any)
+	source, _ := response["body"].(string)
+	pageURL, _ := response["url"].(string)
+	document, parseErr := parsePage(source)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	target := ""
+	found := false
+	for _, node := range document.findAll("a") {
+		if strings.Contains(strings.ToLower(node.attr("onclick")), "towptjbs") {
+			found = true
+			_, target = pageActionTarget(node, nil, document, pageURL)
+			break
+		}
+	}
+	if !found {
+		return nil, &siteError{Code: "feature_unavailable", Message: "当前账号没有毕业设计入口"}
+	}
+	parsed, targetErr := validateGraduationTarget(target)
+	if targetErr != nil {
+		return nil, targetErr
+	}
+	result := map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "external": true, "url": safeSiteURL(parsed), "method": "GET"}
+	if !fetch {
+		return result, nil
+	}
+	fetched, fetchErr := a.execute(ctx, siteRequest{Target: parsed, CookieFile: academicCookiePath(), Method: "GET", Output: output, ReadOnly: true, Yes: true})
+	if fetchErr != nil {
+		return nil, fetchErr
+	}
+	if output != "" {
+		result["download"] = fetched
+		return result, nil
+	}
+	result["response"] = sitePageResult(fetched)["response"]
+	return result, nil
 }
 
 func academicCookiePath() string {

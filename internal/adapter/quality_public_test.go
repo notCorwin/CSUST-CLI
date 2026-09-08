@@ -67,4 +67,28 @@ func TestNativeQualityPublicAndGraduationCommands(t *testing.T) {
 	if payload["external"] != true || payload["url"] != "https://oauth.fanyu.com/sso/cas/10536/1004" {
 		t.Fatalf("unexpected graduation: %#v", payload)
 	}
+
+	handled, stdout, _, code, err = (NativeSite{}).Run(context.Background(), []string{"quality", "status", "--json"}, true)
+	if err != nil || !handled || code != 0 {
+		t.Fatalf("status without session: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
+	}
+	payload = map[string]any{}
+	if err := json.Unmarshal(stdout, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["logged_in"] != false {
+		t.Fatalf("unexpected quality status: %#v", payload)
+	}
+
+	handled, stdout, _, code, err = (NativeSite{}).Run(context.Background(), []string{"quality", "logout", "--json"}, true)
+	if err != nil || !handled || code != 0 {
+		t.Fatalf("logout without session: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
+	}
+	payload = map[string]any{}
+	if err := json.Unmarshal(stdout, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["logged_out"] != true || payload["confirmed"] != true {
+		t.Fatalf("unexpected quality logout: %#v", payload)
+	}
 }

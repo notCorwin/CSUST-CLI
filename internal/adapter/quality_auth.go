@@ -119,10 +119,30 @@ func (a NativeSite) runQualityLogout(ctx context.Context, args []string) (map[st
 	if err := onlyJSONArgs(args); err != nil {
 		return nil, err
 	}
-	path := "/jsxsd/xk/LoginToXk?method=exit&tktime=" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-	result, err := a.runGatewayRequest(ctx, qualityServiceName, gatewayRequest{path: path, method: "GET", yes: true, forceMutating: true})
-	if err != nil {
-		return nil, err
+	_, cookie, session, connectionErr := vpnConnection(false)
+	if connectionErr != nil {
+		return nil, connectionErr
 	}
-	return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "confirmed", "logged_out": true, "service": qualityServiceName, "remote": result}, nil
+	remote := map[string]any{"skipped": true}
+	active := false
+	if _, statErr := os.Stat(cookie); statErr == nil {
+		active = true
+	}
+	if session["token"] != nil {
+		active = true
+	}
+	var remoteErr *siteError
+	if active {
+		path := "/jsxsd/xk/LoginToXk?method=exit&tktime=" + strconv.FormatInt(time.Now().UnixMilli(), 10)
+		remote, remoteErr = a.runGatewayRequest(ctx, qualityServiceName, gatewayRequest{path: path, method: "GET", yes: true, forceMutating: true})
+	}
+	removeErr := removeCookieFile(cookie)
+	if remoteErr != nil {
+		return nil, remoteErr
+	}
+	if removeErr != nil {
+		return nil, &siteError{Code: "cookie_write_failed", Message: removeErr.Error()}
+	}
+	submitted, _ := remote["submitted"].(bool)
+	return map[string]any{"ok": true, "submitted": submitted, "confirmed": true, "evidence": "confirmed", "logged_out": true, "service": qualityServiceName, "remote": remote}, nil
 }

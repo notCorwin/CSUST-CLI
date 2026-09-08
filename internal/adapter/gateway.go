@@ -37,6 +37,13 @@ func (a NativeSite) runGatewayCommand(ctx context.Context, args []string, jsonMo
 		return false, nil, nil, 0, nil
 	}
 	result, runErr := a.executeGatewayCommand(ctx, service, args[1:])
+	if runErr != nil && runErr.Code == "login_required" && gatewayCanRecoverVPN(args[1:]) {
+		if _, loginErr := a.runVPNLogin(ctx, []string{"--auth", "cas"}); loginErr != nil {
+			runErr = loginErr
+		} else {
+			result, runErr = a.executeGatewayCommand(ctx, service, args[1:])
+		}
+	}
 	if runErr != nil {
 		if jsonMode {
 			return true, errorJSON(runErr), nil, 2, nil
@@ -51,6 +58,18 @@ func (a NativeSite) runGatewayCommand(ctx context.Context, args []string, jsonMo
 		return true, encoded, nil, 0, nil
 	}
 	return true, []byte(renderGatewayResult(result)), nil, 0, nil
+}
+
+func gatewayCanRecoverVPN(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "catalog", "status", "logout", "login":
+		return false
+	default:
+		return true
+	}
 }
 
 func gatewayCommandService(command string) (string, bool) {
@@ -74,6 +93,19 @@ func (a NativeSite) executeGatewayCommand(ctx context.Context, service string, a
 			return teachingCatalog(), nil
 		}
 		result := webCatalogResult()
+		routes := make([]map[string]any, 0, len(webRoutes))
+		for _, route := range webRoutes {
+			routes = append(routes, map[string]any{"name": route.command, "section": route.group, "label": route.name, "path": route.path, "description": route.name})
+		}
+		public := make([]map[string]any, 0, len(webPublicRoutes))
+		for _, route := range webPublicRoutes {
+			public = append(public, map[string]any{"name": route["command"], "label": route["name"], "path": route["path"]})
+		}
+		result["routes"] = routes
+		result["public"] = public
+		result["route_count"] = len(routes)
+		result["evaluation"] = map[string]any{"commands": []string{"batches", "courses", "form", "save", "submit"}, "page": "/jsxsd/xspj/xspj_find.do"}
+		result["request"] = "csust quality request --path /jsxsd/... --method POST --data NAME=VALUE --yes --json"
 		result["service"] = service
 		result["system"] = "教学质量保障系统"
 		return result, nil
@@ -269,7 +301,7 @@ func (a NativeSite) runGatewayRequest(ctx context.Context, service string, reque
 	}
 	mutating := item.mutating
 	if request.name == "" {
-		mutating = !readOnlyMethod(request.method) || sideEffectSitePattern.MatchString(request.path)
+		mutating = !readOnlyMethod(request.method) || sideEffectSitePattern.MatchString(request.path) || gatewayParamsMutate(request.params)
 	}
 	if request.readOnly {
 		mutating = false
@@ -301,6 +333,16 @@ func gatewayEntry(service, name string) (teachingCatalogItem, bool, bool) {
 		}
 	}
 	return teachingCatalogItem{}, false, false
+}
+
+func gatewayParamsMutate(params []pair) bool {
+	for _, item := range params {
+		switch strings.ToLower(item.name) {
+		case "action", "op", "operation":
+			return true
+		}
+	}
+	return false
 }
 
 func (a NativeSite) executeGateway(ctx context.Context, service string, request gatewayRequest, mutating bool) (map[string]any, *siteError) {
@@ -479,6 +521,15 @@ func (a NativeSite) qualityStatus(ctx context.Context, args []string) (map[strin
 	if err := onlyJSONArgs(args); err != nil {
 		return nil, err
 	}
+	_, cookie, session, connectionErr := vpnConnection(false)
+	if connectionErr != nil {
+		return nil, connectionErr
+	}
+	if session["token"] == nil {
+		if _, statErr := os.Stat(cookie); os.IsNotExist(statErr) {
+			return map[string]any{"ok": true, "logged_in": false, "service": qualityServiceName, "system": "教学质量保障系统"}, nil
+		}
+	}
 	request := gatewayRequest{path: "/jsxsd/framework/xsMain.jsp", method: "GET"}
 	result, err := a.runGatewayRequest(ctx, qualityServiceName, request)
 	if err != nil {
@@ -617,7 +668,7 @@ func (a NativeSite) teachingCourseOrder(ctx context.Context, args []string) (map
 	if !yes {
 		return nil, &siteError{Code: "confirmation_required", Message: "调整课程顺序会改变远端状态，请加 --yes"}
 	}
-	request := gatewayRequest{path: "/meol/lesson/blen.student.lesson.list.jsp", method: "GET", params: []pair{{"ACTION", map[bool]string{true: "LESSUP", false: "LESSDOWN"}[direction == "up"]}, {"lid", courseID}}, yes: true}
+	request := gatewayRequest{path: "/meol/lesson/blen.student.lesson.list.jsp", method: "GET", params: []pair{{"ACTION", map[bool]string{true: "LESSUP", false: "LESSDOWN"}[direction == "up"]}, {"lid", courseID}}, yes: true, forceMutating: true}
 	return a.runGatewayRequest(ctx, teachingServiceName, request)
 }
 

@@ -25,4 +25,12 @@ func TestAcademicParsersKeepSemanticRows(t *testing.T) {
 	if parseErr != nil || len(gradeRows) != 1 || gradeRows[0]["score"] != "95" {
 		t.Fatalf("unexpected grades: %#v %v", gradeRows, parseErr)
 	}
+	detailDocument, err := parsePage(`<table id="dataList"><tr><td>只有一行</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, parseErr := parseGradeDetailPage(detailDocument, "http://xk.csust.edu.cn/jsxsd/kscj/detail")
+	if parseErr == nil || detail != nil {
+		t.Fatalf("expected missing grade detail error: %#v %v", detail, parseErr)
+	}
 }

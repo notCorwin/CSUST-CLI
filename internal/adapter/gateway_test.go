@@ -58,6 +58,45 @@ func TestNativeVPNAPIAndTeachingGateway(t *testing.T) {
 	}
 }
 
+func TestNativeQualityCatalogPreservesQualityMetadata(t *testing.T) {
+	handled, stdout, _, code, err := (NativeSite{}).Run(context.Background(), []string{"quality", "catalog", "--json"}, true)
+	if err != nil || !handled || code != 0 {
+		t.Fatalf("quality catalog: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(stdout, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["system"] != "教学质量保障系统" || payload["service"] != qualityServiceName {
+		t.Fatalf("unexpected quality identity: %#v", payload)
+	}
+	if payload["route_count"].(float64) != 69 {
+		t.Fatalf("unexpected quality route count: %#v", payload["route_count"])
+	}
+	evaluation := payload["evaluation"].(map[string]any)
+	if evaluation["page"] != "/jsxsd/xspj/xspj_find.do" || payload["request"] == nil {
+		t.Fatalf("unexpected quality metadata: %#v", payload)
+	}
+}
+
+func TestNativeVPNLogoutWithoutSessionReturnsContractFields(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CSUST_VPN_BASE_URL", "http://127.0.0.1:1")
+	t.Setenv("CSUST_VPN_COOKIE_FILE", filepath.Join(root, "vpn.cookies"))
+	t.Setenv("CSUST_VPN_SESSION_FILE", filepath.Join(root, "vpn.json"))
+	handled, stdout, _, code, err := (NativeSite{}).Run(context.Background(), []string{"vpn", "logout", "--json"}, true)
+	if err != nil || !handled || code != 0 {
+		t.Fatalf("vpn logout: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(stdout, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["logged_out"] != true || payload["submitted"] != false || payload["confirmed"] != true {
+		t.Fatalf("unexpected vpn logout: %#v", payload)
+	}
+}
+
 func TestNativeVPNLocalLogin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

@@ -97,7 +97,7 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 		if target.RawQuery != "" {
 			actionPath += "?" + target.RawQuery
 		}
-		result, submitErr := a.execute(ctx, siteRequest{
+		result, submitErr := a.executeAcademicRequestWithRecovery(ctx, siteRequest{
 			Service:      "academic",
 			Path:         actionPath,
 			Method:       "POST",

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -43,10 +44,8 @@ func (a NativeSite) runLoginCommand(ctx context.Context, args []string, jsonMode
 		return false, nil, nil, 0, nil
 	}
 	if args[0] == "logout" {
-		if err := removeCookieFile(academicCookiePath()); err != nil {
-			return loginOutput(jsonMode, nil, &siteError{Code: "cookie_write_failed", Message: err.Error()})
-		}
-		return loginOutput(jsonMode, map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "logged_out": true, "cookie_file": academicCookiePath()}, nil)
+		result, logoutErr := a.logoutAcademic(ctx)
+		return loginOutput(jsonMode, result, logoutErr)
 	}
 	options, parseErr := parseLoginOptions(args[1:])
 	if parseErr != nil {
@@ -54,6 +53,48 @@ func (a NativeSite) runLoginCommand(ctx context.Context, args []string, jsonMode
 	}
 	result, err := a.loginAcademic(ctx, options)
 	return loginOutput(jsonMode, result, err)
+}
+
+func (a NativeSite) logoutAcademic(ctx context.Context) (map[string]any, *siteError) {
+	cookiePath := academicCookiePath()
+	result, requestErr := a.execute(ctx, siteRequest{
+		Service: "academic", Path: "/jsxsd/xk/LoginToXk?method=exit&tktime=" + strconv.FormatInt(time.Now().UnixMilli(), 10),
+		Method: "GET", CookieFile: cookiePath, ReadOnly: true, Yes: true,
+	})
+	if requestErr != nil {
+		_ = removeCookieFile(cookiePath)
+		return nil, requestErr
+	}
+	response, _ := result["response"].(map[string]any)
+	status, _ := response["status"].(int)
+	body, _ := response["body"].(string)
+	confirmed, evidence := false, "unknown"
+	switch {
+	case status == http.StatusNoContent:
+		confirmed, evidence = true, "no_content"
+	case loginPageBody(body):
+		confirmed, evidence = true, "login_page"
+	case body != "":
+		if state, known, _ := businessState([]byte(body), fmt.Sprint(response["content_type"])); known {
+			confirmed, evidence = state, "business"
+		} else if successMessage(body) {
+			confirmed, evidence = true, "html_message"
+		}
+	case response["json"] != nil:
+		if state, known := jsonBusinessState(response["json"]); known {
+			confirmed, evidence = state, "business"
+		}
+	}
+	if !confirmed {
+		_ = removeCookieFile(cookiePath)
+		return nil, &siteError{Code: "mutation_unverified", Message: "远端退出请求已发送但未取得成功证据", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": evidence, "response": response}}
+	}
+	if err := removeCookieFile(cookiePath); err != nil {
+		return nil, &siteError{Code: "cookie_write_failed", Message: err.Error(), Details: map[string]any{"submitted": true, "confirmed": true, "evidence": evidence}}
+	}
+	result["ok"], result["submitted"], result["confirmed"] = true, true, true
+	result["evidence"], result["logged_out"], result["cookie_file"] = evidence, true, cookiePath
+	return result, nil
 }
 
 func loginOutput(jsonMode bool, result map[string]any, err *siteError) (bool, []byte, []byte, int, error) {
@@ -346,6 +387,28 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 
 func (a NativeSite) loginHTTP(ctx context.Context, request siteRequest) (map[string]any, *siteError) {
 	return a.execute(ctx, request)
+}
+
+func (a NativeSite) executeAcademicRequestWithRecovery(ctx context.Context, request siteRequest) (map[string]any, *siteError) {
+	result, err := a.execute(ctx, request)
+	if err == nil || err.Code != "login_required" {
+		return result, err
+	}
+	if _, loginErr := a.loginAcademic(ctx, loginOptions{auth: "auto"}); loginErr != nil {
+		return nil, loginErr
+	}
+	return a.execute(ctx, request)
+}
+
+func (a NativeSite) executeAcademicRunWithRecovery(ctx context.Context, run func() (map[string]any, *siteError)) (map[string]any, *siteError) {
+	result, err := run()
+	if err == nil || err.Code != "login_required" {
+		return result, err
+	}
+	if _, loginErr := a.loginAcademic(ctx, loginOptions{auth: "auto"}); loginErr != nil {
+		return nil, loginErr
+	}
+	return run()
 }
 
 func loginBody(result map[string]any) (string, string, *siteError) {

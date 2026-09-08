@@ -90,7 +90,7 @@ func (a NativeSite) academicPage(ctx context.Context, method, path string, data 
 	if method == "GET" {
 		request.Data = nil
 	}
-	result, err := a.execute(ctx, request)
+	result, err := a.executeAcademicRequestWithRecovery(ctx, request)
 	if err != nil {
 		return "", "", err
 	}
@@ -164,7 +164,11 @@ func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[stri
 		if parseErr != nil {
 			return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
 		}
-		return academicWrap(parseGradeDetailPage(document, pageURL)), nil
+		detail, detailErr := parseGradeDetailPage(document, pageURL)
+		if detailErr != nil {
+			return nil, detailErr
+		}
+		return academicWrap(detail), nil
 	}
 	term, nature, course, display, study := flagValue(args, "--term"), flagValue(args, "--course-nature"), flagValue(args, "--course-name"), flagValue(args, "--display"), flagValue(args, "--study-mode-id")
 	if study == "" {
@@ -771,14 +775,14 @@ func countGradeHeaders(values []string) int {
 	}
 	return count
 }
-func parseGradeDetailPage(document *pageNode, pageURL string) map[string]any {
+func parseGradeDetailPage(document *pageNode, pageURL string) (map[string]any, *siteError) {
 	table := academicTable(document, "dataList")
 	if table == nil {
-		return map[string]any{"url": pageURL, "fields": map[string]string{}}
+		return nil, &siteError{Code: "parse_error", Message: "未找到成绩详情表"}
 	}
 	rows := directTableRows(table)
 	if len(rows) < 2 {
-		return map[string]any{"url": pageURL, "fields": map[string]string{}}
+		return nil, &siteError{Code: "parse_error", Message: "成绩详情表行数不足"}
 	}
 	headers, values := rowValues(rows[0]), rowValues(rows[1])
 	fields := map[string]string{}
@@ -787,7 +791,7 @@ func parseGradeDetailPage(document *pageNode, pageURL string) map[string]any {
 			fields[header] = values[index]
 		}
 	}
-	return map[string]any{"url": safeSiteURL(mustParseURL(pageURL)), "fields": fields, "headers": headers, "cells": values, "text": pageDisplayText(rows[1])}
+	return map[string]any{"url": safeSiteURL(mustParseURL(pageURL)), "fields": fields, "headers": headers, "cells": values, "text": pageDisplayText(rows[1])}, nil
 }
 func parseExamPage(document *pageNode, pageURL string) ([]map[string]any, *siteError) {
 	table := academicTable(document, "dataList")

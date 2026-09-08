@@ -45,12 +45,17 @@ func (a NativeSite) runQualityGraduation(ctx context.Context, args []string) (ma
 		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
 	}
 	target := ""
+	found := false
 	for _, node := range document.findAll("a") {
 		if !strings.Contains(strings.ToLower(node.attr("onclick")), "towptjbs") {
 			continue
 		}
+		found = true
 		_, target = pageActionTarget(node, nil, document, pageURL)
 		break
+	}
+	if !found {
+		return nil, &siteError{Code: "feature_unavailable", Message: "当前账号没有毕业设计入口"}
 	}
 	parsed, targetErr := validateGraduationTarget(target)
 	if targetErr != nil {

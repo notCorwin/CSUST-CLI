@@ -126,7 +126,7 @@ func (a NativeSite) executeTextbook(ctx context.Context, args []string) (map[str
 	} else {
 		submit.Data = fields
 	}
-	result, requestErr := a.execute(ctx, submit)
+	result, requestErr := a.executeAcademicRequestWithRecovery(ctx, submit)
 	if requestErr != nil {
 		return nil, requestErr
 	}

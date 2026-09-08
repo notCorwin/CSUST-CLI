@@ -2,6 +2,8 @@
 
 面向智能体的长沙理工大学服务 CLI，Go 是正式入口；教务、VPN、网络教学和质量保障能力继续由现有协议适配器承载，`site request` 由 Go 原生 HTTP 适配器直接调用服务协议。教务系统命令仍访问旧的 `xk.csust.edu.cn`，登录默认优先通过 `authserver.csust.edu.cn` 统一身份认证；`vpn` 命令对应当前 `vpn.csust.edu.cn` 的 EnUES Vue SPA。
 
+仓库运行时仅保留 Go 实现，不再提供 Python 入口、安装脚本或双运行时回退。
+
 开发阶段的站点探索命令需要显式设置 `CSUST_EXPLORATION=1`；正式业务命令不执行爬取。
 
 ```bash
@@ -124,7 +126,7 @@ go run . quality request --path /jsxsd/... --method POST \
 
 已观察服务使用目录内的传输方案；新服务默认 HTTPS，旧的 HTTP 子域名可显式加 `--scheme http`。默认只执行当前子域名动作；若网页表单明确把登录/提交目标放到外部 HTTP(S) 服务（例如邮箱门户），可在 `site form`/`site action` 加 `--allow-external`，仍会拒绝脚本、邮件协议、目录跳转和 HTTPS 降级。页面明确跳转到其他官方子域名时，使用对应服务名或官方主机名，再配合服务内 `--path` 调用。
 
-账号密码优先从 `CSUST_USERNAME`、`CSUST_PASSWORD` 读取；未设置时读取当前目录 `.env` 中的 `username`、`password`，不会交互询问或写入密码。`.env` 应保持 `600` 权限；权限过宽时默认拒绝读取，如需兼容旧环境可显式设置 `CSUST_ALLOW_INSECURE_ENV=1`。`login` 的 `--auth auto` 在标准 `xk.csust.edu.cn` 地址优先走统一身份认证，网络层失败才回退旧的教务登录；可用 `--auth sso` 强制统一认证，或 `--auth local` 强制旧登录。统一认证需要验证码时由 `ddddocr` 在本机识别，失败会自动重试 3 次；可用 `--captcha CODE` 做测试覆盖。
+账号密码优先从 `CSUST_USERNAME`、`CSUST_PASSWORD` 读取；未设置时读取当前目录 `.env` 中的 `username`、`password`，不会交互询问或写入密码。`.env` 应保持 `600` 权限；权限过宽时默认拒绝读取，如需兼容旧环境可显式设置 `CSUST_ALLOW_INSECURE_ENV=1`。`login` 的 `--auth auto` 在标准 `xk.csust.edu.cn` 地址优先走统一身份认证，网络层失败才回退旧的教务登录；可用 `--auth sso` 强制统一认证，或 `--auth local` 强制旧登录。统一认证需要验证码时，Go 适配器会保存验证码图片并返回 `captcha_required`，需人工提供 `--captcha CODE` 后重试；运行时不依赖 Python/OCR。
 
 会话 Cookie 保存在 `~/.config/csust-cli/cookies.txt`，权限为 `600`；验证码图片保存在同目录，权限为 `600`。可用 `CSUST_BASE_URL` 和 `CSUST_COOKIE_FILE` 覆盖站点与会话文件路径。现站点使用 HTTP 时每个进程的首次请求会向 stderr 发出安全警告。
 
@@ -188,6 +190,6 @@ go run . --help
 GitHub Actions 在每次 push 和 pull request 时执行 Go 测试、静态检查、构建与命令入口检查。
 测试使用本地 HTTP 服务与模拟响应，不会提交学校账户数据。
 
-验证记录（2026-09-08）：本地 Go 26 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱、图书馆远程访问、慕课、网络教学和招生录取入口；`site discover` 深度 2 抓取 200 个页面，发现 38 个官方主机（其中目录已覆盖 46 个已观察服务），并记录了 2 个明确的 404/协议错误。
+验证记录（2026-09-08）：本地 Go 31 项测试通过，覆盖业务结果、混合上传、脚本解析、页面快照与动作引用、下载文件保留、会话刷新、全站子域名 URL 校验、通用 JSON 请求、外部页面动作目标和 CLI 退出码。实时读取了学校主页、统一认证、服务网、校园地图、人才招聘、继续教育、邮箱、图书馆远程访问、慕课、网络教学和招生录取入口；`site discover` 深度 2 抓取 200 个页面，发现 38 个官方主机（其中目录已覆盖 46 个已观察服务），并记录了 2 个明确的 404/协议错误。
 线上尝试了教务登录、课表、成绩、教材列表、VPN 登录与状态、教学课程及质量保障状态和菜单；本机代理下旧教务站返回 HTTP 502，VPN 连接失败，直连探测也未成功。因此这轮没有线上业务验收通过记录，也未执行线上业务写操作。
 目录中的页面/API 数量表示已映射范围，不等同于每个端点已通过线上验证。

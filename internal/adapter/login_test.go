@@ -56,6 +56,35 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 }
 
+func TestNativeLogoutVerifiesRemoteSessionAndClearsCookie(t *testing.T) {
+	logoutCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/jsxsd/xk/LoginToXk" && request.URL.Query().Get("method") == "exit" {
+			logoutCalled = true
+			_, _ = writer.Write([]byte("退出成功"))
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+	cookieFile := filepath.Join(t.TempDir(), "cookies.txt")
+	if err := os.WriteFile(cookieFile, []byte("# Netscape HTTP Cookie File\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", cookieFile)
+	handled, stdout, _, code, err := (NativeSite{}).Run(context.Background(), []string{"logout", "--json"}, true)
+	if err != nil || !handled || code != 0 {
+		t.Fatalf("logout: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
+	}
+	if !logoutCalled || strings.Contains(string(stdout), `"confirmed":false`) {
+		t.Fatalf("logout was not verified: called=%v output=%s", logoutCalled, stdout)
+	}
+	if _, err := os.Stat(cookieFile); !os.IsNotExist(err) {
+		t.Fatalf("cookie file was not removed: %v", err)
+	}
+}
+
 func mustFileMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(path)
