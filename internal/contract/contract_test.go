@@ -58,3 +58,15 @@ func TestNormalizeKeepsPendingFlow(t *testing.T) {
 		t.Fatalf("unexpected pending contract: %#v", result)
 	}
 }
+
+func TestNormalizeRejectsLowConfidenceWithoutEvidence(t *testing.T) {
+	if _, err := Normalize([]byte(`{"response":{"kind":"dynamic","confidence":"low"}}`)); err == nil {
+		t.Fatal("expected low-confidence page without evidence to fail")
+	}
+}
+
+func TestNormalizeAcceptsLowConfidenceWithEvidence(t *testing.T) {
+	if _, err := Normalize([]byte(`{"response":{"kind":"dynamic","confidence":"low","confidence_evidence":{"reason":"script-only"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+}

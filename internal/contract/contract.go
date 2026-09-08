@@ -13,6 +13,9 @@ func Normalize(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateConfidence(result); err != nil {
+		return nil, err
+	}
 	var ok bool
 	if value, exists := result["ok"]; exists {
 		if err := json.Unmarshal(value, &ok); err != nil {
@@ -110,6 +113,23 @@ func nestedBool(result map[string]json.RawMessage, parent, field string, fallbac
 		}
 	}
 	return json.RawMessage(fmt.Sprintf("%t", fallback))
+}
+
+func validateConfidence(result map[string]json.RawMessage) error {
+	for _, key := range []string{"page", "response"} {
+		var page map[string]json.RawMessage
+		if json.Unmarshal(result[key], &page) != nil || page == nil {
+			continue
+		}
+		var confidence string
+		if json.Unmarshal(page["confidence"], &confidence) == nil && confidence == "low" {
+			evidence := page["confidence_evidence"]
+			if len(bytes.TrimSpace(evidence)) <= 2 || bytes.Equal(bytes.TrimSpace(evidence), []byte("null")) {
+				return fmt.Errorf("低置信度页面缺少具体依据")
+			}
+		}
+	}
+	return nil
 }
 
 func pending(result map[string]json.RawMessage) bool {
