@@ -356,6 +356,12 @@ func (a NativeSite) loadSitePage(ctx context.Context, command siteCommand) (*pag
 			return nil, "", "", "", resolveErr
 		}
 	}
+	pageURL := target.String()
+	if rawURL, _ := response["raw_url"].(string); rawURL != "" {
+		if parsed, parseErr := url.Parse(rawURL); parseErr == nil && parsed.Host != "" {
+			pageURL = parsed.String()
+		}
+	}
 	if source == "" {
 		return nil, "", "", "", &siteError{Code: "parse_error", Message: "页面响应为空"}
 	}
@@ -363,7 +369,7 @@ func (a NativeSite) loadSitePage(ctx context.Context, command siteCommand) (*pag
 	if parseErr != nil {
 		return nil, "", "", "", &siteError{Code: "parse_error", Message: parseErr.Error()}
 	}
-	return document, source, target.String(), cookiePath, nil
+	return document, source, pageURL, cookiePath, nil
 }
 
 func (a NativeSite) submitSiteForm(ctx context.Context, command siteCommand, actionMode bool) (map[string]any, *siteError) {
@@ -454,17 +460,27 @@ func overridePairs(base, overrides []pair) []pair {
 	if len(overrides) == 0 {
 		return base
 	}
-	result := append([]pair(nil), base...)
+	byName := make(map[string][]pair, len(overrides))
 	for _, override := range overrides {
-		found := false
-		for index := range result {
-			if result[index].name == override.name {
-				result[index].value = override.value
-				found = true
-			}
-		}
+		byName[override.name] = append(byName[override.name], override)
+	}
+	result := make([]pair, 0, len(base)+len(overrides))
+	replaced := make(map[string]bool, len(byName))
+	for _, item := range base {
+		replacement, found := byName[item.name]
 		if !found {
+			result = append(result, item)
+			continue
+		}
+		if !replaced[item.name] {
+			result = append(result, replacement...)
+			replaced[item.name] = true
+		}
+	}
+	for _, override := range overrides {
+		if !replaced[override.name] {
 			result = append(result, override)
+			replaced[override.name] = true
 		}
 	}
 	return result

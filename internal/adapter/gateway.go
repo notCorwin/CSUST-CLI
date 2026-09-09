@@ -22,6 +22,7 @@ type gatewayRequest struct {
 	files                               []filePart
 	json                                any
 	hasJSON, yes, raw, readOnly         bool
+	methodSet                           bool
 	forceMutating                       bool
 	public                              bool
 	form, button, index                 int
@@ -183,6 +184,13 @@ func parseGatewayRequest(args []string, getOnly bool) (gatewayRequest, *siteErro
 			request.yes = true
 			continue
 		}
+		if arg == "--raw" {
+			if inline {
+				return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			request.raw = true
+			continue
+		}
 		if !inline {
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
@@ -197,6 +205,7 @@ func parseGatewayRequest(args []string, getOnly bool) (gatewayRequest, *siteErro
 			request.path = value
 		case "--method":
 			request.method = strings.ToUpper(value)
+			request.methodSet = true
 		case "--param":
 			item, err := splitPair(value, "--param")
 			if err != nil {
@@ -225,11 +234,6 @@ func parseGatewayRequest(args []string, getOnly bool) (gatewayRequest, *siteErro
 			request.output = expandUserPath(value)
 		case "--referer":
 			request.referer = value
-		case "--raw":
-			if inline {
-				return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			request.raw = true
 		case "--form":
 			parsed, parseErr := parsePositiveInt(value, "--form")
 			if parseErr != nil {
@@ -289,7 +293,7 @@ func parsePositiveInt(value, flag string) (int, *siteError) {
 }
 
 func (a NativeSite) runGatewayRequest(ctx context.Context, service string, request gatewayRequest) (map[string]any, *siteError) {
-	item, known, ambiguous := gatewayEntry(service, request.name)
+	item, known, ambiguous := gatewayEntry(service, request.name, request.method, request.methodSet)
 	if request.name != "" {
 		if ambiguous {
 			return nil, &siteError{Code: "ambiguous_route", Message: "目录名称有歧义，请改用 --path"}
@@ -323,9 +327,9 @@ func (a NativeSite) runGatewayRequest(ctx context.Context, service string, reque
 	return result, nil
 }
 
-func gatewayEntry(service, name string) (teachingCatalogItem, bool, bool) {
+func gatewayEntry(service, name, method string, methodSet bool) (teachingCatalogItem, bool, bool) {
 	if service == teachingServiceName {
-		return teachingLookup(name)
+		return teachingLookup(name, method, methodSet)
 	}
 	for _, route := range webRoutes {
 		if strings.EqualFold(route.command, name) || strings.EqualFold(route.name, name) {

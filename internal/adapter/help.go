@@ -15,6 +15,7 @@ func nativeUsage(args []string) []byte {
   login/logout                 教务会话
   schedule/grades/profile     教务查询
   exams/classrooms/selections 教务查询
+  course-selection            选课中心/跨专业选修课程
   terms/semester-start        学期信息
   textbooks                   教材操作
   evaluation                  学生评价

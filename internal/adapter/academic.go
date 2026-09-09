@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -61,11 +62,11 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 	case "semester-start":
 		return a.academicSemesterStart(ctx, args[1:])
 	case "course-selection", "course-select":
-		return a.academicPageSnapshot(ctx, "/jsxsd/xsxk/xklc_list")
+		return a.academicCourseSelection(ctx, args[1:])
 	case "classroom-request", "room-request":
-		return a.academicPageSnapshot(ctx, "/jsxsd/kbxx/jsjy_query")
+		return a.academicStructuredPage(ctx, args[1:], "classroom-request", "/jsxsd/kbxx/jsjy_query")
 	case "minor", "minor-registration":
-		return a.academicPageSnapshot(ctx, "/jsxsd/fxgl/fxbmxx_query")
+		return a.academicStructuredPage(ctx, args[1:], "minor-registration", "/jsxsd/fxgl/fxbmxx_query")
 	case "evaluation", "evaluate":
 		return a.runAcademicEvaluation(ctx, args[1:])
 	default:
@@ -73,16 +74,227 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 	}
 }
 
-func (a NativeSite) academicPageSnapshot(ctx context.Context, path string) (map[string]any, *siteError) {
+func (a NativeSite) academicCourseSelection(ctx context.Context, args []string) (map[string]any, *siteError) {
+	scope := firstNonEmpty(flagValue(args, "--scope"), "center")
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	paths := map[string]string{
+		"center":        "/jsxsd/xsxk/xklc_list",
+		"cross-major":   "/jsxsd/xsxk/xklc_list",
+		"special":       "/jsxsd/tsxk/tsxk_sqlist",
+		"special-query": "/jsxsd/tsxk/tsxk_cxlist",
+	}
+	path, found := paths[strings.ToLower(scope)]
+	if !found {
+		return nil, &siteError{Code: "invalid_argument", Message: "--scope 只能是 center、cross-major、special 或 special-query"}
+	}
+	entryPath := ""
 	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
 	if err != nil {
 		return nil, err
+	}
+	if scope == "cross-major" {
+		entryPath = path
+		document, parseErr := parsePage(body)
+		if parseErr != nil {
+			return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+		}
+		path = academicSelectionEntry(document, pageURL, "跨专业选修")
+		if path == "" {
+			page, pageErr := pageInspect(body, pageURL)
+			if pageErr != nil {
+				return nil, pageErr
+			}
+			return academicWrap(map[string]any{"scope": scope, "entry_path": entryPath, "path": nil, "keyword": nullableString(strings.TrimSpace(flagValue(args, "--keyword"))), "items": []map[string]any{}, "item_count": 0, "entry_found": false, "page": page}), nil
+		}
+		body, pageURL, err = a.academicPage(ctx, "GET", path, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicCourseRows(document, keyword)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "未找到选课表；请使用 web get 查看页面结构"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
 		return nil, pageErr
 	}
-	return academicWrap(map[string]any{"page": page}), nil
+	return academicWrap(map[string]any{
+		"scope": scope, "entry_path": nullableString(entryPath), "path": path, "keyword": nullableString(keyword),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func academicSelectionEntry(document *pageNode, pageURL, keyword string) string {
+	for _, table := range document.findAll("table") {
+		for _, row := range directTableRows(table) {
+			if !strings.Contains(pageDisplayText(row), keyword) {
+				continue
+			}
+			for _, link := range row.findAll("a") {
+				href := link.attr("href")
+				if href == "" {
+					continue
+				}
+				if target := resolvePageURL(pageURL, href); target != "" {
+					path, pathErr := academicPath(target)
+					if pathErr == nil {
+						return path
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func academicCourseRows(document *pageNode, keyword string) []map[string]any {
+	return academicStructuredRows(document, keyword, academicCourseField)
+}
+
+func (a NativeSite) academicStructuredPage(ctx context.Context, args []string, kind, path string) (map[string]any, *siteError) {
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicStructuredRows(document, keyword, academicPageField)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: kind + " 页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": kind, "path": path, "keyword": nullableString(keyword),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func academicStructuredRows(document *pageNode, keyword string, field func(string) string) []map[string]any {
+	table := (*pageNode)(nil)
+	score := 0
+	for _, candidate := range document.findAll("table") {
+		text := pageDisplayText(candidate)
+		current := len(directTableRows(candidate))
+		if strings.Contains(text, "课程") {
+			current += 5
+		}
+		if strings.Contains(text, "学分") || strings.Contains(text, "教师") || strings.Contains(text, "选课") || strings.Contains(text, "申请") || strings.Contains(text, "教室") || strings.Contains(text, "辅修") {
+			current += 2
+		}
+		if current > score {
+			table, score = candidate, current
+		}
+	}
+	if table == nil {
+		return []map[string]any{}
+	}
+	rows := directTableRows(table)
+	if len(rows) == 0 {
+		return []map[string]any{}
+	}
+	header := rowValues(rows[0])
+	headerCount := 0
+	for _, title := range header {
+		if field(title) != "" {
+			headerCount++
+		}
+	}
+	headerRow := len(directCells(rows[0])) > 0 && (directCells(rows[0])[0].tag == "th" || countGradeHeaders(header) > 0 || countTextHeaders(header) > 0 || headerCount > 0)
+	if headerRow {
+		rows = rows[1:]
+	}
+	result := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		values := rowValues(row)
+		text := strings.TrimSpace(pageDisplayText(row))
+		if len(values) == 0 || allEmpty(values) || academicNoDataRow(text) || (keyword != "" && !strings.Contains(strings.ToLower(text), strings.ToLower(keyword))) {
+			continue
+		}
+		item := map[string]any{"index": len(result) + 1, "cells": values, "text": text}
+		if headerRow {
+			for index, title := range header {
+				if name := field(title); name != "" && index < len(values) {
+					item[name] = values[index]
+				}
+			}
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func academicNoDataRow(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "未查询到数据" || value == "暂无数据" || value == "无数据"
+}
+
+func academicPageField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	if field := academicCourseField(value); field != "" {
+		return field
+	}
+	switch {
+	case strings.Contains(value, "申请编号") || value == "编号":
+		return "id"
+	case strings.Contains(value, "教室"):
+		return "room"
+	case strings.Contains(value, "教学楼"):
+		return "building"
+	case strings.Contains(value, "校区"):
+		return "campus"
+	case strings.Contains(value, "申请日期") || strings.Contains(value, "借用日期") || value == "日期":
+		return "date"
+	case strings.Contains(value, "开始节") || strings.Contains(value, "起始节"):
+		return "section_start"
+	case strings.Contains(value, "结束节") || strings.Contains(value, "终止节"):
+		return "section_end"
+	case strings.Contains(value, "申请人"):
+		return "applicant"
+	case strings.Contains(value, "申请时间") || strings.Contains(value, "提交时间"):
+		return "submitted_at"
+	case strings.Contains(value, "状态"):
+		return "status"
+	case strings.Contains(value, "专业"):
+		return "major"
+	default:
+		return ""
+	}
+}
+
+func academicCourseField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "课程代码") || strings.Contains(value, "课程编号") || strings.Contains(value, "课号"):
+		return "course_id"
+	case strings.Contains(value, "课程名称") || value == "课程" || strings.Contains(value, "科目名称"):
+		return "course"
+	case strings.Contains(value, "教师") || strings.Contains(value, "老师"):
+		return "teacher"
+	case strings.Contains(value, "学分"):
+		return "credit"
+	case strings.Contains(value, "学时"):
+		return "hours"
+	case strings.Contains(value, "课程性质"):
+		return "course_nature"
+	case strings.Contains(value, "课程类别") || strings.Contains(value, "类别"):
+		return "course_category"
+	case strings.Contains(value, "状态"):
+		return "status"
+	default:
+		return ""
+	}
 }
 
 func (a NativeSite) academicPage(ctx context.Context, method, path string, data []pair, headers []pair) (string, string, *siteError) {
@@ -160,7 +372,29 @@ func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[stri
 	if len(args) > 0 && args[0] == "detail" {
 		path := flagValue(args[1:], "--path")
 		if path == "" {
-			return nil, &siteError{Code: "invalid_argument", Message: "grades detail 必须提供 --path"}
+			courseID, courseName := flagValue(args[1:], "--course-id"), flagValue(args[1:], "--course-name")
+			if courseID == "" && courseName == "" {
+				return nil, &siteError{Code: "invalid_argument", Message: "grades detail 必须提供 --course-id 或 --course-name"}
+			}
+			term := flagValue(args[1:], "--term")
+			rows, _, listErr := a.academicGradeRows(ctx, term, flagValue(args[1:], "--course-nature"), "", flagValue(args[1:], "--study-mode-id"), firstNonEmpty(flagValue(args[1:], "--display"), "all"))
+			if listErr != nil {
+				return nil, listErr
+			}
+			for _, row := range rows {
+				if (courseID != "" && fmt.Sprint(row["course_id"]) == courseID) || (courseName != "" && strings.Contains(fmt.Sprint(row["course"]), courseName)) {
+					path = fmt.Sprint(row["grade_detail_url"])
+					break
+				}
+			}
+			if path == "" || path == "<nil>" {
+				return nil, &siteError{Code: "not_found", Message: "成绩列表中找不到对应课程详情"}
+			}
+			var pathErr *siteError
+			path, pathErr = academicPath(path)
+			if pathErr != nil {
+				return nil, pathErr
+			}
 		}
 		body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
 		if err != nil {
@@ -177,6 +411,14 @@ func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[stri
 		return academicWrap(detail), nil
 	}
 	term, nature, course, display, study := flagValue(args, "--term"), flagValue(args, "--course-nature"), flagValue(args, "--course-name"), flagValue(args, "--display"), flagValue(args, "--study-mode-id")
+	items, term, dataErr := a.academicGradeRows(ctx, term, nature, course, study, display)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	return academicWrap(map[string]any{"term": nullableString(term), "items": items}), nil
+}
+
+func (a NativeSite) academicGradeRows(ctx context.Context, term, nature, course, study, display string) ([]map[string]any, string, *siteError) {
 	if study == "" {
 		study = "2"
 	}
@@ -184,26 +426,41 @@ func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[stri
 		display = "all"
 	}
 	if display != "all" && display != "best" {
-		return nil, &siteError{Code: "invalid_argument", Message: "--display 只能是 all 或 best"}
+		return nil, "", &siteError{Code: "invalid_argument", Message: "--display 只能是 all 或 best"}
 	}
 	_, queryURL, queryErr := a.academicPage(ctx, "GET", "/jsxsd/kscj/cjcx_query", nil, nil)
 	if queryErr != nil {
-		return nil, queryErr
+		return nil, "", queryErr
 	}
 	data := []pair{{"kksj", term}, {"kcxz", nature}, {"kcmc", course}, {"xsfs", map[bool]string{true: "max", false: "all"}[display == "best"]}, {"fxkc", study}}
 	body, pageURL, err := a.academicPage(ctx, "POST", "/jsxsd/kscj/cjcx_list", data, []pair{{"Referer", queryURL}})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	document, parseErr := parsePage(body)
 	if parseErr != nil {
-		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+		return nil, "", &siteError{Code: "parse_error", Message: parseErr.Error()}
 	}
 	items, dataErr := parseGradesPage(document, pageURL)
 	if dataErr != nil {
-		return nil, dataErr
+		return nil, "", dataErr
 	}
-	return academicWrap(map[string]any{"term": nullableString(term), "items": items}), nil
+	return items, term, nil
+}
+
+func academicPath(value string) (string, *siteError) {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.User != nil {
+		return "", &siteError{Code: "invalid_path", Message: "成绩详情地址无效"}
+	}
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	if parsed.RawQuery != "" {
+		path += "?" + parsed.RawQuery
+	}
+	return path, nil
 }
 
 func (a NativeSite) academicExams(ctx context.Context, args []string) (map[string]any, *siteError) {
@@ -747,6 +1004,10 @@ func parseGradesPage(document *pageNode, pageURL string) ([]map[string]any, *sit
 func gradeHeaderPage(value string) string {
 	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
 	switch {
+	case strings.Contains(value, "原始成绩"):
+		return "original_score"
+	case strings.Contains(value, "重修学期") || strings.Contains(value, "补考学期"):
+		return "retake_semester"
 	case strings.Contains(value, "学期"):
 		return "semester"
 	case strings.Contains(value, "课程代码") || strings.Contains(value, "课程编号") || strings.Contains(value, "课号"):
@@ -771,8 +1032,6 @@ func gradeHeaderPage(value string) string {
 		return "course_category"
 	case strings.Contains(value, "考核方式") || strings.Contains(value, "考试方式"):
 		return "assessment_method"
-	case strings.Contains(value, "重修学期") || strings.Contains(value, "补考学期"):
-		return "retake_semester"
 	}
 	return ""
 }

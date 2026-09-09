@@ -65,6 +65,12 @@ func (a NativeSite) runQualityLogin(ctx context.Context, args []string) (map[str
 	if _, landingErr := a.executeGateway(ctx, qualityServiceName, gatewayRequest{path: "/", method: "GET"}, false); landingErr != nil {
 		return nil, landingErr
 	}
+	seedRequest := gatewayRequest{path: "/Logon.do?method=logon&flag=sess", method: "POST", raw: true, readOnly: true, yes: true}
+	seedResult, seedErr := a.executeGateway(ctx, qualityServiceName, seedRequest, false)
+	if seedErr != nil {
+		return nil, seedErr
+	}
+	seed, _ := seedResult["raw_body"].(string)
 	tempDir, tempErr := os.MkdirTemp("", "csust-quality-captcha-")
 	if tempErr != nil {
 		return nil, &siteError{Code: "captcha_write_failed", Message: "无法创建验证码临时目录: " + tempErr.Error()}
@@ -85,12 +91,6 @@ func (a NativeSite) runQualityLogin(ctx context.Context, args []string) (map[str
 		}
 		return nil, &siteError{Code: "captcha_required", Message: "教学质量保障系统需要验证码，请提供 --captcha", Details: details}
 	}
-	seedRequest := gatewayRequest{path: "/Logon.do?method=logon&flag=sess", method: "POST", raw: true, readOnly: true, yes: true}
-	seedResult, seedErr := a.executeGateway(ctx, qualityServiceName, seedRequest, false)
-	if seedErr != nil {
-		return nil, seedErr
-	}
-	seed, _ := seedResult["raw_body"].(string)
 	account, password, credentialErr := credentialsGo(options.username, "")
 	if credentialErr != nil {
 		return nil, credentialErr

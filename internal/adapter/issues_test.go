@@ -276,6 +276,90 @@ func TestSessionWritesMergeConcurrentCallers(t *testing.T) {
 	}
 }
 
+func TestCookiePersistenceKeepsPathVariantsAndDeletion(t *testing.T) {
+	var seenRoot, seenChild string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/set":
+			http.SetCookie(writer, &http.Cookie{Name: "SID", Value: "root", Path: "/"})
+			http.SetCookie(writer, &http.Cookie{Name: "SID", Value: "child", Path: "/jsxsd"})
+		case "/jsxsd/probe":
+			seenChild = request.Header.Get("Cookie")
+		case "/clear":
+			http.SetCookie(writer, &http.Cookie{Name: "SID", MaxAge: -1, Path: "/"})
+		case "/echo":
+			seenRoot = request.Header.Get("Cookie")
+		}
+		_, _ = writer.Write([]byte("ok"))
+	}))
+	defer server.Close()
+	cookieFile := filepath.Join(t.TempDir(), "cookies.txt")
+	parseTarget := func(path string) *url.URL {
+		target, err := url.Parse(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return target
+	}
+	for _, path := range []string{"/set", "/jsxsd/probe", "/clear", "/echo"} {
+		if _, err := (NativeSite{}).execute(context.Background(), siteRequest{Target: parseTarget(path), CookieFile: cookieFile, Method: "GET", ReadOnly: true, Yes: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(seenChild, "SID=child") || !strings.Contains(seenChild, "SID=root") {
+		t.Fatalf("path-specific cookies were lost: %q", seenChild)
+	}
+	if strings.Contains(seenRoot, "SID=root") {
+		t.Fatalf("deleted root cookie was resurrected: %q", seenRoot)
+	}
+}
+
+func TestGradeHeadersKeepOriginalAndRetakeFields(t *testing.T) {
+	document, err := parsePage(`<table id="dataList"><tr><th>学期</th><th>重修学期</th><th>成绩</th><th>原始成绩</th><th>课程</th><th>学分</th></tr><tr><td>T1</td><td>T2</td><td>90</td><td>60</td><td>课程</td><td>3</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, parseErr := parseGradesPage(document, "http://example.test/grades")
+	if parseErr != nil || len(rows) != 1 {
+		t.Fatalf("unexpected grades: %#v %v", rows, parseErr)
+	}
+	if rows[0]["semester"] != "T1" || rows[0]["retake_semester"] != "T2" || rows[0]["score"] != "90" || rows[0]["original_score"] != "60" {
+		t.Fatalf("grade columns were overwritten: %#v", rows[0])
+	}
+}
+
+func TestTeachingLookupUsesMethodForSameEndpoint(t *testing.T) {
+	item, known, ambiguous := teachingLookup("course-search", "GET", false)
+	if !known || ambiguous || item.method != "GET" || item.path != "/meol/course.do" {
+		t.Fatalf("unexpected default teaching lookup: %#v known=%v ambiguous=%v", item, known, ambiguous)
+	}
+	item, known, ambiguous = teachingLookup("course-search", "POST", true)
+	if !known || ambiguous || item.method != "POST" || item.path != "/meol/course.do" {
+		t.Fatalf("unexpected POST teaching lookup: %#v known=%v ambiguous=%v", item, known, ambiguous)
+	}
+}
+
+func TestVirtualLabLoginUsesRawBusinessState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"state":"success","message":"登录成功"}`))
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+	handled, stdout, _, code, err := (NativeSite{}).Run(context.Background(), []string{"virtual-lab", "login", "--username", "student", "--password", "password", "--captcha", "ok", "--json"}, true)
+	if err != nil || !handled || code != 0 {
+		t.Fatalf("virtual lab login: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(stdout, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["ok"] != true || result["operation"] != "login" || result["username"] != "student" {
+		t.Fatalf("unexpected virtual lab login: %#v", result)
+	}
+}
+
 func TestRequestBodyStreamsFilesAndRejectsOversize(t *testing.T) {
 	root := t.TempDir()
 	smallPath := filepath.Join(root, "small.txt")

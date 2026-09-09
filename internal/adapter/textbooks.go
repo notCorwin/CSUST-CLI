@@ -45,9 +45,9 @@ func (a NativeSite) executeTextbook(ctx context.Context, args []string) (map[str
 	if command == "list" || command == "account" {
 		path := textbookPaths[0]
 		if command == "account" {
-			path = "/jsxsd/nxsjc/jczmxx"
+			path = textbookPaths[2]
 		}
-		body, pageURL, err := a.findTextbookPage(ctx, path == textbookPaths[0])
+		body, pageURL, err := a.findTextbookPage(ctx, path, true)
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +82,7 @@ func (a NativeSite) executeTextbook(ctx context.Context, args []string) (map[str
 	if strings.TrimSpace(match) == "" && index == 0 {
 		return nil, &siteError{Code: "invalid_target", Message: "--match 不能为空"}
 	}
-	body, pageURL, err := a.findTextbookPage(ctx, true)
+	body, pageURL, err := a.findTextbookPage(ctx, textbookPaths[0], true)
 	if err != nil {
 		return nil, err
 	}
@@ -146,10 +146,17 @@ func (a NativeSite) executeTextbook(ctx context.Context, args []string) (map[str
 	return nil, &siteError{Code: "mutation_unverified", Message: "教材操作已提交但未验证：" + verifyErr, Details: base}
 }
 
-func (a NativeSite) findTextbookPage(ctx context.Context, tryAlternates bool) (string, string, *siteError) {
-	paths := textbookPaths
-	if !tryAlternates {
-		paths = []string{paths[0]}
+func (a NativeSite) findTextbookPage(ctx context.Context, preferred string, tryAlternates bool) (string, string, *siteError) {
+	paths := make([]string, 0, len(textbookPaths))
+	if preferred != "" {
+		paths = append(paths, preferred)
+	}
+	if tryAlternates {
+		for _, path := range textbookPaths {
+			if path != preferred {
+				paths = append(paths, path)
+			}
+		}
 	}
 	for _, path := range paths {
 		body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
@@ -397,7 +404,7 @@ func textbookResponseMessage(result map[string]any) string {
 	return ""
 }
 func (a NativeSite) verifyTextbook(ctx context.Context, before map[string]any, operation string) (bool, string) {
-	body, pageURL, err := a.findTextbookPage(ctx, true)
+	body, pageURL, err := a.findTextbookPage(ctx, textbookPaths[0], true)
 	if err != nil {
 		return false, err.Message
 	}

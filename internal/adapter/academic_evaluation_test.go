@@ -51,3 +51,17 @@ func TestNativeAcademicEvaluationUsesDirectService(t *testing.T) {
 		t.Fatalf("unexpected save result: %#v", payload)
 	}
 }
+
+func TestSelectEvaluationItemUsesSemanticSelectors(t *testing.T) {
+	items := []map[string]any{
+		{"index": 1, "sequence": "1", "course_id": "CS001", "course": "算法"},
+		{"index": 2, "sequence": "2", "course_id": "CS002", "course": "操作系统"},
+	}
+	item, err := selectEvaluationItem(items, "CS002", "course_id", "course")
+	if err != nil || item["course"] != "操作系统" {
+		t.Fatalf("unexpected semantic selection: %#v %v", item, err)
+	}
+	if _, err := selectEvaluationItem(items, "", "course_id"); err == nil || err.Code != "ambiguous_target" {
+		t.Fatalf("expected ambiguous empty selector, got %v", err)
+	}
+}

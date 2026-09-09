@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -539,8 +540,17 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
-	} else if cookiePath == "" {
-		cookiePath = cookieFile("", target)
+	} else {
+		copy := *target
+		target = &copy
+		for _, item := range req.Params {
+			query := target.Query()
+			query.Add(item.name, item.value)
+			target.RawQuery = query.Encode()
+		}
+		if cookiePath == "" {
+			cookiePath = cookieFile("", target)
+		}
 	}
 	if req.Output != "" {
 		if outputErr := validateOutput(req.Output); outputErr != nil {
@@ -635,7 +645,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 	}
 	defer response.Body.Close()
 	mutating = req.mutating || (!req.ReadOnly && mutatingMethod(req.Method))
-	if req.Output != "" && !mutating && !req.RequireLogin && response.StatusCode >= 200 && response.StatusCode < 300 && isBinarySiteContent(response) {
+	if req.Output != "" && !mutating && !req.RequireLogin && response.StatusCode >= 200 && response.StatusCode < 300 && isBinarySiteContent(response) && !outputNeedsContentValidation(req.Output) {
 		written, writeErr := atomicStreamWrite(req.Output, response.Body)
 		if writeErr != nil {
 			return nil, writeErr
@@ -644,7 +654,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		if req.SessionTarget != nil {
 			saveTarget = req.SessionTarget
 		}
-		if saveErr := saveCookies(jar, cookiePath, saveTarget); saveErr != nil {
+		if saveErr := saveCookiesWithResponse(jar, cookiePath, saveTarget, response); saveErr != nil {
 			return nil, &siteError{Code: "session_error", Message: "无法保存 Cookie 会话: " + saveErr.Error()}
 		}
 		return map[string]any{
@@ -674,7 +684,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 	if req.SessionTarget != nil {
 		saveTarget = req.SessionTarget
 	}
-	if saveErr := saveCookies(jar, cookiePath, saveTarget); saveErr != nil {
+	if saveErr := saveCookiesWithResponse(jar, cookiePath, saveTarget, response); saveErr != nil {
 		if mutating {
 			return nil, requestFailure(req, requestInfo, "mutation_unverified", "请求已发送但会话保存失败: "+saveErr.Error())
 		}
@@ -686,7 +696,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		}
 		return nil, &siteError{Code: "login_required", Message: "响应是登录页，会话可能已失效", Details: map[string]any{"request": requestInfo}}
 	}
-	state, knownState, decoded := businessState(content, response.Header.Get("Content-Type"))
+	state, knownState, decoded := businessStateForRequest(content, response.Header.Get("Content-Type"), mutating)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		code := "http_error"
 		if mutating {
@@ -695,6 +705,9 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		return nil, requestFailure(req, requestInfo, code, fmt.Sprintf("HTTP %d %s", response.StatusCode, response.Status))
 	}
 	if knownState && !state && !req.AllowBusinessFailure {
+		if !mutating && jsonRequiresLogin(decoded) {
+			return nil, requestFailure(req, requestInfo, "login_required", "远端要求先登录")
+		}
 		code := "business_rejected"
 		if mutating {
 			code = "mutation_rejected"
@@ -705,6 +718,9 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		return nil, requestFailure(req, requestInfo, "mutation_unverified", "请求已提交但未取得成功证据")
 	}
 	if req.Output != "" {
+		if outputErr := validateOutputContent(req.Output, content); outputErr != nil {
+			return nil, outputErr
+		}
 		if writeErr := atomicWrite(req.Output, content); writeErr != nil {
 			return nil, writeErr
 		}
@@ -855,6 +871,14 @@ func businessState(content []byte, contentType string) (bool, bool, any) {
 	return false, false, nil
 }
 
+func businessStateForRequest(content []byte, contentType string, mutating bool) (bool, bool, any) {
+	trimmed := bytes.TrimSpace(content)
+	if !mutating && (strings.Contains(strings.ToLower(contentType), "html") || bytes.HasPrefix(trimmed, []byte("<"))) {
+		return false, false, nil
+	}
+	return businessState(content, contentType)
+}
+
 func jsonBusinessState(value any) (bool, bool) {
 	states := []bool{}
 	var visit func(any)
@@ -875,6 +899,8 @@ func jsonBusinessState(value any) (bool, bool) {
 				case string:
 					if strings.TrimSpace(value) == "" {
 						states = append(states, true)
+					} else {
+						states = append(states, false)
 					}
 				}
 			}
@@ -929,6 +955,33 @@ func jsonBusinessState(value any) (bool, bool) {
 		return true, true
 	}
 	return false, false
+}
+
+func jsonRequiresLogin(value any) bool {
+	need := false
+	var visit func(any)
+	visit = func(item any) {
+		if need {
+			return
+		}
+		switch typed := item.(type) {
+		case map[string]any:
+			for _, key := range []string{"error", "message", "msg", "state", "code"} {
+				if nested, exists := typed[key]; exists {
+					visit(nested)
+				}
+			}
+		case []any:
+			for _, nested := range typed {
+				visit(nested)
+			}
+		case string:
+			text := strings.ToLower(strings.TrimSpace(typed))
+			need = strings.Contains(text, "login") || strings.Contains(text, "unauthorized") || strings.Contains(text, "未登录") || strings.Contains(text, "请先登录")
+		}
+	}
+	visit(value)
+	return need
 }
 
 var successPattern = regexp.MustCompile(`^(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
@@ -1139,6 +1192,29 @@ func validateOutput(filename string) *siteError {
 	return nil
 }
 
+func outputNeedsContentValidation(filename string) bool {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".pdf":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateOutputContent(filename string, content []byte) *siteError {
+	valid := true
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".pdf":
+		valid = bytes.HasPrefix(content, []byte("%PDF-"))
+	default:
+		return nil
+	}
+	if valid {
+		return nil
+	}
+	return &siteError{Code: "download_invalid", Message: "响应内容与输出文件类型不匹配", Details: map[string]any{"output": filepath.Base(filename)}}
+}
+
 func atomicWrite(filename string, content []byte) *siteError {
 	_, writeErr := atomicStreamWrite(filename, bytes.NewReader(content))
 	return writeErr
@@ -1221,20 +1297,56 @@ func cookieHost(target *url.URL) string {
 }
 
 func loadCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
-	info, err := os.Lstat(filename)
-	if os.IsNotExist(err) {
-		return nil
-	}
+	records, err := readCookieRecords(filename)
 	if err != nil {
 		return err
 	}
+	for _, cookie := range records {
+		cookie := cookie
+		jar.SetCookies(target, []*http.Cookie{&cookie})
+	}
+	return nil
+}
+
+func saveCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
+	return saveCookiesWithResponse(jar, filename, target, nil)
+}
+
+func saveCookiesWithResponse(jar *cookiejar.Jar, filename string, target *url.URL, response *http.Response) error {
+	if err := validateSessionFile(filename); err != nil {
+		return err
+	}
+	return withSiteFileLock(filename, func() error {
+		records, err := readCookieRecords(filename)
+		if err != nil {
+			return err
+		}
+		before := len(records)
+		mergeJarCookies(records, jar, target)
+		mergeResponseCookies(records, response)
+		if len(records) == 0 && before == 0 {
+			return nil
+		}
+		return writeCookieFileUnlocked(filename, cookieRecordsContent(records))
+	})
+}
+
+func readCookieRecords(filename string) (map[string]http.Cookie, error) {
+	records := make(map[string]http.Cookie)
+	info, err := os.Lstat(filename)
+	if os.IsNotExist(err) {
+		return records, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
+		return nil, fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
 	}
 	_ = os.Chmod(filename, 0600)
 	file, err := os.Open(filename)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
@@ -1251,7 +1363,7 @@ func loadCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
 			continue
 		}
 		expires, _ := strconv.ParseInt(fields[4], 10, 64)
-		cookie := &http.Cookie{
+		cookie := http.Cookie{
 			Domain: fields[0],
 			Path:   fields[2],
 			Secure: fields[3] == "TRUE",
@@ -1261,33 +1373,88 @@ func loadCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
 		if expires > 0 {
 			cookie.Expires = time.Unix(expires, 0)
 		}
-		jar.SetCookies(target, []*http.Cookie{cookie})
+		records[cookieRecordKey(cookie)] = cookie
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
 }
 
-func saveCookies(jar *cookiejar.Jar, filename string, target *url.URL) error {
-	if err := validateSessionFile(filename); err != nil {
-		return err
+func mergeJarCookies(records map[string]http.Cookie, jar *cookiejar.Jar, target *url.URL) {
+	for _, cookie := range cookieSnapshot(jar, target) {
+		if cookie.Domain == "" {
+			cookie.Domain = target.Hostname()
+		}
+		if cookie.Path == "" {
+			cookie.Path = defaultCookiePath(target.Path)
+		}
+		records[cookieRecordKey(*cookie)] = *cookie
 	}
-	return withSiteFileLock(filename, func() error {
-		latest, err := cookiejar.New(nil)
-		if err != nil {
-			return err
-		}
-		if err := loadCookies(latest, filename, target); err != nil {
-			return err
-		}
-		for _, cookie := range cookieSnapshot(jar, target) {
-			latest.SetCookies(target, []*http.Cookie{cookie})
-		}
-		content := cookieFileContent(latest, target)
-		if content == "" {
-			return nil
-		}
-		return writeCookieFileUnlocked(filename, content)
-	})
 }
+
+func mergeResponseCookies(records map[string]http.Cookie, response *http.Response) {
+	if response == nil || response.Request == nil || response.Request.URL == nil {
+		return
+	}
+	for _, item := range response.Cookies() {
+		cookie := *item
+		if cookie.Domain == "" {
+			cookie.Domain = response.Request.URL.Hostname()
+		}
+		if cookie.Path == "" {
+			cookie.Path = defaultCookiePath(response.Request.URL.Path)
+		}
+		key := cookieRecordKey(cookie)
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
+			delete(records, key)
+			continue
+		}
+		records[key] = cookie
+	}
+}
+
+func cookieRecordKey(cookie http.Cookie) string {
+	return strings.ToLower(cookie.Domain) + "\x00" + cookie.Path + "\x00" + cookie.Name
+}
+
+func defaultCookiePath(path string) string {
+	if path == "" || !strings.HasPrefix(path, "/") {
+		return "/"
+	}
+	if index := strings.LastIndex(path, "/"); index > 0 {
+		return path[:index]
+	}
+	return "/"
+}
+
+func cookieRecordsContent(records map[string]http.Cookie) string {
+	if len(records) == 0 {
+		return "# Netscape HTTP Cookie File\n"
+	}
+	keys := make([]string, 0, len(records))
+	for key := range records {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := []string{"# Netscape HTTP Cookie File"}
+	for _, key := range keys {
+		cookie := records[key]
+		expires := int64(0)
+		if !cookie.Expires.IsZero() {
+			expires = cookie.Expires.Unix()
+		}
+		cookiePath := cookie.Path
+		if cookiePath == "" {
+			cookiePath = "/"
+		}
+		lines = append(lines, strings.Join([]string{cookie.Domain, "TRUE", cookiePath, strconv.FormatBool(cookie.Secure), strconv.FormatInt(expires, 10), cookie.Name, cookie.Value}, "\t"))
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// cookiejar exposes only cookies applicable to one URL; the record map keeps
+// same-name cookies on different paths and persists server-side deletions.
 
 func validateSessionFile(filename string) error {
 	if info, err := os.Lstat(filename); err == nil {
@@ -1318,27 +1485,12 @@ func cookieSnapshot(jar *cookiejar.Jar, target *url.URL) []*http.Cookie {
 }
 
 func cookieFileContent(jar *cookiejar.Jar, target *url.URL) string {
-	cookies := cookieSnapshot(jar, target)
-	if len(cookies) == 0 {
+	records := make(map[string]http.Cookie)
+	mergeJarCookies(records, jar, target)
+	if len(records) == 0 {
 		return ""
 	}
-	lines := []string{"# Netscape HTTP Cookie File"}
-	for _, cookie := range cookies {
-		domain := cookie.Domain
-		if domain == "" {
-			domain = target.Hostname()
-		}
-		expires := int64(0)
-		if !cookie.Expires.IsZero() {
-			expires = cookie.Expires.Unix()
-		}
-		cookiePath := cookie.Path
-		if cookiePath == "" {
-			cookiePath = "/"
-		}
-		lines = append(lines, strings.Join([]string{domain, "TRUE", cookiePath, strconv.FormatBool(cookie.Secure), strconv.FormatInt(expires, 10), cookie.Name, cookie.Value}, "\t"))
-	}
-	return strings.Join(lines, "\n") + "\n"
+	return cookieRecordsContent(records)
 }
 
 func writeCookieFile(filename, content string) error {

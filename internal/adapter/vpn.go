@@ -47,6 +47,9 @@ func (a NativeSite) runVPNCommand(ctx context.Context, args []string, jsonMode b
 			}
 			return true, encoded, nil, 0, nil
 		}
+		if result["pending"] == true {
+			return true, []byte(fmt.Sprintf("VPN 登录待完成二次认证：%v（代码 %v）\n", result["username"], result["code"])), nil, 0, nil
+		}
 		return true, []byte(fmt.Sprintf("VPN 登录成功：%v\n会话已保存：%v\n", result["username"], result["session_file"])), nil, 0, nil
 	}
 	result, runErr := a.executeVPNCommand(ctx, args[1:])
@@ -366,7 +369,7 @@ func (a NativeSite) vpnCASLogin(ctx context.Context, base *url.URL, cookie strin
 		return nil, &siteError{Code: "authentication_failed", Message: "VPN 统一认证登录页缺少账号密码表单"}
 	}
 	fields := make([]pair, 0)
-	reserved := map[string]bool{"username": true, "password": true, "passwordText": true, "pwdEncryptSalt": true, "captcha": true, "_eventId": true, "cllt": true, "dllt": true, "lt": true}
+	reserved := map[string]bool{"username": true, "password": true, "passwordText": true, "pwdEncryptSalt": true, "captcha": true, "_eventId": true, "cllt": true, "dllt": true}
 	for _, field := range form.findAll("input") {
 		name := strings.TrimSpace(field.attr("name"))
 		kind := strings.ToLower(firstNonEmpty(field.attr("type"), "text"))
@@ -383,7 +386,7 @@ func (a NativeSite) vpnCASLogin(ctx context.Context, base *url.URL, cookie strin
 	if encryptErr != nil {
 		return nil, encryptErr
 	}
-	fields = append(fields, pair{"username", account}, pair{"password", encrypted}, pair{"_eventId", "submit"}, pair{"cllt", "userNameLogin"}, pair{"dllt", "generalLogin"}, pair{"lt", ""})
+	fields = append(fields, pair{"username", account}, pair{"password", encrypted}, pair{"_eventId", "submit"}, pair{"cllt", "userNameLogin"}, pair{"dllt", "generalLogin"})
 	if captchaInfo != "" {
 		value, jsonErr := readJSONArgument(captchaInfo)
 		if jsonErr != nil {
@@ -642,19 +645,12 @@ func (a NativeSite) runVPNAPI(ctx context.Context, args []string) (map[string]an
 	if err != nil {
 		return nil, err
 	}
-	requestPath := resolveVPNPath(spec.path, pathArgs, params)
+	requestPath := resolveVPNPath(spec.path, pathArgs, nil)
 	target, targetErr := vpnAPIPath(base, requestPath, native)
 	if targetErr != nil {
 		return nil, targetErr
 	}
-	request := siteRequest{Target: target, CookieFile: cookie, Method: method, Params: nil, Headers: vpnHeaders(base, target, session, native), Yes: yes, Output: output, RequireLogin: true, ReadOnly: !mutating}
-	request.Params = nil
-	for _, item := range params {
-		query := target.Query()
-		query.Add(item.name, item.value)
-		target.RawQuery = query.Encode()
-	}
-	request.Target = target
+	request := siteRequest{Target: target, CookieFile: cookie, Method: method, Params: params, Headers: vpnHeaders(base, target, session, native), Yes: yes, Output: output, RequireLogin: true, ReadOnly: !mutating}
 	if len(form) > 0 {
 		request.Data = form
 		request.Files = files

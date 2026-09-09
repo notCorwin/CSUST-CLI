@@ -542,6 +542,19 @@ func vpnAPIMutating(method, path string) bool {
 
 func vpnSpec(name string) (vpnAPISpec, bool) {
 	needle := strings.ToLower(strings.TrimSpace(name))
+	if canonical, ok := map[string]string{
+		"antivirus-trustfile-page":    "v1-api-users-antivirus-trustfile-page",
+		"message-secauth-msgid":       "client-message-secauth-msgid",
+		"mfa-commonauth":              "client-mfa-commonauth",
+		"mfa-homeinfo-anchorid":       "client-mfa-homeinfo-anchorid",
+		"mfa-login-commonauth":        "client-mfa-login-commonauth",
+		"mfa-login-homeinfo-anchorid": "client-mfa-login-homeinfo-anchorid",
+		"mfa-sendverifycode":          "client-mfa-sendverifycode",
+		"share-link-delete-id":        "client-share-link-delete-id",
+		"share-link-page":             "client-share-link-page",
+	}[needle]; ok {
+		needle = canonical
+	}
 	for _, row := range vpnAPIRows {
 		if vpnAPIName(row.path) == needle || strings.TrimPrefix(vpnAPIName(row.path), "users-") == needle || strings.TrimPrefix(vpnAPIName(row.path), "v1-") == needle {
 			return row, true

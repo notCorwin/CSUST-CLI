@@ -208,9 +208,6 @@ func (a NativeSite) loginSSOService(ctx context.Context, serviceTarget *url.URL,
 }
 
 func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget *url.URL, account, password string, options loginOptions, cookiePath string, useHandoff bool) (map[string]any, *siteError) {
-	if err := removeCookieIfPresent(cookiePath); err != nil {
-		return nil, &siteError{Code: "cookie_write_failed", Message: err.Error()}
-	}
 	session := *serviceTarget
 	session.Path, session.RawQuery, session.Fragment = "/", "", ""
 	serviceURL := serviceTarget.String()
@@ -261,7 +258,7 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 		salt = field.attr("value")
 	}
 	fields := make([]pair, 0)
-	reserved := map[string]bool{"username": true, "password": true, "passwordText": true, "pwdEncryptSalt": true, "captcha": true, "_eventId": true, "cllt": true, "dllt": true, "lt": true}
+	reserved := map[string]bool{"username": true, "password": true, "passwordText": true, "pwdEncryptSalt": true, "captcha": true, "_eventId": true, "cllt": true, "dllt": true}
 	for _, field := range form.findAll("input") {
 		name := strings.TrimSpace(field.attr("name"))
 		kind := strings.ToLower(firstNonEmpty(field.attr("type"), "text"))
@@ -274,7 +271,7 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 	if encryptErr != nil {
 		return nil, encryptErr
 	}
-	fields = append(fields, pair{"username", account}, pair{"password", encrypted}, pair{"_eventId", "submit"}, pair{"cllt", "userNameLogin"}, pair{"dllt", "generalLogin"}, pair{"lt", ""})
+	fields = append(fields, pair{"username", account}, pair{"password", encrypted}, pair{"_eventId", "submit"}, pair{"cllt", "userNameLogin"}, pair{"dllt", "generalLogin"})
 	needCaptcha, captchaErr := a.authNeedsCaptcha(ctx, &session, account, cookiePath)
 	if captchaErr != nil {
 		return nil, captchaErr
@@ -332,19 +329,9 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 
 func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, password string, options loginOptions) (map[string]any, *siteError) {
 	cookiePath := academicCookiePath()
-	if err := removeCookieIfPresent(cookiePath); err != nil {
-		return nil, &siteError{Code: "cookie_write_failed", Message: err.Error()}
-	}
 	root := *base
 	if _, err := a.loginHTTP(ctx, siteRequest{Target: &root, SessionTarget: &root, CookieFile: cookiePath, Method: "GET", ReadOnly: true, Yes: true}); err != nil {
 		return nil, err
-	}
-	path, fetchErr := a.fetchLoginCaptcha(ctx, root, cookiePath, false, options.captchaImage)
-	if fetchErr != nil {
-		return nil, fetchErr
-	}
-	if options.captcha == "" {
-		return nil, &siteError{Code: "captcha_required", Message: "旧教务登录需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": path}}
 	}
 	seedTarget := root
 	seedTarget.Path = "/Logon.do"
@@ -363,6 +350,13 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 	encoded, encodedErr := generateEncodedGo(account, password, strings.TrimSpace(seedBody))
 	if encodedErr != nil {
 		return nil, encodedErr
+	}
+	path, fetchErr := a.fetchLoginCaptcha(ctx, root, cookiePath, false, options.captchaImage)
+	if fetchErr != nil {
+		return nil, fetchErr
+	}
+	if options.captcha == "" {
+		return nil, &siteError{Code: "captcha_required", Message: "旧教务登录需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": path}}
 	}
 	loginTarget := root
 	loginTarget.Path = "/Logon.do"

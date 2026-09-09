@@ -35,17 +35,18 @@ func Normalize(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(result["submitted"], &submitted); err != nil {
 		return nil, fmt.Errorf("结果字段 submitted 无效: %w", err)
 	}
+	isPending := pending(result)
 	if _, exists := result["confirmed"]; !exists {
-		if submitted {
+		if submitted && !isPending {
 			return nil, fmt.Errorf("写操作缺少 confirmed 成功证据")
 		}
-		result["confirmed"] = json.RawMessage(fmt.Sprintf("%t", ok))
+		result["confirmed"] = json.RawMessage(fmt.Sprintf("%t", ok && !isPending))
 	}
 	var confirmed bool
 	if err := json.Unmarshal(result["confirmed"], &confirmed); err != nil {
 		return nil, fmt.Errorf("结果字段 confirmed 无效: %w", err)
 	}
-	if submitted && !confirmed {
+	if submitted && !confirmed && !isPending {
 		return nil, fmt.Errorf("写操作未取得成功证据")
 	}
 	if _, exists := result["evidence"]; !exists {

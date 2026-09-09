@@ -11,7 +11,7 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 		return nil, &siteError{Code: "invalid_argument", Message: "academic evaluation 缺少子命令"}
 	}
 	operation := args[0]
-	path, yes, suggestion, clearSuggestion := "", false, "", false
+	path, batchSelector, courseID, courseName, yes, suggestion, clearSuggestion := "", "", "", "", false, "", false
 	answers := []pair{}
 	for index := 1; index < len(args); index++ {
 		arg, value, inline := splitInline(args[index])
@@ -36,6 +36,12 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 		switch arg {
 		case "--path":
 			path = value
+		case "--batch":
+			batchSelector = value
+		case "--course-id":
+			courseID = value
+		case "--course-name":
+			courseName = value
 		case "--answer":
 			item, err := splitPair(value, "--answer")
 			if err != nil {
@@ -49,7 +55,11 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 		}
 	}
 	if operation != "batches" && path == "" {
-		return nil, &siteError{Code: "invalid_argument", Message: "该评价命令必须提供 --path"}
+		var targetErr *siteError
+		path, targetErr = a.academicEvaluationTarget(ctx, operation, batchSelector, courseID, courseName)
+		if targetErr != nil {
+			return nil, targetErr
+		}
 	}
 	if (operation == "save" || operation == "submit") && !yes {
 		return nil, &siteError{Code: "confirmation_required", Message: "保存或提交评价会修改账号数据，请加 --yes"}
@@ -127,6 +137,81 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 	default:
 		return nil, &siteError{Code: "invalid_argument", Message: "未知评价子命令: " + operation}
 	}
+}
+
+func (a NativeSite) academicEvaluationTarget(ctx context.Context, operation, batchSelector, courseID, courseName string) (string, *siteError) {
+	body, pageURL, err := a.academicPage(ctx, "GET", "/jsxsd/xspj/xspj_find.do", nil, nil)
+	if err != nil {
+		return "", err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return "", &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	batchResult := parseQualityEvaluationBatches(document, pageURL)
+	batches, _ := batchResult["items"].([]map[string]any)
+	batch, selectErr := selectEvaluationItem(batches, batchSelector, "sequence", "semester", "category", "name")
+	if selectErr != nil {
+		return "", selectErr
+	}
+	batchPath, pathErr := academicPath(fmt.Sprint(batch["path"]))
+	if pathErr != nil {
+		return "", pathErr
+	}
+	if operation == "courses" {
+		return batchPath, nil
+	}
+	courseBody, courseURL, courseErr := a.academicPage(ctx, "GET", batchPath, nil, nil)
+	if courseErr != nil {
+		return "", courseErr
+	}
+	courseDocument, courseParseErr := parsePage(courseBody)
+	if courseParseErr != nil {
+		return "", &siteError{Code: "parse_error", Message: courseParseErr.Error()}
+	}
+	courseResult := parseQualityEvaluationCourses(courseDocument, courseURL)
+	courses, _ := courseResult["items"].([]map[string]any)
+	selector := firstNonEmpty(courseID, courseName)
+	course, courseSelectErr := selectEvaluationItem(courses, selector, "course_id", "course", "name")
+	if courseSelectErr != nil {
+		return "", courseSelectErr
+	}
+	return academicPath(fmt.Sprint(course["path"]))
+}
+
+func selectEvaluationItem(items []map[string]any, selector string, fields ...string) (map[string]any, *siteError) {
+	selector = strings.TrimSpace(selector)
+	if len(items) == 0 {
+		return nil, &siteError{Code: "not_found", Message: "评价列表为空"}
+	}
+	if selector == "" {
+		if len(items) == 1 {
+			return items[0], nil
+		}
+		return nil, &siteError{Code: "ambiguous_target", Message: "评价目标不唯一，请提供 --batch 或 --course-id/--course-name"}
+	}
+	needle := strings.ToLower(selector)
+	matches := make([]map[string]any, 0, 1)
+	for _, item := range items {
+		if fmt.Sprint(item["index"]) == selector {
+			matches = append(matches, item)
+			continue
+		}
+		for _, field := range fields {
+			value := strings.ToLower(strings.TrimSpace(fmt.Sprint(item[field])))
+			if value == needle || strings.Contains(value, needle) {
+				matches = append(matches, item)
+				break
+			}
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return nil, &siteError{Code: "ambiguous_target", Message: "评价目标匹配多个结果，请使用序号或更具体的名称"}
+	}
+	return nil, &siteError{Code: "not_found", Message: "评价目标不存在: " + selector}
 }
 
 func (a NativeSite) academicEvaluationPage(ctx context.Context, path string) (*pageNode, string, *siteError) {

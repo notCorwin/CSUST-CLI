@@ -765,7 +765,7 @@ func teachingCatalog() map[string]any {
 	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "service": "网络教学平台", "routes": routes, "actions": actions, "apis": apis, "route_count": len(routes), "action_count": len(actions), "api_count": len(apis)}
 }
 
-func teachingLookup(name string) (teachingCatalogItem, bool, bool) {
+func teachingLookup(name, method string, methodSet bool) (teachingCatalogItem, bool, bool) {
 	needle := strings.ToLower(strings.TrimSpace(name))
 	matches := make([]teachingCatalogItem, 0, 3)
 	for _, list := range [][]teachingCatalogItem{teachingRoutes, teachingActions, teachingAPIs} {
@@ -778,5 +778,41 @@ func teachingLookup(name string) (teachingCatalogItem, bool, bool) {
 	if len(matches) == 0 {
 		return teachingCatalogItem{}, false, false
 	}
-	return matches[0], true, len(matches) > 1
+	if methodSet {
+		filtered := matches[:0]
+		for _, item := range matches {
+			if strings.EqualFold(item.method, method) {
+				filtered = append(filtered, item)
+			}
+		}
+		matches = filtered
+		if len(matches) == 0 {
+			return teachingCatalogItem{}, false, false
+		}
+	}
+	paths := make(map[string]bool, len(matches))
+	for _, item := range matches {
+		paths[item.path] = true
+	}
+	if len(paths) > 1 {
+		return matches[0], true, true
+	}
+	chosen := matches[0]
+	if !methodSet {
+		for _, item := range matches {
+			if strings.EqualFold(item.method, "GET") {
+				chosen = item
+				break
+			}
+		}
+	}
+	for _, item := range matches {
+		chosen.mutating = chosen.mutating || item.mutating
+		for _, field := range item.fields {
+			if !containsString(chosen.fields, field) {
+				chosen.fields = append(chosen.fields, field)
+			}
+		}
+	}
+	return chosen, true, false
 }

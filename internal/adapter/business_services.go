@@ -150,6 +150,8 @@ func validateBusinessArgs(args []string) *siteError {
 		service = "onlinejudge"
 	case "records":
 		service = "student-record"
+	case "party-exam":
+		service = "party-school-exam"
 	}
 	operation := "catalog"
 	if len(args) > 1 && !strings.HasPrefix(args[1], "--") {
@@ -424,13 +426,13 @@ func businessRequest(ctx context.Context, service, method, path string, params, 
 	request := siteRequest{
 		Service: service, Method: method, Path: path, Params: params, Data: data, Headers: append(options.headers, headers...),
 		CookieFile: options.cookieFile, AllowSSO: options.allowSSO, AllowBusinessFailure: options.allowBusinessFailure, RequireLogin: options.require,
-		ReadOnly: readOnly, Yes: yes, InsecureTLS: options.insecure,
+		ReadOnly: readOnly, Yes: yes, InsecureTLS: options.insecure, RawJSON: true,
 	}
 	return (NativeSite{}).execute(ctx, request)
 }
 
 func (a NativeSite) businessGet(ctx context.Context, service, path string, params []pair, options businessRequestOptions) (map[string]any, *siteError) {
-	request := siteRequest{Service: service, Method: "GET", Path: path, Params: params, Headers: options.headers, CookieFile: options.cookieFile, AllowSSO: options.allowSSO, AllowBusinessFailure: options.allowBusinessFailure, RequireLogin: options.require, ReadOnly: true, Yes: true, InsecureTLS: options.insecure}
+	request := siteRequest{Service: service, Method: "GET", Path: path, Params: params, Headers: options.headers, CookieFile: options.cookieFile, AllowSSO: options.allowSSO, AllowBusinessFailure: options.allowBusinessFailure, RequireLogin: options.require, ReadOnly: true, Yes: true, InsecureTLS: options.insecure, RawJSON: true}
 	return a.execute(ctx, request)
 }
 
@@ -1419,6 +1421,7 @@ func (a NativeSite) onlineJudgeSubmit(ctx context.Context, args []string, option
 	if contest := flagValue(args, "--contest-id"); contest != "" {
 		data = append(data, pair{"contest_id", contest})
 	}
+	options.require = true
 	result, requestErr := businessRequest(ctx, "onlinejudge", "POST", "/api/submission", nil, data, nil, options, false, true)
 	if requestErr != nil {
 		return nil, requestErr
@@ -1434,6 +1437,10 @@ func (a NativeSite) onlineJudgeSubmit(ctx context.Context, args []string, option
 	verification, verifyErr := a.businessGet(ctx, "onlinejudge", "/api/submission", []pair{{"id", id}}, options)
 	if verifyErr != nil {
 		return nil, &siteError{Code: "mutation_unverified", Message: "提交已发送但回读提交状态失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "unknown", "cause": verifyErr.Code, "submission_id": id}}
+	}
+	verificationPayload, verificationParseErr := businessJSONMap(verification)
+	if verificationParseErr != nil || findID(verificationPayload) != id {
+		return nil, &siteError{Code: "mutation_unverified", Message: "提交已发送但回读记录与提交编号不一致", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "readback-identity-mismatch", "submission_id": id}}
 	}
 	result = businessResult(result, "onlinejudge", "submit")
 	result["submission_id"] = id
@@ -1750,9 +1757,19 @@ func (a NativeSite) archiveLogout(ctx context.Context, args []string, service, s
 	if optionsErr != nil {
 		return nil, optionsErr
 	}
-	result, requestErr := a.execute(ctx, siteRequest{Service: service, Path: archiveServicePath("sys/logout"), Method: "POST", CookieFile: options.cookieFile, Headers: options.headers, JSON: map[string]any{}, HasJSON: true, ReadOnly: true, Yes: true})
+	result, requestErr := a.execute(ctx, siteRequest{Service: service, Path: archiveServicePath("sys/logout"), Method: "POST", CookieFile: options.cookieFile, Headers: options.headers, JSON: map[string]any{}, HasJSON: true, RawJSON: true, ReadOnly: true, Yes: true})
 	if requestErr != nil && requestErr.Code != "login_required" {
 		return nil, requestErr
+	}
+	if requestErr == nil {
+		payload, parseErr := businessJSONMap(result)
+		if parseErr != nil {
+			return nil, &siteError{Code: "mutation_unverified", Message: "档案系统退出响应不是可验证的 JSON", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "logout-response"}}
+		}
+		code := fmt.Sprint(payload["code"])
+		if code != "200" && code != "0" {
+			return nil, &siteError{Code: "mutation_rejected", Message: "档案系统退出失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "logout-response", "remote_code": code}}
+		}
 	}
 	_, cookiePath, resolveErr := resolveSite(siteRequest{Service: service, CookieFile: options.cookieFile})
 	if resolveErr != nil {
@@ -2412,7 +2429,7 @@ func (a NativeSite) virtualLabUploadPhoto(ctx context.Context, args []string, co
 	if file.size == 0 {
 		return nil, &siteError{Code: "invalid_argument", Message: "证照文件不能为空"}
 	}
-	result, requestErr := a.execute(ctx, siteRequest{Service: "virtual-lab", Method: "POST", Path: "/Home/UpdateImg", CookieFile: cookie, Files: []filePart{file}, ReadOnly: true, Yes: true, RawJSON: true, AllowBusinessFailure: true})
+	result, requestErr := a.execute(ctx, siteRequest{Service: "virtual-lab", Method: "POST", Path: "/Home/UpdateImg", CookieFile: cookie, Files: []filePart{file}, ReadOnly: false, Yes: true, RawJSON: true, AllowBusinessFailure: true})
 	if requestErr != nil {
 		return nil, requestErr
 	}

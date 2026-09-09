@@ -59,6 +59,20 @@ func TestNormalizeKeepsPendingFlow(t *testing.T) {
 	}
 }
 
+func TestNormalizeKeepsSubmittedPendingFlow(t *testing.T) {
+	raw, err := Normalize([]byte(`{"ok":false,"submitted":true,"pending":true,"next":"second-auth"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["submitted"] != true || result["confirmed"] != false || result["evidence"] != "pending" {
+		t.Fatalf("unexpected submitted pending contract: %#v", result)
+	}
+}
+
 func TestNormalizeRejectsLowConfidenceWithoutEvidence(t *testing.T) {
 	if _, err := Normalize([]byte(`{"response":{"kind":"dynamic","confidence":"low"}}`)); err == nil {
 		t.Fatal("expected low-confidence page without evidence to fail")

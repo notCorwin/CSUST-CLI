@@ -13,7 +13,7 @@ func (a NativeSite) runQualityEvaluation(ctx context.Context, args []string) (ma
 		return nil, &siteError{Code: "invalid_argument", Message: "quality evaluation 缺少子命令"}
 	}
 	operation := args[1]
-	path, yes, suggestion, clearSuggestion := "", false, "", false
+	path, batchSelector, courseID, courseName, yes, suggestion, clearSuggestion := "", "", "", "", false, "", false
 	answers := []pair{}
 	for index := 2; index < len(args); index++ {
 		arg, value, inline := splitInline(args[index])
@@ -38,6 +38,12 @@ func (a NativeSite) runQualityEvaluation(ctx context.Context, args []string) (ma
 		switch arg {
 		case "--path":
 			path = value
+		case "--batch":
+			batchSelector = value
+		case "--course-id":
+			courseID = value
+		case "--course-name":
+			courseName = value
 		case "--answer":
 			item, err := splitPair(value, "--answer")
 			if err != nil {
@@ -51,7 +57,11 @@ func (a NativeSite) runQualityEvaluation(ctx context.Context, args []string) (ma
 		}
 	}
 	if operation != "batches" && path == "" {
-		return nil, &siteError{Code: "invalid_argument", Message: "该评价命令必须提供 --path"}
+		var targetErr *siteError
+		path, targetErr = a.qualityEvaluationTarget(ctx, operation, batchSelector, courseID, courseName)
+		if targetErr != nil {
+			return nil, targetErr
+		}
 	}
 	if (operation == "save" || operation == "submit") && !yes {
 		return nil, &siteError{Code: "confirmation_required", Message: "保存或提交评价会修改账号数据，请加 --yes"}
@@ -104,6 +114,52 @@ func (a NativeSite) runQualityEvaluation(ctx context.Context, args []string) (ma
 	default:
 		return nil, &siteError{Code: "invalid_argument", Message: "未知评价子命令: " + operation}
 	}
+}
+
+func (a NativeSite) qualityEvaluationTarget(ctx context.Context, operation, batchSelector, courseID, courseName string) (string, *siteError) {
+	_, document, pageURL, err := a.qualityEvaluationPageDocument(ctx, "/jsxsd/xspj/xspj_find.do")
+	if err != nil {
+		return "", err
+	}
+	batchResult := parseQualityEvaluationBatches(document, pageURL)
+	batches, _ := batchResult["items"].([]map[string]any)
+	batch, selectErr := selectEvaluationItem(batches, batchSelector, "sequence", "semester", "category", "name")
+	if selectErr != nil {
+		return "", selectErr
+	}
+	batchPath, pathErr := evaluationRelativePath(fmt.Sprint(batch["path"]))
+	if pathErr != nil {
+		return "", pathErr
+	}
+	if operation == "courses" {
+		return batchPath, nil
+	}
+	_, courseDocument, courseURL, courseErr := a.qualityEvaluationPageDocument(ctx, batchPath)
+	if courseErr != nil {
+		return "", courseErr
+	}
+	courseResult := parseQualityEvaluationCourses(courseDocument, courseURL)
+	courses, _ := courseResult["items"].([]map[string]any)
+	course, courseSelectErr := selectEvaluationItem(courses, firstNonEmpty(courseID, courseName), "course_id", "course", "name")
+	if courseSelectErr != nil {
+		return "", courseSelectErr
+	}
+	return evaluationRelativePath(fmt.Sprint(course["path"]))
+}
+
+func evaluationRelativePath(value string) (string, *siteError) {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.User != nil {
+		return "", &siteError{Code: "invalid_path", Message: "评价页面地址无效"}
+	}
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	if parsed.RawQuery != "" {
+		path += "?" + parsed.RawQuery
+	}
+	return path, nil
 }
 
 func (a NativeSite) qualityEvaluationPage(ctx context.Context, path, kind string) (map[string]any, *siteError) {

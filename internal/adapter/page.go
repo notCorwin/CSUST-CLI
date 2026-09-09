@@ -611,9 +611,12 @@ func pageActionRef(node *pageNode, method, target string, form *pageNode, fields
 	if formKey == "" && form != nil {
 		formKey = firstNonEmpty(form.attr("name"), form.attr("id"))
 	}
-	targetPath := ""
+	targetIdentity := ""
 	if parsed, err := url.Parse(target); err == nil {
-		targetPath = parsed.Path
+		targetIdentity = parsed.Path
+		if parsed.RawQuery != "" {
+			targetIdentity += "?" + parsed.RawQuery
+		}
 	}
 	label := firstNonEmpty(pageDisplayText(node), node.attr("value"))
 	call := ""
@@ -626,7 +629,7 @@ func pageActionRef(node *pageNode, method, target string, form *pageNode, fields
 	identity := strings.Join([]string{
 		node.tag, strings.ToLower(node.attr("type")), strings.ToLower(node.attr("name")), strings.ToLower(node.attr("id")),
 		strings.ToLower(node.attr("role")), strings.ToLower(node.attr("aria-label")), strings.ToLower(label), strings.ToLower(call),
-		strings.ToUpper(method), strings.ToLower(formKey), targetPath,
+		strings.ToUpper(method), strings.ToLower(formKey), targetIdentity,
 	}, "\x1f")
 	hash := sha256.Sum256([]byte(identity))
 	return "action:" + hex.EncodeToString(hash[:])[:16]
