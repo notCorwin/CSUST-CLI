@@ -1,4 +1,4 @@
-# csust-cli
+# CSUST CLI
 
 [![Tests](https://github.com/notCorwin/csust-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/notCorwin/csust-cli/actions/workflows/tests.yml)
 
