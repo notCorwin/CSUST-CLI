@@ -14,3 +14,11 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: go run . --help
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+      - run: npm test

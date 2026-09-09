@@ -1,0 +1,17 @@
+{
+  "targets": [
+    {
+      "name": "public-site",
+      "baseUrl": "https://example.org",
+      "entryPaths": ["/"],
+      "allowedHosts": ["example.org"],
+      "authProfile": "anonymous",
+      "headless": true,
+      "maxDepth": 1,
+      "maxPages": 20,
+      "probeActions": false,
+      "mappings": []
+    }
+  ],
+  "output": "exploration.json"
+}
