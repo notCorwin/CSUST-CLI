@@ -106,7 +106,7 @@ password=密码
 | 命令 | 用途 |
 | --- | --- |
 | `login` / `logout` | 教务统一认证或旧登录会话 |
-| `schedule`, `grades`, `profile`, `exams`, `in-class-exams` | 教务查询；成绩包含学分/绩点汇总和成绩构成详情 |
+| `schedule`, `grades`, `profile`, `exams`, `in-class-exams` | 教务查询；个人资料保留原始字段并提供 `semantic` 字段，成绩包含学分/绩点汇总和成绩构成详情 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
 | `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |

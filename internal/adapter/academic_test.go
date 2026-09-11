@@ -111,6 +111,14 @@ func TestGraduationConclusionKeepsSemanticFields(t *testing.T) {
 	}
 }
 
+func TestProfileSemanticFieldsPreferExplicitLabelValues(t *testing.T) {
+	result := parseProfilePage(`<table id="xjkpTable"><tr><td>姓名：张三</td><td>学号：S001</td><td>专业：道路工程</td></tr><tr><td>性别</td><td>男</td></tr><tr><td>姓名</td><td>与本人关系</td></tr></table>`, "http://xk.csust.edu.cn/jsxsd/grxx/xsxx")
+	semantic, ok := result["semantic"].(map[string]string)
+	if !ok || semantic["name"] != "张三" || semantic["student_id"] != "S001" || semantic["major"] != "道路工程" || semantic["gender"] != "男" {
+		t.Fatalf("unexpected profile semantic fields: %#v", result)
+	}
+}
+
 func TestGraduationInfoCheckKeepsVisibleFieldsAndStatus(t *testing.T) {
 	document, err := parsePage(`<table><tr><td>所属学院:</td><td>交通学院</td><td>所属专业:</td><td>道路桥梁与渡河工程</td></tr><tr><td>所在班级:</td><td>道桥渡24-1</td><td>培养层次:</td><td>普通本科</td></tr><tr><td>学制:</td><td>4</td><td>性别:</td><td>男</td></tr><tr><td>证件类型:</td><td>身份证</td><td>证件号:</td><td></td></tr><tr><td>学号:</td><td>202401150107</td><td>姓名:</td><td></td></tr><tr><td></td><td>注：毕业生信息核对时间未到！</td></tr></table>`)
 	if err != nil {

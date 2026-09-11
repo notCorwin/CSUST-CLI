@@ -2401,8 +2401,9 @@ func parseProfilePage(source, pageURL string) map[string]any {
 	rows := make([][]string, 0)
 	fields := make([]map[string]string, 0)
 	values := map[string]string{}
+	semantic := map[string]string{}
 	if table == nil {
-		return map[string]any{"url": pageURL, "fields": fields, "values": values, "rows": rows}
+		return map[string]any{"kind": "profile", "url": pageURL, "fields": fields, "values": values, "semantic": semantic, "rows": rows}
 	}
 	for _, row := range directTableRows(table) {
 		items := rowValues(row)
@@ -2411,17 +2412,35 @@ func parseProfilePage(source, pageURL string) map[string]any {
 			if name, item, ok := colonField(value); ok {
 				fields = append(fields, map[string]string{"name": name, "value": item})
 				values[name] = item
+				if semanticName := profileSemanticField(name); semanticName != "" {
+					semantic[semanticName] = item
+				}
 			}
 		}
 		for index := 0; index+1 < len(items); index += 2 {
 			label := strings.Trim(strings.TrimSpace(items[index]), "：:")
-			if label != "" && len(label) <= 40 && !strings.ContainsAny(label, "：:") && strings.TrimSpace(items[index+1]) != "" {
-				fields = append(fields, map[string]string{"name": label, "value": strings.TrimSpace(items[index+1])})
-				values[label] = strings.TrimSpace(items[index+1])
+			item := strings.TrimSpace(items[index+1])
+			if label != "" && len(label) <= 40 && !strings.ContainsAny(label, "：:") && item != "" {
+				fields = append(fields, map[string]string{"name": label, "value": item})
+				values[label] = item
+				if semanticName := profileSemanticField(label); semanticName != "" {
+					if _, exists := semantic[semanticName]; !exists {
+						semantic[semanticName] = item
+					}
+				}
 			}
 		}
 	}
-	return map[string]any{"url": safeSiteURL(mustParseURL(pageURL)), "fields": fields, "values": values, "rows": rows}
+	return map[string]any{"kind": "profile", "url": safeSiteURL(mustParseURL(pageURL)), "fields": fields, "values": values, "semantic": semantic, "rows": rows}
+}
+
+func profileSemanticField(value string) string {
+	return map[string]string{
+		"院系": "college", "专业": "major", "学制": "duration_years", "班级": "class", "学号": "student_id",
+		"姓名": "name", "性别": "gender", "姓名拼音": "name_pinyin", "出生日期": "birth_date", "本人电话": "phone",
+		"民族": "ethnicity", "学习层次": "study_level", "入学日期": "enrollment_date", "入学考号": "entrance_exam_id",
+		"身份证编号": "id_number", "备注": "note",
+	}[strings.Join(strings.Fields(value), "")]
 }
 
 func parseGraduationConclusionPage(source, pageURL string) map[string]any {
@@ -2497,15 +2516,17 @@ func graduationField(values map[string]string, names ...string) string {
 }
 
 func colonField(value string) (string, string, bool) {
-	index := strings.IndexAny(value, "：:")
-	if index < 1 {
-		return "", "", false
+	for index, delimiter := range value {
+		if delimiter != ':' && delimiter != '：' {
+			continue
+		}
+		name := strings.TrimSpace(value[:index])
+		if name == "" {
+			return "", "", false
+		}
+		return name, strings.TrimSpace(value[index+len(string(delimiter)):]), true
 	}
-	name, item := strings.TrimSpace(value[:index]), strings.TrimSpace(value[index+1:])
-	if name == "" {
-		return "", "", false
-	}
-	return name, item, true
+	return "", "", false
 }
 
 func parseSchedulePage(document *pageNode, term string) ([]map[string]any, *siteError) {
