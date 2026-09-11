@@ -186,3 +186,14 @@ func TestAcademicSecondClassCreditRowsKeepApplicationStates(t *testing.T) {
 		t.Fatalf("unexpected second-class credit row: %#v", rows)
 	}
 }
+
+func TestAcademicStatusWarningRowsKeepDecisionFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>预警学期</th><th>预警名称</th><th>预警条件</th><th>处理结果</th><th>提示信息</th><th>对象名称</th><th>实际值</th></tr><tr><td>1</td><td>2025-2026-1</td><td>学分预警</td><td>已修学分不足</td><td>未处理</td><td>请及时处理</td><td>学分</td><td>10</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicStatusWarningField)
+	if len(rows) != 1 || rows[0]["term"] != "2025-2026-1" || rows[0]["warning"] != "学分预警" || rows[0]["condition"] != "已修学分不足" || rows[0]["result"] != "未处理" || rows[0]["message"] != "请及时处理" || rows[0]["object"] != "学分" || rows[0]["actual_value"] != "10" {
+		t.Fatalf("unexpected academic warning row: %#v", rows)
+	}
+}

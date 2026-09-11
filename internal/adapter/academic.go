@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -71,6 +71,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credits", "/jsxsd/pyfa/cxxf_query", academicSecondClassCreditField)
 	case "second-class-credit-applications", "innovation-credit-applications":
 		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credit-applications", "/jsxsd/pyfa/cxxfsb_query", academicSecondClassCreditField)
+	case "status-warnings", "academic-warnings":
+		return a.academicStructuredPageWithField(ctx, args[1:], "status-warnings", "/jsxsd/xsxj/xsyjxx.do", academicStatusWarningField)
 	case "classroom-request", "room-request":
 		return a.academicStructuredPage(ctx, args[1:], "classroom-request", "/jsxsd/kbxx/jsjy_query")
 	case "minor", "minor-registration":
@@ -560,6 +562,28 @@ func academicSecondClassCreditField(value string) string {
 		return "note"
 	case value == "操作":
 		return "action"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicStatusWarningField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "预警学期"):
+		return "term"
+	case strings.Contains(value, "预警名称"):
+		return "warning"
+	case strings.Contains(value, "预警条件"):
+		return "condition"
+	case strings.Contains(value, "处理结果"):
+		return "result"
+	case strings.Contains(value, "提示信息"):
+		return "message"
+	case strings.Contains(value, "对象名称"):
+		return "object"
+	case strings.Contains(value, "实际值"):
+		return "actual_value"
 	default:
 		return academicPageField(value)
 	}
