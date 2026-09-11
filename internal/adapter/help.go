@@ -19,6 +19,7 @@ func nativeUsage(args []string) []byte {
   course-selection            选课中心/跨专业选修课程
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况
+  deferred-exam-applications  缓考申请记录（按学期/课程/状态查询）
   second-class-credits        第二课堂学分查询
   second-class-credit-applications 第二课堂学分申报记录
   second-class-credit-application --id ID 查看申报审核流程

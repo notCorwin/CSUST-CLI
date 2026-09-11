@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -73,6 +73,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicTrainingPlan(ctx, args[1:])
 	case "training-progress", "training-plan-progress":
 		return a.academicTrainingProgress(ctx, args[1:])
+	case "deferred-exam-applications", "deferred-exam-application":
+		return a.academicDeferredExamApplications(ctx, args[1:])
 	case "second-class-credits", "innovation-credits", "second-class-credit-query":
 		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credits", "/jsxsd/pyfa/cxxf_query", academicSecondClassCreditField)
 	case "second-class-credit-applications", "innovation-credit-applications":
@@ -260,6 +262,146 @@ func (a NativeSite) academicStructuredPageWithField(ctx context.Context, args []
 		"kind": kind, "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+func (a NativeSite) academicDeferredExamApplications(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const queryPath = "/jsxsd/kscj/hksq_query"
+	const listPath = "/jsxsd/kscj/hksq_list"
+	queryBody, queryURL, err := a.academicPage(ctx, "GET", queryPath, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	queryDocument, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	term := strings.TrimSpace(flagValue(args, "--term"))
+	if term == "" {
+		term = selectedOptionPage(queryDocument, "xnxqid")
+	}
+	activity := strings.TrimSpace(flagValue(args, "--activity"))
+	activityID := ""
+	if activity != "" {
+		var activityErr *siteError
+		activityID, activity, activityErr = a.academicDeferredExamActivity(ctx, term, activity, queryURL)
+		if activityErr != nil {
+			return nil, activityErr
+		}
+	}
+	status, statusID, statusErr := deferredExamStatus(flagValue(args, "--status"))
+	if statusErr != nil {
+		return nil, statusErr
+	}
+	course := strings.TrimSpace(flagValue(args, "--course"))
+	data := []pair{{"xnxqid", term}, {"cj0701id", activityID}, {"kch", course}, {"iswfmes", statusID}}
+	body, pageURL, err := a.academicPage(ctx, "POST", listPath, data, []pair{{"Referer", queryURL}})
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicStructuredRowsWithLinks(document, keyword, academicDeferredExamField, pageURL)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "缓考申请页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "deferred-exam-applications", "path": listPath,
+		"term": nullableString(term), "activity": nullableString(activity), "course": nullableString(course), "status": nullableString(status),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func (a NativeSite) academicDeferredExamActivity(ctx context.Context, term, wanted, referer string) (string, string, *siteError) {
+	path := "/jsxsd/kscj/hksq_query_ajax?xnxq01id=" + url.QueryEscape(term)
+	result, err := a.executeAcademicRequestWithRecovery(ctx, siteRequest{
+		Service: "academic", Path: path, Method: "GET", CookieFile: academicCookiePath(),
+		Headers: []pair{{"Referer", referer}}, RequireLogin: true, ReadOnly: true, Yes: true, RawJSON: true,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	var options []struct {
+		ID   string `json:"cj0701id"`
+		Name string `json:"cjlrmc"`
+	}
+	encoded := []byte(nil)
+	if value, ok := businessData(result); ok {
+		var marshalErr error
+		encoded, marshalErr = json.Marshal(value)
+		if marshalErr != nil {
+			return "", "", &siteError{Code: "parse_error", Message: "缓考活动接口响应无法读取: " + marshalErr.Error()}
+		}
+	} else if response, ok := result["response"].(map[string]any); ok {
+		body, _ := response["body_internal"].(string)
+		if body == "" {
+			body, _ = response["body"].(string)
+		}
+		encoded = []byte(body)
+	}
+	if parseErr := json.Unmarshal(encoded, &options); parseErr != nil {
+		return "", "", &siteError{Code: "parse_error", Message: "缓考活动接口响应不是有效 JSON: " + parseErr.Error()}
+	}
+	wantedLower := strings.ToLower(strings.TrimSpace(wanted))
+	for _, option := range options {
+		if option.ID != "" && strings.TrimSpace(option.Name) == wanted {
+			return option.ID, strings.TrimSpace(option.Name), nil
+		}
+	}
+	matches := make([]struct {
+		id   string
+		name string
+	}, 0)
+	for _, option := range options {
+		name := strings.TrimSpace(option.Name)
+		if option.ID != "" && (name == wanted || strings.Contains(strings.ToLower(name), wantedLower)) {
+			matches = append(matches, struct {
+				id   string
+				name string
+			}{id: option.ID, name: name})
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0].id, matches[0].name, nil
+	}
+	if len(matches) > 1 {
+		choices := make([]string, 0, len(matches))
+		for _, match := range matches {
+			choices = append(choices, match.name)
+		}
+		return "", "", &siteError{Code: "ambiguous_target", Message: "缓考活动名称对应多个活动，请使用完整名称", Details: map[string]any{"activity": wanted, "choices": choices}}
+	}
+	choices := make([]string, 0, len(options))
+	for _, option := range options {
+		if name := strings.TrimSpace(option.Name); name != "" {
+			choices = append(choices, name)
+		}
+	}
+	return "", "", &siteError{Code: "not_found", Message: "当前学期找不到对应缓考活动", Details: map[string]any{"activity": wanted, "choices": choices}}
+}
+
+func deferredExamStatus(value string) (string, string, *siteError) {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "", "all", "全部":
+		return "", "", nil
+	case "pending", "待审":
+		return "pending", "3", nil
+	case "reviewing", "审核中":
+		return "reviewing", "2", nil
+	case "approved", "通过":
+		return "approved", "1", nil
+	case "rejected", "不通过":
+		return "rejected", "0", nil
+	default:
+		return "", "", &siteError{Code: "invalid_argument", Message: "--status 只能是 pending、reviewing、approved、rejected 或 all"}
+	}
 }
 
 func (a NativeSite) academicSecondClassCreditApplications(ctx context.Context, args []string) (map[string]any, *siteError) {
@@ -929,6 +1071,36 @@ func academicSecondClassCreditField(value string) string {
 		return "credit"
 	case value == "备注":
 		return "note"
+	case value == "操作":
+		return "action"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicDeferredExamField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "学年学期"):
+		return "term"
+	case strings.Contains(value, "课程编号") || strings.Contains(value, "课程代码"):
+		return "course_id"
+	case strings.Contains(value, "课程名称") || value == "课程":
+		return "course"
+	case strings.Contains(value, "学时"):
+		return "hours"
+	case value == "学分":
+		return "credit"
+	case strings.Contains(value, "考试方式"):
+		return "assessment_method"
+	case strings.Contains(value, "成绩标识"):
+		return "score_mark"
+	case strings.Contains(value, "缓考原因"):
+		return "reason"
+	case strings.Contains(value, "审核状态"):
+		return "status"
+	case strings.Contains(value, "申请时间"):
+		return "submitted_at"
 	case value == "操作":
 		return "action"
 	default:

@@ -207,6 +207,55 @@ func TestAcademicTrainingProgressKeepsCompletionAndCreditSummary(t *testing.T) {
 	}
 }
 
+func TestAcademicDeferredExamRowsKeepSemanticFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>学年学期</th><th>课程编号</th><th>课程名称</th><th>学时</th><th>学分</th><th>考试方式</th><th>成绩标识</th><th>缓考原因</th><th>审核状态</th><th>申请时间</th><th>操作</th></tr><tr><td>1</td><td>2025-2026-1</td><td>CS001</td><td>数据结构</td><td>48</td><td>3</td><td>考试</td><td>正常</td><td>因病</td><td>通过</td><td>2026-01-02</td><td>查看</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicDeferredExamField)
+	if len(rows) != 1 || rows[0]["term"] != "2025-2026-1" || rows[0]["course_id"] != "CS001" || rows[0]["course"] != "数据结构" || rows[0]["hours"] != "48" || rows[0]["credit"] != "3" || rows[0]["assessment_method"] != "考试" || rows[0]["score_mark"] != "正常" || rows[0]["reason"] != "因病" || rows[0]["status"] != "通过" || rows[0]["submitted_at"] != "2026-01-02" || rows[0]["action"] != "查看" {
+		t.Fatalf("unexpected deferred exam row: %#v", rows)
+	}
+}
+
+func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch request.URL.Path {
+		case "/jsxsd/kscj/hksq_query":
+			_, _ = writer.Write([]byte(`<select id="xnxqid"><option value="2026-2027-1" selected>2026-2027-1</option></select>`))
+		case "/jsxsd/kscj/hksq_query_ajax":
+			if request.URL.Query().Get("xnxq01id") != "2025-2026-1" {
+				t.Fatalf("unexpected deferred exam activity term: %s", request.URL.String())
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`[{"cj0701id":"A1","cjlrmc":"2025-2026-1期末考试"}]`))
+		case "/jsxsd/kscj/hksq_list":
+			if err := request.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if request.Form.Get("xnxqid") != "2025-2026-1" || request.Form.Get("cj0701id") != "A1" || request.Form.Get("kch") != "CS001" || request.Form.Get("iswfmes") != "1" {
+				t.Fatalf("unexpected deferred exam filters: %#v", request.Form)
+			}
+			_, _ = writer.Write([]byte(`<table><tr><th>序号</th><th>学年学期</th><th>课程编号</th><th>课程名称</th><th>学时</th><th>学分</th><th>考试方式</th><th>成绩标识</th><th>缓考原因</th><th>审核状态</th><th>申请时间</th><th>操作</th></tr><tr><td>1</td><td>2025-2026-1</td><td>CS001</td><td>数据结构</td><td>48</td><td>3</td><td>考试</td><td>正常</td><td>因病</td><td>通过</td><td>2026-01-02</td><td>查看</td></tr></table>`))
+		default:
+			t.Fatalf("unexpected deferred exam path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicDeferredExamApplications(context.Background(), []string{"--term", "2025-2026-1", "--activity", "期末考试", "--course", "CS001", "--status", "approved"})
+	if err != nil || result["term"] != "2025-2026-1" || result["activity"] != "2025-2026-1期末考试" || result["status"] != "approved" || result["item_count"] != 1 {
+		t.Fatalf("unexpected deferred exam result: %#v %v", result, err)
+	}
+	items, ok := result["items"].([]map[string]any)
+	if !ok || items[0]["course_id"] != "CS001" || items[0]["status"] != "通过" {
+		t.Fatalf("unexpected deferred exam items: %#v", result["items"])
+	}
+}
+
 func TestAcademicSecondClassCreditRowsKeepApplicationStates(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>序号</th><th>组织方式</th><th>学年学期</th><th>分类名称</th><th>获得项目时间</th><th>认定学分</th><th>审核状态</th><th>认定状态</th><th>备注</th><th>操作</th></tr><tr><td>1</td><td>个人</td><td>2025-2026-1</td><td>学科竞赛</td><td>2026-01-01</td><td>2</td><td>已通过</td><td>已认定</td><td>备注</td><td>流程</td></tr></table>`)
 	if err != nil {
