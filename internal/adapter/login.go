@@ -313,7 +313,9 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 	}
 	probeRequest := siteRequest{Target: probeTarget, SessionTarget: &session, CookieFile: cookiePath, Method: "GET", RequireLogin: true, ReadOnly: true, AllowSSO: true, Yes: true}
 	if _, probeErr := a.loginHTTP(ctx, probeRequest); probeErr != nil {
-		return nil, &siteError{Code: "authentication_failed", Message: "统一认证回跳成功，但服务未建立有效会话", Details: map[string]any{"cause": probeErr.Code}}
+		details := loginResponseDetails(loginResult)
+		details["cause"] = probeErr.Code
+		return nil, &siteError{Code: "authentication_failed", Message: "统一认证回跳成功，但服务未建立有效会话", Details: details}
 	}
 	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "username": account, "auth": "sso", "cookie_file": cookiePath, "service": safeSiteURL(serviceTarget), "attempts": 1}, nil
 }
@@ -377,7 +379,9 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 	probe := root
 	probe.Path = academicProbePath
 	if _, probeErr := a.loginHTTP(ctx, siteRequest{Target: &probe, SessionTarget: &root, CookieFile: cookiePath, Method: "GET", RequireLogin: true, ReadOnly: true, Yes: true}); probeErr != nil {
-		return nil, &siteError{Code: "authentication_failed", Message: "登录失败，教务系统未建立有效会话", Details: map[string]any{"cause": probeErr.Code}}
+		details := loginResponseDetails(response)
+		details["cause"] = probeErr.Code
+		return nil, &siteError{Code: "authentication_failed", Message: "登录失败，教务系统未建立有效会话", Details: details}
 	}
 	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "username": account, "auth": "local", "cookie_file": cookiePath, "attempts": 1}, nil
 }
@@ -444,6 +448,17 @@ func loginBody(result map[string]any) (string, string, *siteError) {
 		pageURL, _ = response["url"].(string)
 	}
 	return body, pageURL, nil
+}
+
+func loginResponseDetails(result map[string]any) map[string]any {
+	details := map[string]any{}
+	response, _ := result["response"].(map[string]any)
+	for _, key := range []string{"status", "url", "content_type", "format"} {
+		if value, ok := response[key]; ok {
+			details[key] = value
+		}
+	}
+	return details
 }
 
 func (a NativeSite) authNeedsCaptcha(ctx context.Context, session *url.URL, account, cookiePath string) (bool, *siteError) {
