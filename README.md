@@ -80,6 +80,7 @@ password=密码
 ./csust special-course-query --term 2026-2027-1 --json
 ./csust social-exam-registration --json
 ./csust make-up-exam-registration --json
+./csust summer-remedial-registration --json
 ./csust training-plan --keyword 专业核心 --json
 ./csust training-progress --json
 ./csust deferred-exam-applications --term 2025-2026-1 --status approved --json
@@ -115,7 +116,7 @@ password=密码
 | `personal-info` | 查询或更新个人资料设置；更新返回服务端反馈或回读确认 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
 | `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
-| `classrooms`, `selections`, `course-selection`, `special-course-query`, `social-exam-registration`, `make-up-exam-registration`, `terms`, `semester-start` | 教室、选课和考试报名信息；跨专业选修使用 `--scope cross-major`，特殊选课查询使用 `--term` 和可选 `--special-name` |
+| `classrooms`, `selections`, `course-selection`, `special-course-query`, `social-exam-registration`, `make-up-exam-registration`, `summer-remedial-registration`, `terms`, `semester-start` | 教室、选课和考试报名信息；跨专业选修使用 `--scope cross-major`，特殊选课查询使用 `--term` 和可选 `--special-name`，暑期补修可用 `--batch` 查询具体批次 |
 | `training-plan` | 培养方案执行计划课程 |
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
 | `deferred-exam-applications` | 按学期、缓考活动、课程和审核状态查询缓考申请记录 |

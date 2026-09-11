@@ -23,6 +23,7 @@ func nativeUsage(args []string) []byte {
   special-course-query        特殊选课申请查询
   social-exam-registration    社会考试报名状态与可报名项目
   make-up-exam-registration   补考报名状态与可报名课程
+  summer-remedial-registration 暑期补修报名状态与课程
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况
   teaching-calendar           学期教学周历

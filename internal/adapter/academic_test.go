@@ -154,6 +154,24 @@ func TestAcademicMakeUpExamRegistrationKeepsClosedWindowStatus(t *testing.T) {
 	}
 }
 
+func TestAcademicSummerRemedialFieldsAndBatchStatus(t *testing.T) {
+	page, err := pageInspect(`<html><body><b>请选择审核批次进行查询</b></body></html>`, "http://xk.csust.edu.cn/jsxsd/kscj/qkbm_query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if academicPageStatusMessage(page, "请选择审核批次进行查询") != "请选择审核批次进行查询" {
+		t.Fatalf("unexpected summer-remedial status: %#v", page)
+	}
+	document, parseErr := parsePage(`<table><tr><th>课程编号</th><th>课程名称</th><th>考试性质</th><th>考试时间</th><th>考试地点</th><th>报名状态</th><th>缴费状态</th></tr><tr><td>CS002</td><td>高等数学</td><td>暑期补修</td><td>2026-08-01</td><td>B202</td><td>已报名</td><td>已缴费</td></tr></table>`)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	rows := academicStructuredRows(document, "高等", academicSummerRemedialField)
+	if len(rows) != 1 || rows[0]["course_id"] != "CS002" || rows[0]["registration_status"] != "已报名" || rows[0]["payment_status"] != "已缴费" {
+		t.Fatalf("unexpected summer-remedial rows: %#v", rows)
+	}
+}
+
 func TestAcademicStructuredRowsNormalizeRequestFields(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>申请编号</th><th>教室</th><th>借用日期</th><th>状态</th></tr><tr><td>R001</td><td>A101</td><td>2026-09-10</td><td>待审核</td></tr></table>`)
 	if err != nil {
