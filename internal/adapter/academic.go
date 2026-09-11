@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "announcement", "notice", "announcement-detail", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -75,6 +75,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicStructuredPageWithField(ctx, args[1:], "status-warnings", "/jsxsd/xsxj/xsyjxx.do", academicStatusWarningField)
 	case "announcements", "notices", "received-announcements":
 		return a.academicAnnouncements(ctx, args[1:])
+	case "announcement", "notice", "announcement-detail":
+		return a.academicAnnouncement(ctx, args[1:])
 	case "retake-courses", "retake-registration":
 		return a.academicRetakeCourses(ctx, args[1:])
 	case "classroom-request", "room-request":
@@ -265,6 +267,29 @@ func (a NativeSite) academicAnnouncements(ctx context.Context, args []string) (m
 	return academicWrap(map[string]any{
 		"kind": "announcements", "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func (a NativeSite) academicAnnouncement(ctx context.Context, args []string) (map[string]any, *siteError) {
+	id := strings.TrimSpace(flagValue(args, "--id"))
+	if id == "" || strings.ContainsAny(id, "/?#&") {
+		return nil, &siteError{Code: "invalid_argument", Message: "announcement 必须提供不含路径的 --id"}
+	}
+	path := "/jsxsd/ggly/ggly_show?ggid=" + url.QueryEscape(id)
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "announcement", "announcement_id": id, "content": pageDisplayText(document), "page": page,
 	}), nil
 }
 
@@ -593,6 +618,11 @@ func academicStructuredRowsWithLinks(document *pageNode, keyword string, field f
 					target := resolvePageURL(pageURL, candidate)
 					if path, pathErr := academicPath(target); pathErr == nil {
 						item["detail_path"] = path
+						if parsed, parseErr := url.Parse(path); parseErr == nil {
+							if id := parsed.Query().Get("ggid"); id != "" {
+								item["announcement_id"] = id
+							}
+						}
 						break
 					}
 				}

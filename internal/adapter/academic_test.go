@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -204,8 +205,26 @@ func TestAcademicAnnouncementRowsKeepDetailPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := academicStructuredRowsWithLinks(document, "", academicAnnouncementField, "http://xk.csust.edu.cn/jsxsd/ggly/ysgg_query")
-	if len(rows) != 1 || rows[0]["title"] != "选课通知" || rows[0]["category"] != "通知公告" || rows[0]["sender"] != "教务处" || rows[0]["detail_path"] != "/jsxsd/ggly/ggly_show?ggid=ABC" {
+	if len(rows) != 1 || rows[0]["title"] != "选课通知" || rows[0]["category"] != "通知公告" || rows[0]["sender"] != "教务处" || rows[0]["detail_path"] != "/jsxsd/ggly/ggly_show?ggid=ABC" || rows[0]["announcement_id"] != "ABC" {
 		t.Fatalf("unexpected announcement row: %#v", rows)
+	}
+}
+
+func TestAcademicAnnouncementDetailUsesSemanticID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/jsxsd/ggly/ggly_show" || request.URL.Query().Get("ggid") != "ABC" {
+			t.Fatalf("unexpected announcement request: %s", request.URL.String())
+		}
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = writer.Write([]byte(`<html><head><title>选课通知</title></head><body><div>请按通知完成选课。</div></body></html>`))
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicAnnouncement(context.Background(), []string{"--id", "ABC"})
+	if err != nil || result["announcement_id"] != "ABC" || !strings.Contains(result["content"].(string), "完成选课") {
+		t.Fatalf("unexpected announcement detail: %#v %v", result, err)
 	}
 }
 
