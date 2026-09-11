@@ -2055,7 +2055,10 @@ func (a NativeSite) academicExams(ctx context.Context, args []string) (map[strin
 	if dataErr != nil {
 		return nil, dataErr
 	}
-	return academicWrap(map[string]any{"term": term, "items": items, "url": safeSiteURL(mustParseURL(pageURL))}), nil
+	return academicWrap(map[string]any{
+		"kind": "exams", "path": "/jsxsd/xsks/xsksap_list", "term": nullableString(term),
+		"items": items, "item_count": len(items), "url": safeSiteURL(mustParseURL(pageURL)),
+	}), nil
 }
 
 func (a NativeSite) academicInClassExams(ctx context.Context, args []string) (map[string]any, *siteError) {
@@ -2846,7 +2849,7 @@ func parseExamPage(document *pageNode, pageURL string) ([]map[string]any, *siteE
 			continue
 		}
 		item := map[string]any{"index": len(result) + 1, "sequence": values[0], "campus": valueAt(values, 1), "session": valueAt(values, 2), "course_id": valueAt(values, 3), "course": valueAt(values, 4), "teacher": valueAt(values, 5), "exam_time": valueAt(values, 6), "room": valueAt(values, 7), "seat": valueAt(values, 8), "admission_ticket": valueAt(values, 9), "remarks": valueAt(values, 10), "cells": values, "text": pageDisplayText(row)}
-		if match := regexp.MustCompile(`(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s+(\d{1,2}:\d{2})\s*[~～-]\s*(\d{1,2}:\d{2})`).FindStringSubmatch(valueAt(values, 6)); len(match) > 4 {
+		if match := regexp.MustCompile(`(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s+(\d{1,2}:\d{2})\s*[~～-]\s*(\d{1,2}:\d{2})`).FindStringSubmatch(valueAt(values, 6)); len(match) > 3 {
 			item["date"], item["start_time"], item["end_time"] = match[1], match[2], match[3]
 		}
 		result = append(result, item)

@@ -32,6 +32,15 @@ func TestAcademicParsersKeepSemanticRows(t *testing.T) {
 	if parseErr != nil || len(gradeRows) != 1 || gradeRows[0]["score"] != "95" {
 		t.Fatalf("unexpected grades: %#v %v", gradeRows, parseErr)
 	}
+	exams := `<table id="dataList"><tr><th>序号</th><th>校区</th><th>场次</th><th>课程代码</th><th>课程名称</th><th>教师</th><th>考试时间</th><th>教室</th><th>座位</th><th>准考证号</th><th>备注</th></tr><tr><td>1</td><td>云塘校区</td><td>第1场</td><td>CS001</td><td>数据结构</td><td>张老师</td><td>2026-09-12 14:00~15:40</td><td>A101</td><td>12</td><td>T001</td><td></td></tr></table>`
+	document, err = parsePage(exams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	examRows, parseErr := parseExamPage(document, "http://xk.csust.edu.cn/jsxsd/xsks/xsksap_list")
+	if parseErr != nil || len(examRows) != 1 || examRows[0]["date"] != "2026-09-12" || examRows[0]["start_time"] != "14:00" || examRows[0]["end_time"] != "15:40" {
+		t.Fatalf("unexpected exams: %#v %v", examRows, parseErr)
+	}
 	detailDocument, err := parsePage(`<table id="dataList"><tr><td>只有一行</td></tr></table>`)
 	if err != nil {
 		t.Fatal(err)
