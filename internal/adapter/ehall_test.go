@@ -42,6 +42,13 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"wid": "item-folder-1", "folderName": "服务项收藏夹", "folderItems": []any{}}},
 			})
+		case "/collectServiceItem":
+			if request.Method != http.MethodGet || request.URL.Query().Get("id") != "item-1" || request.URL.Query().Get("folderWid") != "folder-2" {
+				t.Fatalf("service item favorite query = %s", request.URL.RawQuery)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{"changed": true},
+			})
 		case "/getMessageCount":
 			if request.Method != http.MethodGet {
 				t.Fatalf("message count method = %s", request.Method)
@@ -238,6 +245,14 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	itemFavorites := runIssueJSON(t, "ehall", "service-item-favorites", "--cookie-file", cookie)
 	if itemFavorites["operation"] != "service-item-favorites" || itemFavorites["folder_count"] != float64(1) || itemFavorites["folders"].([]any)[0].(map[string]any)["folderName"] != "服务项收藏夹" {
 		t.Fatalf("eHall service item favorites were not preserved: %#v", itemFavorites)
+	}
+	itemAdded := runIssueJSON(t, "ehall", "service-item-favorite", "add", "--item-id", "item-1", "--folder-id", "folder-2", "--yes", "--cookie-file", cookie)
+	if itemAdded["operation"] != "service-item-favorite-add" || itemAdded["item_id"] != "item-1" || itemAdded["favorite"] != true || itemAdded["evidence"] != "response" {
+		t.Fatalf("service item favorite add was not confirmed: %#v", itemAdded)
+	}
+	itemRemoved := runIssueJSON(t, "ehall", "service-item-favorite", "remove", "--item-id", "item-1", "--folder-id", "folder-2", "--yes", "--cookie-file", cookie)
+	if itemRemoved["operation"] != "service-item-favorite-remove" || itemRemoved["favorite"] != false || itemRemoved["evidence"] != "response" {
+		t.Fatalf("service item favorite remove was not confirmed: %#v", itemRemoved)
 	}
 	messageCount := runIssueJSON(t, "ehall", "message-count", "--cookie-file", cookie)
 	if messageCount["message_count"] != float64(3) || messageCount["data"] != "3" {

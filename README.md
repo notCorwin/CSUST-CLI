@@ -202,6 +202,8 @@ password=密码
 ./csust ehall me --json
 ./csust ehall favorites --json
 ./csust ehall service-item-favorites --json
+./csust ehall service-item-favorite add --item-id ITEM_ID --yes --json
+./csust ehall service-item-favorite remove --item-id ITEM_ID --yes --json
 ./csust ehall message-count --json
 ./csust ehall notifications --json
 ./csust ehall service-cycles --json

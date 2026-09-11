@@ -28,6 +28,14 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "service-item-favorites" || args[0] == "item-favorites" {
 		return a.ehallServiceItemFavorites(ctx, cookie)
 	}
+	if args[0] == "service-item-favorite" {
+		if len(args) == 1 {
+			return a.ehallServiceItemFavorites(ctx, cookie)
+		}
+		if args[1] == "add" || args[1] == "remove" {
+			return a.ehallServiceItemFavoriteMutation(ctx, args[1], args[2:], cookie)
+		}
+	}
 	if args[0] == "message-count" {
 		return a.ehallMessageCount(ctx, cookie)
 	}
@@ -71,7 +79,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、service-item-favorites、message-count、notifications、service-cycles、mail-status、news、rating、favorite add/remove、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、service-item-favorites、service-item-favorite add/remove、message-count、notifications、service-cycles、mail-status、news、rating、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -251,6 +259,50 @@ func (a NativeSite) ehallServiceItemFavorites(ctx context.Context, cookie string
 		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
 		"service": "ehall", "operation": "service-item-favorites", "scope": "current-user",
 		"folders": folders, "folder_count": len(folders),
+	}, nil
+}
+
+func (a NativeSite) ehallServiceItemFavoriteMutation(ctx context.Context, operation string, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "修改 eHall 服务项收藏状态必须加 --yes"}
+	}
+	id, requiredErr := businessRequired(args, "--item-id", "ehall service-item-favorite 必须提供 --item-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	operate, wantFavorite := "0", false
+	if operation == "add" {
+		operate, wantFavorite = "1", true
+	}
+	params := []pair{{name: "id", value: id}, {name: "operate", value: operate}}
+	if folder, found, valueErr := businessValue(args, "--folder-id"); valueErr != nil {
+		return nil, valueErr
+	} else if found {
+		if strings.TrimSpace(folder) == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "--folder-id 不能为空"}
+		}
+		params = append(params, pair{name: "folderWid", value: folder})
+	}
+	result, requestErr := a.execute(ctx, siteRequest{
+		Service: "ehall", Method: "GET", Path: "/collectServiceItem", Params: params,
+		Headers: ehallRequestOptions(cookie).headers, CookieFile: cookie, AllowSSO: true,
+		RequireLogin: true, AllowBusinessFailure: true, ReadOnly: false, Yes: true, RawJSON: true,
+	})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		if dataErr.Code == "business_rejected" {
+			dataErr.Code = "mutation_rejected"
+			dataErr.Details = map[string]any{"submitted": true, "confirmed": false, "evidence": "response", "item_id": id}
+		}
+		return nil, dataErr
+	}
+	return map[string]any{
+		"ok": true, "submitted": true, "confirmed": true, "evidence": "response",
+		"service": "ehall", "operation": "service-item-favorite-" + operation, "item_id": id,
+		"favorite": wantFavorite, "api_data": value, "api": "/collectServiceItem",
 	}, nil
 }
 
