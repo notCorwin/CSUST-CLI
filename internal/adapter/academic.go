@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/url"
 	"regexp"
 	"sort"
@@ -32,7 +33,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "personal-info", "account-settings", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "personal-info", "account-settings", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "special-course-query", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -77,6 +78,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicTeachingCalendar(ctx, args[1:])
 	case "course-selection", "course-select":
 		return a.academicCourseSelection(ctx, args[1:])
+	case "special-course-query":
+		return a.academicSpecialCourseQuery(ctx, args[1:])
 	case "training-plan", "plan", "cultivation-plan":
 		return a.academicTrainingPlan(ctx, args[1:])
 	case "training-progress", "training-plan-progress":
@@ -362,6 +365,9 @@ func (a NativeSite) academicCourseSelection(ctx context.Context, args []string) 
 	if !found {
 		return nil, &siteError{Code: "invalid_argument", Message: "--scope 只能是 center、cross-major、special 或 special-query"}
 	}
+	if scope == "special-query" {
+		return a.academicSpecialCourseQuery(ctx, args)
+	}
 	entryPath := ""
 	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
 	if err != nil {
@@ -406,6 +412,157 @@ func (a NativeSite) academicCourseSelection(ctx context.Context, args []string) 
 		"scope": scope, "entry_path": nullableString(entryPath), "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+const academicSpecialCourseQueryPath = "/jsxsd/tsxk/tsxk_cxlist"
+const academicSpecialCourseListPath = "/jsxsd/tsxk/tsxk_cxlist_jzyxkc"
+
+func (a NativeSite) academicSpecialCourseQuery(ctx context.Context, args []string) (map[string]any, *siteError) {
+	queryBody, queryURL, err := a.academicPage(ctx, "GET", academicSpecialCourseQueryPath, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	termOptions := pageOptions(document, "xnxq01id")
+	term, termLabel, found := academicOptionValue(termOptions, flagValue(args, "--term"))
+	if !found {
+		return nil, &siteError{Code: "invalid_argument", Message: "special-course-query 必须提供有效的 --term", Details: map[string]any{"terms": termOptions}}
+	}
+	specialOptions := academicSpecialCourseOptions(queryBody, term)
+	specialName := strings.TrimSpace(flagValue(args, "--special-name"))
+	specialID, selectedSpecialName, specialErr := academicSpecialCourseOption(specialOptions, specialName)
+	if specialErr != nil {
+		return nil, specialErr
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	result, requestErr := a.executeAcademicRequestWithRecovery(ctx, siteRequest{
+		Service: "academic", Path: academicSpecialCourseListPath, Method: "POST", CookieFile: academicCookiePath(),
+		Data:         []pair{{"xnxq01id", term}, {"tsxk01id", specialID}},
+		Headers:      []pair{{"Referer", queryURL}, {"X-Requested-With", "XMLHttpRequest"}},
+		RequireLogin: true, ReadOnly: true, Yes: true, RawJSON: true,
+	})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, ok := businessData(result)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "特殊选课查询接口未返回 JSON"}
+	}
+	rows, ok := data.([]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "特殊选课查询接口返回的不是课程列表"}
+	}
+	items := academicSpecialCourseRows(rows, keyword)
+	page, pageErr := pageInspect(queryBody, queryURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "special-course-query", "path": academicSpecialCourseListPath, "query_path": academicSpecialCourseQueryPath,
+		"term": term, "term_label": termLabel, "special_course_id": nullableString(specialID),
+		"special_course_name": nullableString(selectedSpecialName), "terms": termOptions, "special_courses": specialOptions,
+		"keyword": nullableString(keyword), "items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func academicOptionValue(options []map[string]any, wanted string) (string, string, bool) {
+	wanted = strings.TrimSpace(wanted)
+	if wanted == "" {
+		return "", "", false
+	}
+	for _, option := range options {
+		value, _ := option["value"].(string)
+		label, _ := option["label"].(string)
+		if wanted == value || wanted == label {
+			return value, label, true
+		}
+	}
+	return "", "", false
+}
+
+var academicSpecialCourseOptionPattern = regexp.MustCompile(`(?s)if\("([^"]+)"\s*==\s*\$\("#xnxq01id"\)\.val\(\)\)\s*\{\s*\$\("#tsxk01id"\)\.append\("<option value='([^']*)'>(.*?)</option>"\);`)
+
+func academicSpecialCourseOptions(source, term string) []map[string]any {
+	options := make([]map[string]any, 0)
+	for _, match := range academicSpecialCourseOptionPattern.FindAllStringSubmatch(source, -1) {
+		if len(match) != 4 || match[1] != term {
+			continue
+		}
+		options = append(options, map[string]any{"value": match[2], "label": html.UnescapeString(strings.TrimSpace(match[3]))})
+	}
+	return options
+}
+
+func academicSpecialCourseOption(options []map[string]any, wanted string) (string, string, *siteError) {
+	wanted = strings.TrimSpace(wanted)
+	if wanted == "" {
+		return "", "", nil
+	}
+	if value, label, ok := academicOptionValue(options, wanted); ok {
+		return value, label, nil
+	}
+	matches := make([]map[string]any, 0)
+	for _, option := range options {
+		label, _ := option["label"].(string)
+		if strings.Contains(strings.ToLower(label), strings.ToLower(wanted)) {
+			matches = append(matches, option)
+		}
+	}
+	if len(matches) == 1 {
+		value, _ := matches[0]["value"].(string)
+		label, _ := matches[0]["label"].(string)
+		return value, label, nil
+	}
+	if len(matches) > 1 {
+		choices := make([]string, 0, len(matches))
+		for _, option := range matches {
+			choices = append(choices, fmt.Sprint(option["label"]))
+		}
+		return "", "", &siteError{Code: "ambiguous_target", Message: "特殊选课名称对应多个选项，请使用完整名称", Details: map[string]any{"special_course": wanted, "choices": choices}}
+	}
+	return "", "", &siteError{Code: "invalid_argument", Message: "未找到指定的特殊选课名称", Details: map[string]any{"special_course": wanted, "choices": options}}
+}
+
+var academicSpecialCourseFields = map[string]string{
+	"kch": "course_id", "kcmc": "course", "xf": "credit", "jx0404id": "notice_id", "tsxklx": "selection_type",
+	"bjmc": "class", "sksjdd": "schedule_location", "jsxm": "teacher", "kcfalx": "course_attribute", "xdlx": "attempt_type",
+	"jfqk": "payment_status", "xkzt": "selection_status", "sqsj": "applied_at", "xksj": "processed_at",
+}
+
+func academicSpecialCourseRows(rows []any, keyword string) []map[string]any {
+	items := make([]map[string]any, 0, len(rows))
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	for _, value := range rows {
+		row, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if keyword != "" {
+			matched := false
+			for _, field := range []string{"kch", "kcmc", "tsxklx", "bjmc", "jsxm", "xkzt"} {
+				if strings.Contains(strings.ToLower(fmt.Sprint(row[field])), keyword) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		item := make(map[string]any, len(row)+2)
+		for key, fieldValue := range row {
+			item[key] = fieldValue
+			if semantic, exists := academicSpecialCourseFields[key]; exists {
+				item[semantic] = fieldValue
+			}
+		}
+		item["index"] = len(items) + 1
+		items = append(items, item)
+	}
+	return items
 }
 
 func academicSelectionWindowRows(document *pageNode, keyword, pageURL string) []map[string]any {

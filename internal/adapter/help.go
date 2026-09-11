@@ -20,6 +20,7 @@ func nativeUsage(args []string) []byte {
   exams/in-class-exams       考试安排与随堂考查询
   classrooms/selections      教室与选课查询
   course-selection            选课中心/跨专业选修课程
+  special-course-query        特殊选课申请查询
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况
   teaching-calendar           学期教学周历

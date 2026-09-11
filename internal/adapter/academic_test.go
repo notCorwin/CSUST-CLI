@@ -84,6 +84,39 @@ func TestAcademicCourseSelectionRowsNormalizeCrossMajorFields(t *testing.T) {
 	}
 }
 
+func TestAcademicSpecialCourseQueryUsesJSONEndpointAndSemanticRows(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if request.Method == http.MethodGet && request.URL.Path == "/jsxsd/tsxk/tsxk_cxlist" {
+			_, _ = writer.Write([]byte(`<select id="xnxq01id"><option value="2026-2027-1">2026-2027-1</option></select><script>if("2026-2027-1"==$("#xnxq01id").val()){$("#tsxk01id").append("<option value='SPECIAL-1'>特殊情况选课</option>");}</script>`))
+			return
+		}
+		if request.Method != http.MethodPost || request.URL.Path != academicSpecialCourseListPath {
+			t.Fatalf("unexpected special-course request: %s %s", request.Method, request.URL.Path)
+		}
+		if err := request.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if request.Form.Get("xnxq01id") != "2026-2027-1" || request.Form.Get("tsxk01id") != "SPECIAL-1" || request.Header.Get("X-Requested-With") != "XMLHttpRequest" {
+			t.Fatalf("unexpected special-course form: %#v headers=%v", request.Form, request.Header)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`[{"kch":"CS001","kcmc":"数据结构","xf":"3","jx0404id":"NOTICE-1","tsxklx":"特殊选课","bjmc":"计算机2401","sksjdd":"周一 1-2节 A101","jsxm":"教师","kcfalx":"主修","xdlx":"初修","jfqk":"未缴费","xkzt":"已申请","sqsj":"2026-09-12","xksj":""}]`))
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicSpecialCourseQuery(context.Background(), []string{"--term", "2026-2027-1", "--special-name", "特殊情况", "--keyword", "数据"})
+	if err != nil || result["kind"] != "special-course-query" || result["term"] != "2026-2027-1" || result["special_course_id"] != "SPECIAL-1" {
+		t.Fatalf("unexpected special-course result: %#v %v", result, err)
+	}
+	items, ok := result["items"].([]map[string]any)
+	if !ok || len(items) != 1 || items[0]["course_id"] != "CS001" || items[0]["course"] != "数据结构" || items[0]["selection_status"] != "已申请" {
+		t.Fatalf("unexpected special-course items: %#v", result["items"])
+	}
+}
+
 func TestAcademicStructuredRowsNormalizeRequestFields(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>申请编号</th><th>教室</th><th>借用日期</th><th>状态</th></tr><tr><td>R001</td><td>A101</td><td>2026-09-10</td><td>待审核</td></tr></table>`)
 	if err != nil {
