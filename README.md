@@ -124,6 +124,11 @@ password=密码
 ./csust site login --service ehall --auth sso --password-stdin --json
 ./csust site get --service ehall --path /index.html --require-login --json
 
+# 无密码认证：扫码，或先发送动态码再登录
+./csust site login --service ehall --auth qr --qr-image ./ehall-qr.png --json
+./csust site login --service ehall --auth dynamic --mobile 手机号 --send-code --yes --json
+./csust site login --service ehall --auth dynamic --mobile 手机号 --dynamic-code 动态码 --captcha 验证码 --json
+
 # 语义化业务服务
 ./csust journal search --journal transport --query 软岩 --page-size 20 --json
 ./csust employment list --kind career --json

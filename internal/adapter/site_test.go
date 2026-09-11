@@ -99,6 +99,21 @@ func TestEHallSSOUsesCurrentPortalCallback(t *testing.T) {
 	}
 }
 
+func TestSiteLoginParsesPasswordAndPasswordlessModes(t *testing.T) {
+	password, err := parseSiteCommand([]string{"login", "--service", "ehall", "--auth", "sso", "--password-stdin"})
+	if err != nil || !password.login.passwordStdin {
+		t.Fatalf("site SSO password stdin was not parsed: %#v %v", password, err)
+	}
+	qr, err := parseSiteCommand([]string{"login", "--service", "ehall", "--auth", "qr", "--qr-image", "./login.png"})
+	if err != nil || qr.login.auth != "qr" || qr.login.qrImage != "./login.png" {
+		t.Fatalf("site QR login was not parsed: %#v %v", qr, err)
+	}
+	dynamic, err := parseSiteCommand([]string{"login", "--service", "ehall", "--auth", "dynamic", "--mobile", "13800138000", "--send-code", "--yes"})
+	if err != nil || dynamic.login.auth != "dynamic" || dynamic.login.mobile != "13800138000" || !dynamic.login.sendCode || !dynamic.request.Yes {
+		t.Fatalf("site dynamic login was not parsed: %#v %v", dynamic, err)
+	}
+}
+
 func TestSiteBusinessStateAndBinaryResponse(t *testing.T) {
 	if state, known, decoded := businessState([]byte(`{"success":true,"data":{"value":1}}`), "application/json"); !state || !known || decoded == nil {
 		t.Fatalf("unexpected JSON success state: %v %v %#v", state, known, decoded)

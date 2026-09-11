@@ -126,6 +126,22 @@ func parseSiteCommand(args []string) (siteCommand, *siteError) {
 			command.login.captcha = value
 		case "--captcha-image":
 			command.login.captchaImage = expandUserPath(value)
+		case "--password-stdin":
+			if inline || hasValue {
+				return siteCommand{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			command.login.passwordStdin = true
+		case "--mobile":
+			command.login.mobile = value
+		case "--dynamic-code":
+			command.login.dynamicCode = value
+		case "--send-code":
+			if inline || hasValue {
+				return siteCommand{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			command.login.sendCode = true
+		case "--qr-image":
+			command.login.qrImage = expandUserPath(value)
 		case "--param":
 			item, err := splitPair(value, "--param")
 			if err != nil {
@@ -196,7 +212,7 @@ func parseSiteCommand(args []string) (siteCommand, *siteError) {
 			}
 			return siteCommand{}, &siteError{Code: "invalid_argument", Message: "site 子命令不接受位置参数"}
 		}
-		if !hasValue && arg != "--require-login" && arg != "--allow-external" && arg != "--insecure" && arg != "--yes" && arg != "--json" {
+		if !hasValue && arg != "--require-login" && arg != "--allow-external" && arg != "--insecure" && arg != "--yes" && arg != "--json" && arg != "--password-stdin" && arg != "--send-code" {
 			return siteCommand{}, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
 		}
 	}
@@ -209,8 +225,8 @@ func parseSiteCommand(args []string) (siteCommand, *siteError) {
 	if command.request.Service == "" {
 		return siteCommand{}, &siteError{Code: "invalid_argument", Message: "必须提供 --service"}
 	}
-	if command.name == "login" && command.login.auth != "auto" && command.login.auth != "sso" {
-		return siteCommand{}, &siteError{Code: "invalid_argument", Message: "site login 只支持 auto 或 sso"}
+	if command.name == "login" && command.login.auth != "auto" && command.login.auth != "sso" && command.login.auth != "dynamic" && command.login.auth != "qr" {
+		return siteCommand{}, &siteError{Code: "invalid_argument", Message: "site login 只支持 auto、sso、dynamic 或 qr"}
 	}
 	if command.form < 0 || command.button < 0 || command.index < 0 {
 		return siteCommand{}, &siteError{Code: "invalid_argument", Message: "表单、按钮和动作序号必须为正整数"}
@@ -237,6 +253,7 @@ func (a NativeSite) executeSiteCommand(ctx context.Context, command siteCommand)
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
+		command.login.yes = command.request.Yes
 		return a.loginSSOService(ctx, target, cookiePath, command.login)
 	case "catalog":
 		return siteCatalogResult(), nil

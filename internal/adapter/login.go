@@ -37,6 +37,11 @@ type loginOptions struct {
 	captcha       string
 	captchaImage  string
 	passwordStdin bool
+	mobile        string
+	dynamicCode   string
+	qrImage       string
+	sendCode      bool
+	yes           bool
 }
 
 func (a NativeSite) runLoginCommand(ctx context.Context, args []string, jsonMode bool) (bool, []byte, []byte, int, error) {
@@ -197,6 +202,32 @@ func (a NativeSite) loginSSO(ctx context.Context, serviceTarget *url.URL, accoun
 }
 
 func (a NativeSite) loginSSOService(ctx context.Context, serviceTarget *url.URL, cookiePath string, options loginOptions) (map[string]any, *siteError) {
+	if options.auth != "dynamic" && (options.mobile != "" || options.dynamicCode != "" || options.sendCode) {
+		return nil, &siteError{Code: "invalid_argument", Message: "--mobile、--dynamic-code、--send-code 只适用于 --auth dynamic"}
+	}
+	if options.auth != "qr" && options.qrImage != "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "--qr-image 只适用于 --auth qr"}
+	}
+	if options.auth != "sso" && options.auth != "auto" && options.passwordStdin {
+		return nil, &siteError{Code: "invalid_argument", Message: "--password-stdin 只适用于账号密码登录"}
+	}
+	callback := ssoServiceTarget(serviceTarget)
+	if options.auth == "qr" {
+		return a.loginSSOQR(ctx, callback, serviceTarget, cookiePath, options)
+	}
+	if options.auth == "dynamic" {
+		return a.loginSSODynamic(ctx, callback, serviceTarget, cookiePath, options)
+	}
+	if options.passwordStdin {
+		value, readErr := readBoundedSiteInput(os.Stdin)
+		if readErr != nil {
+			if errors.Is(readErr, errSiteRequestTooLarge) {
+				return nil, siteRequestTooLarge("标准输入密码")
+			}
+			return nil, &siteError{Code: "credentials_required", Message: "无法读取标准输入密码: " + readErr.Error()}
+		}
+		options.password = strings.TrimRight(string(value), "\r\n")
+	}
 	account, password, err := credentialsGo(options.username, options.password)
 	if err != nil {
 		return nil, err
@@ -204,7 +235,6 @@ func (a NativeSite) loginSSOService(ctx context.Context, serviceTarget *url.URL,
 	if options.captcha == "" {
 		options.captcha = envValueGo("CSUST_CAPTCHA")
 	}
-	callback := ssoServiceTarget(serviceTarget)
 	result, loginErr := a.loginSSOWith(ctx, callback, serviceTarget, account, password, options, cookiePath, false)
 	if result != nil {
 		result["service"] = safeSiteURL(serviceTarget)
@@ -224,6 +254,225 @@ func ssoServiceTarget(target *url.URL) *url.URL {
 	query.Set("portalService", portal.String())
 	callback.RawQuery = query.Encode()
 	return &callback
+}
+
+func (a NativeSite) loginSSOPage(ctx context.Context, callback, session *url.URL, cookiePath, formID, loginType string) (*pageNode, string, *siteError) {
+	authURL, _ := url.Parse(authServerBase + authLoginPath)
+	query := authURL.Query()
+	query.Set("service", callback.String())
+	if loginType != "" {
+		query.Set("type", loginType)
+	}
+	authURL.RawQuery = query.Encode()
+	result, requestErr := a.loginHTTP(ctx, siteRequest{Target: authURL, SessionTarget: session, CookieFile: cookiePath, Method: "GET", ReadOnly: true, AllowSSO: true, Yes: true})
+	if requestErr != nil {
+		return nil, "", requestErr
+	}
+	body, responseURL, bodyErr := loginBody(result)
+	if bodyErr != nil {
+		return nil, "", bodyErr
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, "", &siteError{Code: "authentication_failed", Message: "统一认证登录页解析失败: " + parseErr.Error()}
+	}
+	form := document.first("form", formID)
+	if form == nil {
+		return nil, "", &siteError{Code: "authentication_failed", Message: "统一认证登录页缺少" + formID + "表单"}
+	}
+	return form, responseURL, nil
+}
+
+func authServerTarget(session *url.URL, path string) *url.URL {
+	target := *session
+	target.Scheme, target.Host, target.Path, target.RawQuery, target.Fragment = "https", "authserver.csust.edu.cn", path, "", ""
+	return &target
+}
+
+func (a NativeSite) requiredAuthCaptcha(ctx context.Context, session url.URL, cookiePath, output, message string) (string, *siteError) {
+	if output == "" {
+		output = filepath.Join(filepath.Dir(cookiePath), "authserver-captcha.png")
+	}
+	path, fetchErr := a.fetchLoginCaptcha(ctx, session, cookiePath, true, output)
+	if fetchErr != nil {
+		return "", fetchErr
+	}
+	return "", &siteError{Code: "captcha_required", Message: message, Details: map[string]any{"captcha_image": path}}
+}
+
+func ssoFormAction(form *pageNode, responseURL, serviceURL string) (*url.URL, *siteError) {
+	actionValue := form.attr("action")
+	if actionValue == "" {
+		actionValue = responseURL
+	}
+	action := resolvePageURL(responseURL, actionValue)
+	actionURL, actionErr := validatePageActionTarget(action, responseURL, false)
+	if actionErr != nil {
+		return nil, actionErr
+	}
+	if !strings.EqualFold(actionURL.Host, "authserver.csust.edu.cn") {
+		return nil, &siteError{Code: "invalid_path", Message: "统一认证表单地址不是认证服务器"}
+	}
+	query := actionURL.Query()
+	if query.Get("service") == "" {
+		query.Set("service", serviceURL)
+		actionURL.RawQuery = query.Encode()
+	}
+	return actionURL, nil
+}
+
+func (a NativeSite) loginSSODynamic(ctx context.Context, callback, serviceTarget *url.URL, cookiePath string, options loginOptions) (map[string]any, *siteError) {
+	mobile := strings.TrimSpace(options.mobile)
+	if mobile == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "动态码登录必须提供 --mobile"}
+	}
+	if options.sendCode && options.dynamicCode != "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "--send-code 不能与 --dynamic-code 同时使用"}
+	}
+	if options.sendCode && !options.yes {
+		return nil, &siteError{Code: "confirmation_required", Message: "发送动态码会触发短信，请加 --yes"}
+	}
+	if !options.sendCode && strings.TrimSpace(options.dynamicCode) == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "动态码登录必须提供 --dynamic-code，或先使用 --send-code --yes"}
+	}
+	session := *serviceTarget
+	session.Path, session.RawQuery, session.Fragment = "/", "", ""
+	form, responseURL, pageErr := a.loginSSOPage(ctx, callback, &session, cookiePath, "phoneFromId", "dynamicLogin")
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	captcha := options.captcha
+	if captcha == "" {
+		_, captchaErr := a.requiredAuthCaptcha(ctx, session, cookiePath, options.captchaImage, "动态码登录需要验证码，请提供 --captcha")
+		return nil, captchaErr
+	}
+	if options.sendCode {
+		result, requestErr := a.loginHTTP(ctx, siteRequest{
+			Target: authServerTarget(&session, "/authserver/dynamicCode/getDynamicCode.htl"), SessionTarget: &session, CookieFile: cookiePath,
+			Method: "POST", Data: []pair{{"mobile", mobile}, {"captcha", captcha}},
+			Headers: []pair{{"Referer", responseURL}}, ReadOnly: true, AllowSSO: true, AllowBusinessFailure: true, Yes: true, RawJSON: true,
+		})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		value, ok := businessData(result)
+		payload, payloadOK := value.(map[string]any)
+		if !ok || !payloadOK || fmt.Sprint(payload["code"]) != "success" {
+			return nil, &siteError{Code: "authentication_failed", Message: "动态码发送失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "dynamic-code-response", "response": value}}
+		}
+		return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "dynamic-code-response-success", "service": safeSiteURL(serviceTarget), "operation": "send-code", "auth": "dynamic", "mobile": mobile}, nil
+	}
+	fields := casLoginFields(form)
+	fields = setFormField(fields, "username", mobile)
+	fields = setFormField(fields, "captcha", captcha)
+	fields = setFormField(fields, "dynamicCode", strings.TrimSpace(options.dynamicCode))
+	fields = setFormField(fields, "_eventId", "submit")
+	fields = setFormField(fields, "cllt", "dynamicLogin")
+	fields = setFormField(fields, "dllt", "generalLogin")
+	actionURL, actionErr := ssoFormAction(form, responseURL, callback.String())
+	if actionErr != nil {
+		return nil, actionErr
+	}
+	loginResult, requestErr := a.loginHTTP(ctx, siteRequest{Target: actionURL, SessionTarget: &session, CookieFile: cookiePath, Method: "POST", Data: fields, Headers: []pair{{"Referer", responseURL}}, ReadOnly: true, AllowBusinessFailure: true, AllowSSO: true, Yes: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	return a.finishSSOLogin(ctx, serviceTarget, &session, cookiePath, loginResult, "dynamic", map[string]any{"mobile": mobile})
+}
+
+func (a NativeSite) loginSSOQR(ctx context.Context, callback, serviceTarget *url.URL, cookiePath string, options loginOptions) (map[string]any, *siteError) {
+	session := *serviceTarget
+	session.Path, session.RawQuery, session.Fragment = "/", "", ""
+	form, responseURL, pageErr := a.loginSSOPage(ctx, callback, &session, cookiePath, "qrLoginForm", "qrLogin")
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	result, requestErr := a.loginHTTP(ctx, siteRequest{Target: authServerTarget(&session, "/authserver/qrCode/getToken"), SessionTarget: &session, CookieFile: cookiePath, Method: "GET", Params: []pair{{"ts", strconv.FormatInt(time.Now().UnixMilli(), 10)}}, ReadOnly: true, AllowSSO: true, Yes: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	body, _, bodyErr := loginBody(result)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	uuid := strings.TrimSpace(body)
+	if uuid == "" {
+		return nil, &siteError{Code: "authentication_failed", Message: "统一认证未返回扫码令牌"}
+	}
+	qrPath := options.qrImage
+	if qrPath == "" {
+		qrPath = filepath.Join(filepath.Dir(cookiePath), cookieHost(serviceTarget)+"-qr.png")
+	}
+	qrPath = expandUserPath(qrPath)
+	qrURL := authServerTarget(&session, "/authserver/qrCode/getCode")
+	qrResult, qrErr := a.loginHTTP(ctx, siteRequest{Target: qrURL, SessionTarget: &session, CookieFile: cookiePath, Method: "GET", Params: []pair{{"uuid", uuid}}, Output: qrPath, ReadOnly: true, AllowSSO: true, Yes: true})
+	if qrErr != nil {
+		return nil, qrErr
+	}
+	if qrResult == nil {
+		return nil, &siteError{Code: "authentication_failed", Message: "二维码保存失败"}
+	}
+	fmt.Fprintf(os.Stderr, "二维码已保存：%s，请扫码确认\n", qrPath)
+	deadline := time.NewTimer(120 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		statusResult, statusErr := a.loginHTTP(ctx, siteRequest{Target: authServerTarget(&session, "/authserver/qrCode/getStatus.htl"), SessionTarget: &session, CookieFile: cookiePath, Method: "GET", Params: []pair{{"ts", strconv.FormatInt(time.Now().UnixMilli(), 10)}, {"uuid", uuid}}, ReadOnly: true, AllowSSO: true, Yes: true})
+		if statusErr != nil {
+			return nil, statusErr
+		}
+		statusBody, _, statusBodyErr := loginBody(statusResult)
+		if statusBodyErr != nil {
+			return nil, statusBodyErr
+		}
+		switch strings.TrimSpace(statusBody) {
+		case "1":
+			fields := casLoginFields(form)
+			fields = setFormField(fields, "uuid", uuid)
+			actionURL, actionErr := ssoFormAction(form, responseURL, callback.String())
+			if actionErr != nil {
+				return nil, actionErr
+			}
+			loginResult, loginErr := a.loginHTTP(ctx, siteRequest{Target: actionURL, SessionTarget: &session, CookieFile: cookiePath, Method: "POST", Data: fields, Headers: []pair{{"Referer", responseURL}}, ReadOnly: true, AllowBusinessFailure: true, AllowSSO: true, Yes: true})
+			if loginErr != nil {
+				return nil, loginErr
+			}
+			return a.finishSSOLogin(ctx, serviceTarget, &session, cookiePath, loginResult, "qr", map[string]any{"qr_image": qrPath})
+		case "3":
+			return nil, &siteError{Code: "authentication_failed", Message: "二维码已失效", Details: map[string]any{"qr_image": qrPath, "evidence": "qr-status-3"}}
+		}
+		select {
+		case <-ctx.Done():
+			return nil, &siteError{Code: "authentication_timeout", Message: "扫码登录已取消", Details: map[string]any{"qr_image": qrPath}}
+		case <-deadline.C:
+			return nil, &siteError{Code: "authentication_timeout", Message: "扫码登录超时", Details: map[string]any{"qr_image": qrPath}}
+		case <-ticker.C:
+		}
+	}
+}
+
+func (a NativeSite) finishSSOLogin(ctx context.Context, serviceTarget, session *url.URL, cookiePath string, loginResult map[string]any, auth string, extra map[string]any) (map[string]any, *siteError) {
+	body, _, bodyErr := loginBody(loginResult)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	if failure := loginFailure(body); failure != nil {
+		return nil, failure
+	}
+	if loginPageBody(body) {
+		return nil, &siteError{Code: "authentication_failed", Message: "统一认证登录失败，未建立有效会话"}
+	}
+	if _, probeErr := a.loginHTTP(ctx, siteRequest{Target: serviceTarget, SessionTarget: session, CookieFile: cookiePath, Method: "GET", RequireLogin: true, ReadOnly: true, AllowSSO: true, Yes: true}); probeErr != nil {
+		details := loginResponseDetails(loginResult)
+		details["cause"] = probeErr.Code
+		return nil, &siteError{Code: "authentication_failed", Message: "统一认证回跳成功，但服务未建立有效会话", Details: details}
+	}
+	result := map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "auth": auth, "cookie_file": cookiePath, "service": safeSiteURL(serviceTarget), "attempts": 1}
+	for key, value := range extra {
+		result[key] = value
+	}
+	return result, nil
 }
 
 func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget *url.URL, account, password string, options loginOptions, cookiePath string, useHandoff bool) (map[string]any, *siteError) {
