@@ -1035,7 +1035,7 @@ func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[stri
 				return nil, &siteError{Code: "invalid_argument", Message: "grades detail 必须提供 --course-id 或 --course-name"}
 			}
 			term := flagValue(args[1:], "--term")
-			rows, _, listErr := a.academicGradeRows(ctx, term, flagValue(args[1:], "--course-nature"), "", flagValue(args[1:], "--study-mode-id"), firstNonEmpty(flagValue(args[1:], "--display"), "all"))
+			rows, _, _, listErr := a.academicGradeRows(ctx, term, flagValue(args[1:], "--course-nature"), "", flagValue(args[1:], "--study-mode-id"), firstNonEmpty(flagValue(args[1:], "--display"), "all"))
 			if listErr != nil {
 				return nil, listErr
 			}
@@ -1069,14 +1069,14 @@ func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[stri
 		return academicWrap(detail), nil
 	}
 	term, nature, course, display, study := flagValue(args, "--term"), flagValue(args, "--course-nature"), flagValue(args, "--course-name"), flagValue(args, "--display"), flagValue(args, "--study-mode-id")
-	items, term, dataErr := a.academicGradeRows(ctx, term, nature, course, study, display)
+	items, term, summary, dataErr := a.academicGradeRows(ctx, term, nature, course, study, display)
 	if dataErr != nil {
 		return nil, dataErr
 	}
-	return academicWrap(map[string]any{"term": nullableString(term), "items": items}), nil
+	return academicWrap(map[string]any{"term": nullableString(term), "summary": summary, "items": items}), nil
 }
 
-func (a NativeSite) academicGradeRows(ctx context.Context, term, nature, course, study, display string) ([]map[string]any, string, *siteError) {
+func (a NativeSite) academicGradeRows(ctx context.Context, term, nature, course, study, display string) ([]map[string]any, string, map[string]string, *siteError) {
 	if study == "" {
 		study = "2"
 	}
@@ -1084,26 +1084,45 @@ func (a NativeSite) academicGradeRows(ctx context.Context, term, nature, course,
 		display = "all"
 	}
 	if display != "all" && display != "best" {
-		return nil, "", &siteError{Code: "invalid_argument", Message: "--display 只能是 all 或 best"}
+		return nil, "", nil, &siteError{Code: "invalid_argument", Message: "--display 只能是 all 或 best"}
 	}
 	_, queryURL, queryErr := a.academicPage(ctx, "GET", "/jsxsd/kscj/cjcx_query", nil, nil)
 	if queryErr != nil {
-		return nil, "", queryErr
+		return nil, "", nil, queryErr
 	}
 	data := []pair{{"kksj", term}, {"kcxz", nature}, {"kcmc", course}, {"xsfs", map[bool]string{true: "max", false: "all"}[display == "best"]}, {"fxkc", study}}
 	body, pageURL, err := a.academicPage(ctx, "POST", "/jsxsd/kscj/cjcx_list", data, []pair{{"Referer", queryURL}})
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	document, parseErr := parsePage(body)
 	if parseErr != nil {
-		return nil, "", &siteError{Code: "parse_error", Message: parseErr.Error()}
+		return nil, "", nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
 	}
 	items, dataErr := parseGradesPage(document, pageURL)
 	if dataErr != nil {
-		return nil, "", dataErr
+		return nil, "", nil, dataErr
 	}
-	return items, term, nil
+	return items, term, parseGradeSummary(document), nil
+}
+
+func parseGradeSummary(document *pageNode) map[string]string {
+	text := pageDisplayText(document)
+	patterns := map[string]*regexp.Regexp{
+		"earned_credit":           regexp.MustCompile(`已获得总学分\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)`),
+		"required_credit":         regexp.MustCompile(`其中必修\s*([0-9]+(?:\.[0-9]+)?)`),
+		"general_elective_credit": regexp.MustCompile(`公选\s*([0-9]+(?:\.[0-9]+)?)`),
+		"elective_credit":         regexp.MustCompile(`选修\s*([0-9]+(?:\.[0-9]+)?)`),
+		"average_grade_point":     regexp.MustCompile(`平均学分绩点\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)`),
+		"average_score":           regexp.MustCompile(`平均成绩\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)`),
+	}
+	result := make(map[string]string, len(patterns))
+	for name, pattern := range patterns {
+		if match := pattern.FindStringSubmatch(text); len(match) > 1 {
+			result[name] = match[1]
+		}
+	}
+	return result
 }
 
 func academicPath(value string) (string, *siteError) {

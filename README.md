@@ -91,7 +91,7 @@ password=密码
 | 命令 | 用途 |
 | --- | --- |
 | `login` / `logout` | 教务统一认证或旧登录会话 |
-| `schedule`, `grades`, `profile`, `exams` | 教务查询 |
+| `schedule`, `grades`, `profile`, `exams` | 教务查询；成绩包含学分/绩点汇总和成绩构成详情 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |
 | `training-plan` | 培养方案执行计划课程 |

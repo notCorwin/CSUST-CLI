@@ -53,6 +53,17 @@ func TestAcademicGradesExtractJavascriptDetailLink(t *testing.T) {
 	}
 }
 
+func TestAcademicGradesParseSummaryMetrics(t *testing.T) {
+	document, err := parsePage(`<div>查询条件：全部 已获得总学分:79(其中必修71.5,公选3,选修4.5)，平均学分绩点:2.81，平均成绩:81.64;</div>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := parseGradeSummary(document)
+	if summary["earned_credit"] != "79" || summary["required_credit"] != "71.5" || summary["general_elective_credit"] != "3" || summary["elective_credit"] != "4.5" || summary["average_grade_point"] != "2.81" || summary["average_score"] != "81.64" {
+		t.Fatalf("unexpected grade summary: %#v", summary)
+	}
+}
+
 func TestAcademicCourseSelectionRowsNormalizeCrossMajorFields(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>课程代码</th><th>课程名称</th><th>教师</th><th>学分</th><th>课程性质</th></tr><tr><td>CS001</td><td>跨专业选修</td><td>张老师</td><td>2</td><td>选修</td></tr><tr><td>CS002</td><td>不相关课程</td><td>李老师</td><td>3</td><td>选修</td></tr></table>`)
 	if err != nil {
