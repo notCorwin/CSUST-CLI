@@ -238,6 +238,7 @@ password=密码
 ./csust sunshine send-code --phone 手机号 --yes --json
 # 匿名提交建议/投诉：先发送验证码，再提交并回读详情确认
 ./csust sunshine suggestion --title 操场分区建议 --department 信息化处 --content '请说明校区、具体事由和希望的处理方式，内容至少二十个字符。' --reporter 姓名 --phone 手机号 --email user@example.com --role student --code 验证码 --expected-date 2026-09-20 --yes --json
+# 可选附件：追加 --attachment ./说明.pdf；当前远端配置最多 1 个、10 MiB
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json

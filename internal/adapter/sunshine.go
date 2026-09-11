@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -186,11 +187,15 @@ func (a NativeSite) sunshineCreate(ctx context.Context, args []string, cookie, d
 	if publicErr != nil {
 		return nil, publicErr
 	}
+	attachments, attachmentsErr := a.sunshineUploadAttachments(ctx, args, cookie)
+	if attachmentsErr != nil {
+		return nil, attachmentsErr
+	}
 	body := map[string]any{
 		"name": title, "department": departmentID, "content": content, "type": typeName,
 		"dateExpected": dateExpected, "reporter": reporter, "phone": phone, "email": email,
 		"role": role, "verifyCode": code, "needVerifyCode": true, "isPublic": public,
-		"attachments": []any{},
+		"attachments": attachments,
 	}
 	path := "/api/issues"
 	created, requestErr := a.sunshineJSON(ctx, "POST", path, body, cookie, false, true)
@@ -332,6 +337,83 @@ func sunshinePublicOption(args []string) (bool, *siteError) {
 		return false, &siteError{Code: "invalid_argument", Message: "--public 与 --private 不能同时提供"}
 	}
 	return !private, nil
+}
+
+func (a NativeSite) sunshineUploadAttachments(ctx context.Context, args []string, cookie string) ([]any, *siteError) {
+	paths, valueErr := businessValues(args, "--attachment")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	if len(paths) == 0 {
+		return []any{}, nil
+	}
+	config, requestErr := a.sunshineJSON(ctx, "GET", "/api/systems", nil, cookie, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	configPayload, parseErr := businessJSONMap(config)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	settings, ok := configPayload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "response_error", Message: "阳光服务系统配置格式无效"}
+	}
+	maxNum := sunshineConfigInt(settings["issueAttachmentMaxNum"])
+	maxSize := sunshineConfigInt(settings["issueAttachmentMaxSize"])
+	if maxNum > 0 && int64(len(paths)) > maxNum {
+		return nil, &siteError{Code: "invalid_argument", Message: "附件数量超过阳光服务限制"}
+	}
+	files := make([]filePart, 0, len(paths))
+	var totalSize int64
+	for _, path := range paths {
+		file, fileErr := siteFilePart("file", path, "阳光服务附件")
+		if fileErr != nil {
+			return nil, fileErr
+		}
+		if file.size <= 0 {
+			return nil, &siteError{Code: "invalid_argument", Message: "阳光服务附件不能为空"}
+		}
+		totalSize += file.size
+		files = append(files, file)
+	}
+	if maxSize > 0 && totalSize > maxSize {
+		return nil, &siteError{Code: "invalid_argument", Message: "附件总大小超过阳光服务限制"}
+	}
+	attachments := make([]any, 0, len(files))
+	for _, file := range files {
+		result, uploadErr := a.execute(ctx, siteRequest{
+			Service: "sunshine", Method: "POST", Path: "/api/uploadfiles", CookieFile: cookie,
+			Data: []pair{{name: "size", value: strconv.FormatInt(file.size, 10)}}, Files: []filePart{file},
+			ReadOnly: false, Yes: true, RawJSON: true,
+		})
+		if uploadErr != nil {
+			return nil, uploadErr
+		}
+		payload, payloadErr := businessJSONMap(result)
+		if payloadErr != nil {
+			return nil, &siteError{Code: "mutation_unverified", Message: "附件已上传但响应无法解析", Details: map[string]any{"api": "/api/uploadfiles", "cause": payloadErr.Code}}
+		}
+		attachment, ok := payload["data"].(map[string]any)
+		if !ok {
+			return nil, &siteError{Code: "mutation_unverified", Message: "附件已上传但响应缺少附件数据", Details: map[string]any{"api": "/api/uploadfiles"}}
+		}
+		attachments = append(attachments, attachment)
+	}
+	return attachments, nil
+}
+
+func sunshineConfigInt(value any) int64 {
+	switch number := value.(type) {
+	case float64:
+		return int64(number)
+	case int:
+		return int64(number)
+	case int64:
+		return number
+	default:
+		return 0
+	}
 }
 
 func sunshineIssueQuery(args []string) (map[string]any, map[string]any, *siteError) {

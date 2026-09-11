@@ -3,8 +3,10 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,16 +85,42 @@ func TestSunshinePublicQueriesAndCodeConfirmation(t *testing.T) {
 func TestSunshineSuggestionSubmitsSemanticPayloadAndReadsBack(t *testing.T) {
 	var submitted map[string]any
 	var detailBody map[string]any
+	var uploadedName, uploadedSize string
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		requests++
 		switch request.URL.Path {
+		case "/api/systems":
+			if request.Method != http.MethodGet {
+				t.Fatalf("unexpected config request")
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"issueAttachmentMaxNum":1,"issueAttachmentMaxSize":10485760}}`))
 		case "/api/departments":
 			if request.Method != http.MethodPut || json.NewDecoder(request.Body).Decode(&detailBody) != nil {
 				t.Fatalf("unexpected department request")
 			}
 			_, _ = writer.Write([]byte(`{"success":true,"data":[{"_id":"department-1","name":"信息化处","nickname":"信息化处"}]}`))
+		case "/api/uploadfiles":
+			if request.Method != http.MethodPost || request.ParseMultipartForm(1<<20) != nil {
+				t.Fatalf("unexpected attachment request")
+			}
+			items := request.MultipartForm.File["file"]
+			if len(items) != 1 {
+				t.Fatalf("unexpected attachment file parts: %#v", request.MultipartForm.File)
+			}
+			uploadedSize = request.FormValue("size")
+			uploadedName = items[0].Filename
+			file, openErr := items[0].Open()
+			if openErr != nil {
+				t.Fatalf("open attachment: %v", openErr)
+			}
+			content, readErr := io.ReadAll(file)
+			_ = file.Close()
+			if readErr != nil || string(content) != "payload" {
+				t.Fatalf("unexpected attachment content: %q err=%v", content, readErr)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"_id":"attachment-1","size":7,"name":"说明.pdf"}}`))
 		case "/api/issues":
 			if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&submitted) != nil {
 				t.Fatalf("unexpected submit request")
@@ -108,6 +136,10 @@ func TestSunshineSuggestionSubmitsSemanticPayloadAndReadsBack(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	attachmentPath := filepath.Join(t.TempDir(), "说明.pdf")
+	if err := os.WriteFile(attachmentPath, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("CSUST_BASE_URL", server.URL)
 	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
 
@@ -116,12 +148,16 @@ func TestSunshineSuggestionSubmitsSemanticPayloadAndReadsBack(t *testing.T) {
 		t.Fatalf("submit should require confirmation: handled=%v code=%d err=%v requests=%d", handled, code, err, requests)
 	}
 
-	result := runIssueJSON(t, "sunshine", "suggestion", "--title", "操场分区建议", "--department", "信息化处", "--content", "请说明校区、具体事由和希望的处理方式，内容足够详细。", "--reporter", "张三", "--phone", "13800138000", "--email", "user@example.com", "--role", "student", "--code", "123456", "--expected-date", "2099-01-02", "--yes")
+	result := runIssueJSON(t, "sunshine", "suggestion", "--title", "操场分区建议", "--department", "信息化处", "--content", "请说明校区、具体事由和希望的处理方式，内容足够详细。", "--reporter", "张三", "--phone", "13800138000", "--email", "user@example.com", "--role", "student", "--code", "123456", "--expected-date", "2099-01-02", "--attachment", attachmentPath, "--yes")
 	if result["submitted"] != true || result["confirmed"] != true || result["issue_id"] != "issue-1" || result["evidence"] != "POST /api/issues success and detail readback" {
 		t.Fatalf("unexpected sunshine submit result: %#v", result)
 	}
 	if submitted["name"] != "操场分区建议" || submitted["department"] != "department-1" || submitted["type"] != "建议咨询" || submitted["reporter"] != "张三" || submitted["role"] != "本校学生" || submitted["verifyCode"] != "123456" || submitted["needVerifyCode"] != true || submitted["isPublic"] != true {
 		t.Fatalf("semantic submit payload was not mapped: %#v", submitted)
+	}
+	attachments, ok := submitted["attachments"].([]any)
+	if !ok || len(attachments) != 1 || uploadedName != "说明.pdf" || uploadedSize != "7" {
+		t.Fatalf("attachment was not uploaded or mapped: attachments=%#v name=%q size=%q", submitted["attachments"], uploadedName, uploadedSize)
 	}
 	if date, _ := submitted["dateExpected"].(string); func() bool {
 		parsed, parseErr := time.Parse(time.RFC3339Nano, date)
@@ -129,10 +165,11 @@ func TestSunshineSuggestionSubmitsSemanticPayloadAndReadsBack(t *testing.T) {
 	}() {
 		t.Fatalf("unexpected expected date: %#v", submitted["dateExpected"])
 	}
-	if attachments, ok := submitted["attachments"].([]any); !ok || len(attachments) != 0 {
+	if attachments, ok := submitted["attachments"].([]any); !ok || len(attachments) != 1 {
 		t.Fatalf("unexpected attachment payload: %#v", submitted["attachments"])
 	}
-	if string(mustJSON(result)) == "" || strings.Contains(string(mustJSON(result)), "123456") || strings.Contains(string(mustJSON(result)), "13800138000") {
+	encoded := string(mustJSON(result))
+	if encoded == "" || strings.Contains(encoded, "123456") || strings.Contains(encoded, "13800138000") {
 		t.Fatalf("submission secrets leaked in result: %#v", result)
 	}
 }
