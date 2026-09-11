@@ -8,7 +8,7 @@
 
 ## 能做什么
 
-- 教务：课表、成绩、个人信息、考试、空教室、选课结果、培养方案、学期信息、教材和教学评价。
+- 教务：课表、成绩、个人信息、考试、空教室、选课结果、培养方案、第二课堂学分、学期信息、教材和教学评价。
 - 网页映射：教务菜单、页面快照、表单和动作调用、公开入口及毕业设计跳转。
 - VPN：登录、状态、退出、页面/控件/API 目录、文件资源和已映射 API 调用。
 - 网络教学与教学质量保障：课程、课程详情、页面请求、教学评价和页面目录。
@@ -69,6 +69,8 @@ password=密码
 ./csust course-selection --scope cross-major --json
 ./csust training-plan --keyword 专业核心 --json
 ./csust training-progress --json
+./csust second-class-credits --json
+./csust second-class-credit-applications --json
 ```
 
 ## 常用命令
@@ -80,6 +82,8 @@ password=密码
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |
 | `training-plan` | 培养方案执行计划课程 |
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
+| `second-class-credits` | 第二课堂学分认定查询 |
+| `second-class-credit-applications` | 第二课堂学分申报及审核状态 |
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |

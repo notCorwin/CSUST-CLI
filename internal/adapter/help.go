@@ -18,6 +18,8 @@ func nativeUsage(args []string) []byte {
   course-selection            选课中心/跨专业选修课程
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况
+  second-class-credits        第二课堂学分查询
+  second-class-credit-applications 第二课堂学分申报记录
   terms/semester-start        学期信息
   textbooks                   教材操作
   evaluation                  学生评价

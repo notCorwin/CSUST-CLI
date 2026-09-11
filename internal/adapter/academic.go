@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -67,6 +67,10 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicTrainingPlan(ctx, args[1:])
 	case "training-progress", "training-plan-progress":
 		return a.academicTrainingProgress(ctx, args[1:])
+	case "second-class-credits", "innovation-credits", "second-class-credit-query":
+		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credits", "/jsxsd/pyfa/cxxf_query", academicSecondClassCreditField)
+	case "second-class-credit-applications", "innovation-credit-applications":
+		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credit-applications", "/jsxsd/pyfa/cxxfsb_query", academicSecondClassCreditField)
 	case "classroom-request", "room-request":
 		return a.academicStructuredPage(ctx, args[1:], "classroom-request", "/jsxsd/kbxx/jsjy_query")
 	case "minor", "minor-registration":
@@ -206,6 +210,10 @@ func academicCourseRows(document *pageNode, keyword string) []map[string]any {
 }
 
 func (a NativeSite) academicStructuredPage(ctx context.Context, args []string, kind, path string) (map[string]any, *siteError) {
+	return a.academicStructuredPageWithField(ctx, args, kind, path, academicPageField)
+}
+
+func (a NativeSite) academicStructuredPageWithField(ctx context.Context, args []string, kind, path string, field func(string) string) (map[string]any, *siteError) {
 	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
 	if err != nil {
 		return nil, err
@@ -215,7 +223,7 @@ func (a NativeSite) academicStructuredPage(ctx context.Context, args []string, k
 		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
 	}
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
-	items := academicStructuredRows(document, keyword, academicPageField)
+	items := academicStructuredRows(document, keyword, field)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
 		return nil, &siteError{Code: "parse_error", Message: kind + " 页面未包含可解析表格；请使用 web get 查看页面结构"}
 	}
@@ -516,6 +524,42 @@ func academicTrainingPlanField(value string) string {
 		return "course_attribute"
 	case strings.Contains(value, "是否考试"):
 		return "exam"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicSecondClassCreditField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "组织方式"):
+		return "organization"
+	case strings.Contains(value, "学年学期"):
+		return "term"
+	case strings.Contains(value, "分类名称"):
+		return "category"
+	case strings.Contains(value, "获得项目时间"):
+		return "project_time"
+	case strings.Contains(value, "认定学分"):
+		return "recognized_credit"
+	case strings.Contains(value, "审核状态"):
+		return "review_status"
+	case strings.Contains(value, "认定状态"):
+		return "recognition_status"
+	case strings.Contains(value, "项目编号"):
+		return "project_id"
+	case value == "学号":
+		return "student_id"
+	case value == "姓名":
+		return "name"
+	case strings.Contains(value, "学分类型"):
+		return "credit_type"
+	case value == "学分":
+		return "credit"
+	case value == "备注":
+		return "note"
+	case value == "操作":
+		return "action"
 	default:
 		return academicPageField(value)
 	}

@@ -175,3 +175,14 @@ func TestAcademicTrainingProgressKeepsCompletionAndCreditSummary(t *testing.T) {
 		t.Fatalf("unexpected credit summary: %#v", result["credit_summary"])
 	}
 }
+
+func TestAcademicSecondClassCreditRowsKeepApplicationStates(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>组织方式</th><th>学年学期</th><th>分类名称</th><th>获得项目时间</th><th>认定学分</th><th>审核状态</th><th>认定状态</th><th>备注</th><th>操作</th></tr><tr><td>1</td><td>个人</td><td>2025-2026-1</td><td>学科竞赛</td><td>2026-01-01</td><td>2</td><td>已通过</td><td>已认定</td><td>备注</td><td>流程</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicSecondClassCreditField)
+	if len(rows) != 1 || rows[0]["organization"] != "个人" || rows[0]["term"] != "2025-2026-1" || rows[0]["category"] != "学科竞赛" || rows[0]["recognized_credit"] != "2" || rows[0]["review_status"] != "已通过" || rows[0]["recognition_status"] != "已认定" || rows[0]["action"] != "流程" {
+		t.Fatalf("unexpected second-class credit row: %#v", rows)
+	}
+}
