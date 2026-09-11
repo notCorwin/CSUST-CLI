@@ -262,6 +262,17 @@ func TestAcademicExemptExamRowsKeepDistinctStatuses(t *testing.T) {
 	}
 }
 
+func TestAcademicEnrollmentStatusChangeRowsKeepBeforeAndAfterFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>详情</th><th>原班级</th><th>原学籍</th><th>原在校</th><th>新学院</th><th>新专业</th><th>新班级</th><th>新学籍</th><th>新状态</th><th>新在校</th><th>异动类别</th><th>终审状态</th></tr><tr><td>查看</td><td>土木24-1</td><td>正常</td><td>在校</td><td>交通学院</td><td>道路工程</td><td>道桥24-1</td><td>正常</td><td>正常</td><td>在校</td><td>转专业</td><td>通过</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicEnrollmentStatusChangeField)
+	if len(rows) != 1 || rows[0]["previous_class"] != "土木24-1" || rows[0]["new_college"] != "交通学院" || rows[0]["new_major"] != "道路工程" || rows[0]["change_type"] != "转专业" || rows[0]["final_review_status"] != "通过" {
+		t.Fatalf("unexpected enrollment status change row: %#v", rows)
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")

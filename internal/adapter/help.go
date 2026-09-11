@@ -24,6 +24,7 @@ func nativeUsage(args []string) []byte {
   deferred-exam-applications  缓考申请记录（按学期/课程/状态查询）
   exempt-exam-applications    免考申请记录（按学期/课程/考试方式查询）
   enrollment-proof-applications 在读证明申请记录
+  enrollment-status-changes  学籍异动历史
   drop-course-applications    可退课程及退课审核状态
   student-status-changes      个人信息修改审核历史
   second-class-credits        第二课堂学分查询
