@@ -136,3 +136,33 @@ func TestTransportMobileSendCodeRequiresConfirmation(t *testing.T) {
 		t.Fatalf("send-code without confirmation was not rejected: handled=%v code=%d err=%v", handled, code, err)
 	}
 }
+
+func TestTransportMobileAdditionalSemanticModels(t *testing.T) {
+	if note := transportMobileNote(map[string]any{"_id": "n-1", "name": "请示", "dateModified": "2026-09-12", "participants": []any{"u-1"}}); note["last_reply"] != "2026-09-12" {
+		t.Fatalf("note model failed: %#v", note)
+	}
+	access := transportMobileAccessRecord(map[string]any{"employeeCode": "T001", "personName": "交通老师", "departmentName": "交通学院", "deviceAlias": "门禁一", "eventDescription": "进校", "eventTime": "2026-09-12", "verifyModeName": "刷卡"})
+	if access["employee_code"] != "T001" || access["verify_mode"] != "刷卡" {
+		t.Fatalf("access record model failed: %#v", access)
+	}
+	achievement := transportMobileAchievement(map[string]any{"student": map[string]any{"code": "S-1", "name": "学生一"}, "awardLevel": "校级"})
+	if achievement["student_code"] != "S-1" || achievement["award_level"] != "校级" {
+		t.Fatalf("achievement model failed: %#v", achievement)
+	}
+	kpi := transportMobileKPI(map[string]any{"owner": map[string]any{"name": "交通老师"}, "type": "教学"})
+	if kpi["owner"].(map[string]any)["name"] != "交通老师" || kpi["kpi_type"] != "教学" {
+		t.Fatalf("KPI model failed: %#v", kpi)
+	}
+	notice := transportMobileNotice(map[string]any{"code": "N-1", "title": "通知", "type": "校内"})
+	if notice["title"] != "通知" || notice["notice_type"] != "校内" {
+		t.Fatalf("notice model failed: %#v", notice)
+	}
+	workflow := transportMobileWorkflow(map[string]any{"current": map[string]any{"node": "院系审核", "user": map[string]any{"name": "审批人"}}})
+	if workflow["current_node"] != "院系审核" || workflow["approver"].(map[string]any)["name"] != "审批人" {
+		t.Fatalf("workflow model failed: %#v", workflow)
+	}
+	vacation := transportMobileVacation(map[string]any{"reason": "出差", "days": 2})
+	if vacation["reason"] != "出差" || vacation["days"] != 2 {
+		t.Fatalf("vacation model failed: %#v", vacation)
+	}
+}

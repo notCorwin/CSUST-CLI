@@ -32,6 +32,40 @@ var transportMobileTables = map[string]transportMobileTable{
 		populator: []map[string]any{{"path": "group", "select": "name"}, {"path": "creater", "select": "name code"}},
 		model:     transportMobileFinance,
 	},
+	"notes": {
+		table: "note", sortColumn: "dateModified", fuzzy: []string{"name"},
+		populator: []map[string]any{{"path": "creater participants.user", "select": "name code"}},
+		model:     transportMobileNote,
+	},
+	"access-records": {
+		table: "accessrecord", sortColumn: "eventTime", fuzzy: []string{"employeeCode", "personName", "departmentName", "deviceAlias", "eventDescription", "verifyModeName"},
+		model: transportMobileAccessRecord,
+	},
+	"achievements": {
+		table: "achievement", sortColumn: "code", fuzzy: []string{"name", "code", "remark"},
+		populator: []map[string]any{{"path": "creater teacher.department student.department", "select": "name"}},
+		model:     transportMobileAchievement,
+	},
+	"kpis": {
+		table: "kpi", sortColumn: "version", fuzzy: []string{"code", "name", "remark"},
+		populator: []map[string]any{{"path": "creater owner batch", "select": "name"}},
+		model:     transportMobileKPI,
+	},
+	"notices": {
+		table: "notice", sortColumn: "code", fuzzy: []string{"code", "title", "content"},
+		populator: []map[string]any{{"path": "creater user approver public.user public.role public.group", "select": "name"}},
+		model:     transportMobileNotice,
+	},
+	"workflows": {
+		table: "realworkflow", sortColumn: "code", fuzzy: []string{"code"},
+		populator: []map[string]any{{"path": "creater current.user history.user", "select": "name"}},
+		model:     transportMobileWorkflow,
+	},
+	"vacations": {
+		table: "vacation", sortColumn: "dateCreate", fuzzy: []string{"code"},
+		populator: []map[string]any{{"path": "creater department", "select": "name"}},
+		model:     transportMobileVacation,
+	},
 }
 
 func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (map[string]any, *siteError) {
@@ -57,6 +91,20 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileDictionaries(ctx, args[1:], cookie)
 	case "defenses":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["defenses"], "defenses")
+	case "notes":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["notes"], "notes")
+	case "access-records":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["access-records"], "access-records")
+	case "achievements":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["achievements"], "achievements")
+	case "kpis":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["kpis"], "kpis")
+	case "notices":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["notices"], "notices")
+	case "workflows":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["workflows"], "workflows")
+	case "vacations":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["vacations"], "vacations")
 	case "defense":
 		return a.transportMobileDefenseDetail(ctx, args[1:], cookie)
 	case "finances":
@@ -546,6 +594,88 @@ func transportMobileFinance(row map[string]any) map[string]any {
 	result["allowed_balance"] = transportMobileValue(row, "stat.allowleft")
 	result["expense_rate"] = transportMobileValue(row, "stat.feerate")
 	result["allowed_rate"] = transportMobileValue(row, "stat.allowrate")
+	return result
+}
+
+func transportMobileNote(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["participants"] = row["participants"]
+	result["last_reply"] = transportMobileValue(row, "dateModified")
+	return result
+}
+
+func transportMobileAccessRecord(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["employee_code"] = transportMobileText(row, "employeeCode")
+	result["person_name"] = transportMobileText(row, "personName")
+	result["department_name"] = transportMobileText(row, "departmentName")
+	result["device_alias"] = transportMobileText(row, "deviceAlias")
+	result["event_description"] = transportMobileText(row, "eventDescription")
+	result["event_time"] = transportMobileValue(row, "eventTime")
+	result["verify_mode"] = transportMobileText(row, "verifyModeName")
+	return result
+}
+
+func transportMobileAchievement(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["achievement_type"] = transportMobileValue(row, "type")
+	result["event"] = transportMobileValue(row, "event")
+	result["level"] = transportMobileValue(row, "level")
+	result["student_code"] = transportMobileText(row, "studentCode", "student.code")
+	result["student_name"] = transportMobileText(row, "studentName", "student.name")
+	result["authorization_number"] = transportMobileText(row, "authorizationNo")
+	result["first_inventor"] = transportMobileText(row, "firstInventor")
+	result["journal"] = transportMobileText(row, "journal")
+	result["indexing"] = transportMobileValue(row, "indexing")
+	result["competition"] = transportMobileValue(row, "competition")
+	result["award_level"] = transportMobileValue(row, "awardLevel")
+	result["completed_at"] = transportMobileValue(row, "dateComplete", "completed_at")
+	result["applicant"] = transportMobileValue(row, "applicant")
+	result["applied_at"] = transportMobileValue(row, "dateApply", "applied_at")
+	return result
+}
+
+func transportMobileKPI(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["kpi_type"] = transportMobileValue(row, "type")
+	result["owner"] = transportMobileValue(row, "owner")
+	result["block"] = transportMobileValue(row, "block")
+	result["batch"] = transportMobileValue(row, "batch")
+	return result
+}
+
+func transportMobileNotice(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["title"] = transportMobileText(row, "title")
+	result["notice_type"] = transportMobileValue(row, "type")
+	result["file"] = row["file"]
+	result["audience"] = row["public"]
+	result["publisher"] = transportMobileValue(row, "user", "creater")
+	result["published_at"] = transportMobileValue(row, "dateCreate")
+	return result
+}
+
+func transportMobileWorkflow(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["workflow_type"] = transportMobileValue(row, "type")
+	result["applicant"] = transportMobileValue(row, "user", "applicant")
+	result["sms_notified"] = transportMobileValue(row, "sms", "sendSms")
+	result["current_node"] = transportMobileValue(row, "current.node")
+	result["approver"] = transportMobileValue(row, "current.user")
+	result["submitted_at"] = transportMobileValue(row, "dateCreate")
+	result["completed_at"] = transportMobileValue(row, "dateComplete")
+	return result
+}
+
+func transportMobileVacation(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["applicant"] = transportMobileValue(row, "user", "applicant")
+	result["department"] = row["department"]
+	result["period"] = transportMobileValue(row, "period", "time")
+	result["days"] = transportMobileValue(row, "days")
+	result["leave_type"] = transportMobileValue(row, "type")
+	result["reason"] = transportMobileText(row, "reason")
+	result["applied_at"] = transportMobileValue(row, "dateCreate")
 	return result
 }
 

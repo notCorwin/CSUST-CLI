@@ -61,7 +61,7 @@ var businessServices = []businessService{
 	{"recruitment", "人才招聘", "recruitment", "招聘", "high", "live rczpw public SM2 ajaxService exposes channels, notices, organizations, positions and position detail"},
 	{"professional-learning", "专业技术人员继续教育", "jxjy", "继续教育", "high", "live jxjy public course, category, notice and course-detail APIs"},
 	{"institutional-learning", "事业单位工作人员继续教育", "zyjx", "继续教育", "high", "live zyjx public course, category, notice and course-detail APIs"},
-	{"transport-mobile", "交通运输工程综合信息", "transport-mobile", "学院管理", "high", "live WiJat SPA defines token authentication, user profile, pending count, public dictionaries, defense and finance table APIs"},
+	{"transport-mobile", "交通运输工程综合信息", "transport-mobile", "学院管理", "high", "live WiJat SPA defines token authentication, user profile, pending count, public dictionaries and protected defense, finance, note, access, achievement, KPI, notice, workflow and vacation tables"},
 	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
@@ -345,6 +345,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "dictionaries", "dict":
 			add("--code")
 		case "defenses":
+			add("--keyword", "--page", "--page-size")
+		case "notes", "access-records", "achievements", "kpis", "notices", "workflows", "vacations":
 			add("--keyword", "--page", "--page-size")
 		case "defense", "finance":
 			add("--id")
