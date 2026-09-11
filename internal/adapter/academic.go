@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "enrollment-proof-applications", "enrollment-proof-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "enrollment-proof-applications", "enrollment-proof-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -69,6 +69,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicTerms(ctx, args[1:])
 	case "semester-start":
 		return a.academicSemesterStart(ctx, args[1:])
+	case "teaching-calendar", "semester-calendar":
+		return a.academicTeachingCalendar(ctx, args[1:])
 	case "course-selection", "course-select":
 		return a.academicCourseSelection(ctx, args[1:])
 	case "training-plan", "plan", "cultivation-plan":
@@ -1657,6 +1659,42 @@ func (a NativeSite) academicSemesterStart(ctx context.Context, args []string) (m
 	return academicWrap(result), nil
 }
 
+func (a NativeSite) academicTeachingCalendar(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const path = "/jsxsd/jxzl/jxzl_query"
+	term := strings.TrimSpace(flagValue(args, "--term"))
+	queryBody, queryURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	queryDocument, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	if term == "" {
+		term = selectedOptionPage(queryDocument, "xnxq01id")
+	}
+	body, pageURL := queryBody, queryURL
+	if term != selectedOptionPage(queryDocument, "xnxq01id") {
+		body, pageURL, err = a.academicPage(ctx, "POST", path, []pair{{"xnxq01id", term}}, []pair{{"Referer", queryURL}})
+		if err != nil {
+			return nil, err
+		}
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	items, dataErr := parseTeachingCalendarPage(document)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{"kind": "teaching-calendar", "path": path, "term": nullableString(term), "items": items, "item_count": len(items), "page": page}), nil
+}
+
 func academicWrap(value map[string]any) map[string]any {
 	result := map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed"}
 	for key, item := range value {
@@ -2317,6 +2355,43 @@ func parseSemesterStartPage(document *pageNode, pageURL string) (map[string]any,
 	}
 	return nil, &siteError{Code: "parse_error", Message: "未找到学期起始日"}
 }
+
+func parseTeachingCalendarPage(document *pageNode) ([]map[string]any, *siteError) {
+	table := academicTable(document)
+	if table == nil {
+		return nil, &siteError{Code: "parse_error", Message: "未找到教学周历表"}
+	}
+	rows := directTableRows(table)
+	if len(rows) == 0 {
+		return []map[string]any{}, nil
+	}
+	if strings.Contains(pageDisplayText(rows[0]), "星期日") {
+		rows = rows[1:]
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		values := rowValues(row)
+		if len(values) < 8 || !regexp.MustCompile(`^\d+$`).MatchString(strings.TrimSpace(values[0])) {
+			continue
+		}
+		item := map[string]any{
+			"week":      values[0],
+			"sunday":    values[1],
+			"monday":    values[2],
+			"tuesday":   values[3],
+			"wednesday": values[4],
+			"thursday":  values[5],
+			"friday":    values[6],
+			"saturday":  values[7],
+			"note":      valueAt(values, 8),
+			"cells":     values,
+			"text":      pageDisplayText(row),
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 func valueAt(values []string, index int) string {
 	if index >= 0 && index < len(values) {
 		return values[index]

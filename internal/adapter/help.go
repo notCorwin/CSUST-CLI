@@ -20,6 +20,7 @@ func nativeUsage(args []string) []byte {
   course-selection            选课中心/跨专业选修课程
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况
+  teaching-calendar           学期教学周历
   deferred-exam-applications  缓考申请记录（按学期/课程/状态查询）
   enrollment-proof-applications 在读证明申请记录
   drop-course-applications    可退课程及退课审核状态

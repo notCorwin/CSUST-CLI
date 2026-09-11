@@ -133,6 +133,17 @@ func TestEnrollmentProofRowsKeepSemanticFields(t *testing.T) {
 	}
 }
 
+func TestTeachingCalendarRowsKeepWeekdayFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th></th><th>星期日</th><th>星期一</th><th>星期二</th><th>星期三</th><th>星期四</th><th>星期五</th><th>星期六</th><th>备注</th></tr><tr><td>1</td><td>09月06日</td><td>07</td><td>08</td><td>09</td><td>10</td><td>11</td><td>09月12日</td><td>开学</td></tr><tr><td>周历编制</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, parseErr := parseTeachingCalendarPage(document)
+	if parseErr != nil || len(items) != 1 || items[0]["week"] != "1" || items[0]["monday"] != "07" || items[0]["saturday"] != "09月12日" || items[0]["note"] != "开学" {
+		t.Fatalf("unexpected teaching calendar: %#v %v", items, parseErr)
+	}
+}
+
 func TestAcademicSelectionEntryFindsCrossMajorWindow(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>名称</th><th>操作</th></tr><tr><td>跨专业选修课补选</td><td><a href="/jsxsd/xsxk/xklc_view?jx0502zbid=abc">进入选课</a></td></tr></table>`)
 	if err != nil {
