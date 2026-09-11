@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "personal-info", "account-settings", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -51,6 +51,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 			return nil, err
 		}
 		return academicWrap(parseProfilePage(body, pageURL)), nil
+	case "personal-info", "account-settings":
+		return a.academicPersonalInfo(ctx, args[1:])
 	case "graduation-conclusion", "graduation-status":
 		body, pageURL, err := a.academicPage(ctx, "GET", "/jsxsd/bygl/bygl_ckxsList", nil, nil)
 		if err != nil {
@@ -133,6 +135,218 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 	default:
 		return nil, &siteError{Code: "invalid_argument", Message: "未知教务命令"}
 	}
+}
+
+const academicPersonalInfoPath = "/jsxsd/grsz/grsz_xggrxx.do"
+
+func (a NativeSite) academicPersonalInfo(ctx context.Context, args []string) (map[string]any, *siteError) {
+	operation := "get"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "--") {
+		operation, args = strings.ToLower(args[0]), args[1:]
+	}
+	switch operation {
+	case "get", "show":
+		body, pageURL, err := a.academicPage(ctx, "GET", academicPersonalInfoPath, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		return academicPersonalInfoSnapshot(body, pageURL, "get")
+	case "update", "save":
+		return a.academicPersonalInfoUpdate(ctx, args)
+	default:
+		return nil, &siteError{Code: "invalid_argument", Message: "personal-info 只支持 get 或 update"}
+	}
+}
+
+func academicPersonalInfoSnapshot(source, pageURL, operation string) (map[string]any, *siteError) {
+	document, parseErr := parsePage(source)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	values := academicPersonalInfoValues(document)
+	page, pageErr := pageInspect(source, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "personal-info", "operation": operation, "path": academicPersonalInfoPath,
+		"account": nullableString(values["account"]), "real_name": nullableString(values["realName"]),
+		"online_classroom": academicPersonalInfoOnlineClassroom(values["sfzczxkt"]),
+		"page_size":        nullableString(values["pageSize"]),
+		"password_protection": map[string]any{
+			"question_1_set": values["pwdQuestion1"] != "", "answer_1_set": values["pwdAnswer1"] != "",
+			"question_2_set": values["pwdQuestion2"] != "", "answer_2_set": values["pwdAnswer2"] != "",
+		},
+		"page": page,
+	}), nil
+}
+
+func academicPersonalInfoValues(document *pageNode) map[string]string {
+	values := map[string]string{}
+	for _, tag := range []string{"input", "select", "textarea"} {
+		for _, node := range document.findAll(tag) {
+			name := node.attr("name")
+			switch name {
+			case "account", "realName", "pwdQuestion1", "pwdAnswer1", "pwdQuestion2", "pwdAnswer2", "sfzczxkt", "pageSize":
+				values[name] = pageElementValue(node)
+			}
+		}
+	}
+	return values
+}
+
+func academicPersonalInfoOnlineClassroom(value string) any {
+	switch strings.TrimSpace(value) {
+	case "1":
+		return true
+	case "0":
+		return false
+	default:
+		return nil
+	}
+}
+
+func academicPersonalInfoOnlineClassroomValue(value string) (string, *siteError) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "enabled", "enable", "on", "true", "yes", "是":
+		return "1", nil
+	case "0", "disabled", "disable", "off", "false", "no", "否":
+		return "0", nil
+	default:
+		return "", &siteError{Code: "invalid_argument", Message: "--online-classroom 只能是 enabled 或 disabled"}
+	}
+}
+
+func (a NativeSite) academicPersonalInfoUpdate(ctx context.Context, args []string) (map[string]any, *siteError) {
+	allowed := map[string]bool{
+		"--real-name": true, "--page-size": true, "--online-classroom": true,
+		"--password-question-1": true, "--password-answer-1": true,
+		"--password-question-2": true, "--password-answer-2": true,
+	}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if !strings.HasPrefix(arg, "--") {
+			return nil, &siteError{Code: "invalid_argument", Message: "personal-info update 不接受位置参数: " + arg}
+		}
+		name, _, inline := strings.Cut(arg, "=")
+		if name != "--yes" && name != "--json" && !allowed[name] {
+			return nil, &siteError{Code: "invalid_argument", Message: "personal-info update 不支持参数: " + name}
+		}
+		if name != "--yes" && name != "--json" && !inline {
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return nil, &siteError{Code: "invalid_argument", Message: name + " 缺少参数值"}
+			}
+			index++
+		}
+	}
+	if !flagPresent(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "修改个人资料会改变账号设置，请加 --yes"}
+	}
+	changed := make([]string, 0, len(allowed))
+	updates := map[string]string{}
+	setUpdate := func(flag, field string) {
+		if flagPresent(args, flag) {
+			updates[field] = flagValue(args, flag)
+			changed = append(changed, strings.TrimPrefix(flag, "--"))
+		}
+	}
+	setUpdate("--real-name", "realName")
+	setUpdate("--page-size", "pageSize")
+	setUpdate("--password-question-1", "pwdQuestion1")
+	setUpdate("--password-answer-1", "pwdAnswer1")
+	setUpdate("--password-question-2", "pwdQuestion2")
+	setUpdate("--password-answer-2", "pwdAnswer2")
+	if flagPresent(args, "--online-classroom") {
+		value, valueErr := academicPersonalInfoOnlineClassroomValue(flagValue(args, "--online-classroom"))
+		if valueErr != nil {
+			return nil, valueErr
+		}
+		updates["sfzczxkt"] = value
+		changed = append(changed, "online-classroom")
+	}
+	if len(changed) == 0 {
+		return nil, &siteError{Code: "invalid_argument", Message: "至少提供一个需要修改的个人资料参数"}
+	}
+	queryBody, queryURL, queryErr := a.academicPage(ctx, "GET", academicPersonalInfoPath, nil, nil)
+	if queryErr != nil {
+		return nil, queryErr
+	}
+	queryDocument, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	current := academicPersonalInfoValues(queryDocument)
+	for field, value := range current {
+		if _, exists := updates[field]; !exists {
+			updates[field] = value
+		}
+	}
+	if updates["realName"] == "" || len([]rune(updates["realName"])) > 32 {
+		return nil, &siteError{Code: "invalid_argument", Message: "--real-name 不能为空且不能超过 32 个字符"}
+	}
+	pageSize, sizeErr := strconv.Atoi(updates["pageSize"])
+	if sizeErr != nil || pageSize < 1 || pageSize > 260 {
+		return nil, &siteError{Code: "invalid_argument", Message: "--page-size 必须是 1 到 260 的整数"}
+	}
+	for _, field := range []string{"pwdQuestion1", "pwdAnswer1", "pwdQuestion2", "pwdAnswer2"} {
+		if len([]rune(updates[field])) > 50 {
+			return nil, &siteError{Code: "invalid_argument", Message: field + " 不能超过 50 个字符"}
+		}
+	}
+	data := []pair{
+		{"realName", updates["realName"]}, {"pwdQuestion1", updates["pwdQuestion1"]}, {"pwdAnswer1", updates["pwdAnswer1"]},
+		{"pwdQuestion2", updates["pwdQuestion2"]}, {"pwdAnswer2", updates["pwdAnswer2"]}, {"sfzczxkt", updates["sfzczxkt"]},
+		{"pageSize", updates["pageSize"]}, {"edit", "1"},
+	}
+	result, submitErr := a.executeAcademicRequestWithRecovery(ctx, siteRequest{
+		Service: "academic", Path: academicPersonalInfoPath, Method: "POST", CookieFile: academicCookiePath(), Data: data,
+		Headers: []pair{{"Referer", queryURL}}, RequireLogin: true, Yes: true,
+	})
+	if submitErr != nil {
+		return nil, submitErr
+	}
+	responseBody, _, bodyErr := loginBody(result)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	success, known := pageFeedback(responseBody, "text/html")
+	if known && !success {
+		return nil, &siteError{Code: "mutation_rejected", Message: "个人资料保存被服务端拒绝", Details: map[string]any{"submitted": true, "confirmed": false, "changed_fields": changed}}
+	}
+	if success {
+		return academicWrap(map[string]any{
+			"kind": "personal-info-update", "operation": "update", "path": academicPersonalInfoPath,
+			"changed_fields": changed, "submitted": true, "confirmed": true, "evidence": "response-success",
+		}), nil
+	}
+	verifyBody, _, verifyErr := a.academicPage(ctx, "GET", academicPersonalInfoPath, nil, nil)
+	if verifyErr != nil {
+		return nil, verifyErr
+	}
+	verifyDocument, verifyParseErr := parsePage(verifyBody)
+	if verifyParseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: verifyParseErr.Error()}
+	}
+	verified := true
+	for field, value := range updates {
+		if currentValue, ok := verifyPersonalInfoValue(verifyDocument, field); ok && currentValue != value {
+			verified = false
+			break
+		}
+	}
+	if !verified {
+		return nil, &siteError{Code: "mutation_unverified", Message: "个人资料已提交但回读结果不匹配", Details: map[string]any{"submitted": true, "confirmed": false, "changed_fields": changed}}
+	}
+	return academicWrap(map[string]any{
+		"kind": "personal-info-update", "operation": "update", "path": academicPersonalInfoPath,
+		"changed_fields": changed, "submitted": true, "confirmed": true, "evidence": "readback",
+	}), nil
+}
+
+func verifyPersonalInfoValue(document *pageNode, field string) (string, bool) {
+	values := academicPersonalInfoValues(document)
+	value, ok := values[field]
+	return value, ok
 }
 
 func (a NativeSite) academicCourseSelection(ctx context.Context, args []string) (map[string]any, *siteError) {

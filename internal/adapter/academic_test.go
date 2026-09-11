@@ -128,6 +128,34 @@ func TestProfileSemanticFieldsPreferExplicitLabelValues(t *testing.T) {
 	}
 }
 
+func TestAcademicPersonalInfoUpdateUsesSemanticFieldsAndSuccessFeedback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch request.Method {
+		case http.MethodGet:
+			_, _ = writer.Write([]byte(`<form><input name="account" value="S001"><input name="realName" value="张三"><input name="pwdQuestion1" value="旧问题"><input name="pwdAnswer1" value="旧答案"><input name="pwdQuestion2" value=""><input name="pwdAnswer2" value=""><select name="sfzczxkt"><option value="1" selected>是</option><option value="0">否</option></select><input name="pageSize" value="200"></form>`))
+		case http.MethodPost:
+			if err := request.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if request.Form.Get("realName") != "李四" || request.Form.Get("pageSize") != "120" || request.Form.Get("sfzczxkt") != "0" || request.Form.Get("pwdQuestion1") != "旧问题" || request.Form.Get("edit") != "1" {
+				t.Fatalf("unexpected personal-info update form: %#v", request.Form)
+			}
+			_, _ = writer.Write([]byte(`<script>alert('保存成功')</script>`))
+		default:
+			t.Fatalf("unexpected personal-info method: %s", request.Method)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicPersonalInfo(context.Background(), []string{"update", "--real-name", "李四", "--page-size", "120", "--online-classroom", "disabled", "--yes"})
+	if err != nil || result["submitted"] != true || result["confirmed"] != true || result["evidence"] != "response-success" || result["kind"] != "personal-info-update" {
+		t.Fatalf("unexpected personal-info update: %#v %v", result, err)
+	}
+}
+
 func TestGraduationInfoCheckKeepsVisibleFieldsAndStatus(t *testing.T) {
 	document, err := parsePage(`<table><tr><td>所属学院:</td><td>交通学院</td><td>所属专业:</td><td>道路桥梁与渡河工程</td></tr><tr><td>所在班级:</td><td>道桥渡24-1</td><td>培养层次:</td><td>普通本科</td></tr><tr><td>学制:</td><td>4</td><td>性别:</td><td>男</td></tr><tr><td>证件类型:</td><td>身份证</td><td>证件号:</td><td></td></tr><tr><td>学号:</td><td>202401150107</td><td>姓名:</td><td></td></tr><tr><td></td><td>注：毕业生信息核对时间未到！</td></tr></table>`)
 	if err != nil {

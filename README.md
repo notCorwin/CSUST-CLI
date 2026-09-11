@@ -70,6 +70,8 @@ password=密码
 ./csust grades --term 2025-2026-1 --json
 ./csust grades detail --term 2025-2026-1 --course-name 课程名称 --json
 ./csust profile --json
+./csust personal-info --json
+./csust personal-info update --real-name 新姓名 --page-size 200 --yes --json
 ./csust graduation-conclusion --json
 ./csust graduation-info-check --json
 ./csust exams --json
@@ -107,6 +109,7 @@ password=密码
 | --- | --- |
 | `login` / `logout` | 教务统一认证或旧登录会话 |
 | `schedule`, `grades`, `profile`, `exams`, `in-class-exams` | 教务查询；个人资料保留原始字段并提供 `semantic` 字段，成绩包含学分/绩点汇总和成绩构成详情 |
+| `personal-info` | 查询或更新个人资料设置；更新返回服务端反馈或回读确认 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
 | `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |

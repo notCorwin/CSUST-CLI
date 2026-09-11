@@ -14,6 +14,7 @@ func nativeUsage(args []string) []byte {
 命令：
   login/logout                 教务会话
   schedule/grades/profile     教务查询
+  personal-info               个人资料设置（更新需要 --yes）
   graduation-conclusion       毕业结论查询
   graduation-info-check       毕业生信息核对
   exams/in-class-exams       考试安排与随堂考查询
