@@ -149,6 +149,7 @@ password=密码
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
 | `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务及学院业务查询 |
+| `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
@@ -269,6 +270,10 @@ password=密码
 ./csust transport-mobile finances --keyword 科研 --json
 ./csust transport-mobile notices --keyword 评审 --json
 ./csust transport-mobile vacations --page-size 20 --json
+# 图书馆远程资源：公开数据库目录、关键词/学科筛选和详情
+./csust library-remote databases --keyword 知网 --sort visits --json
+./csust library-remote databases --subject 工学 --json
+./csust library-remote database --id 1 --json
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json

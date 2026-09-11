@@ -53,6 +53,7 @@ var businessServices = []businessService{
 	{"journal-highways", "公路与汽运期刊", "journal-highways", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
 	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines /api/problem, /api/contest, /api/submissions and /api/submission"},
 	{"library-personal", "图书馆个人中心", "library-personal", "图书馆", "medium", "book.csust.edu.cn redirects ClientWeb personal center into authserver CAS"},
+	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data and exposes student/company modules"},
 	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "linked external page returned title 统招生学籍查询_长沙理工大学档案馆 查询预约系统"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
@@ -79,7 +80,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "continuing-education", "virtual-lab", "library-center", "library-remote", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -138,6 +139,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeLearning(ctx, args[1:], args[0])
 	case "transport-mobile":
 		return a.executeTransportMobile(ctx, args[1:])
+	case "library-remote":
+		return a.executeLibraryRemote(ctx, args[1:])
 	case "continuing-education":
 		return a.executeContinuingEducation(ctx, args[1:])
 	case "virtual-lab":
@@ -353,6 +356,14 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "finances":
 			add("--keyword", "--page", "--page-size")
 		case "logout":
+		}
+	case "library-remote":
+		common()
+		switch operation {
+		case "databases", "list":
+			add("--keyword", "--letter", "--subject", "--sort")
+		case "database", "detail":
+			add("--id")
 		}
 	case "ehall":
 		common()
