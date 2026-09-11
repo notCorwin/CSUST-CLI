@@ -26,6 +26,7 @@ func nativeUsage(args []string) []byte {
   exempt-exam-applications    免考申请记录（按学期/课程/考试方式查询）
   graduate-exam-registration  毕业生插考报名状态/记录查询
   grade-recognition-applications 成绩认定申请记录
+  grade-confirmation           成绩确认时间和状态
   enrollment-proof-applications 在读证明申请记录
   enrollment-status-changes  学籍异动历史
   drop-course-applications    可退课程及退课审核状态

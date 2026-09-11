@@ -83,6 +83,7 @@ password=密码
 ./csust deferred-exam-registration --term 2026-2027-1 --exam-project 开学补考 --campus yuntang --json
 ./csust graduate-exam-registration --term 2026-2027-1 --exam-project 开学补考 --campus yuntang --json
 ./csust grade-recognition-applications --json
+./csust grade-confirmation --json
 ./csust enrollment-status-changes --json
 ./csust drop-course-applications --json
 ./csust student-status-changes --json
@@ -116,6 +117,7 @@ password=密码
 | `deferred-exam-registration` | 查询缓考报名窗口、资格状态和已有记录 |
 | `graduate-exam-registration` | 查询毕业生插考项目、报名资格状态和已有记录 |
 | `grade-recognition-applications` | 查询成绩认定申请的课程、原成绩和审核状态 |
+| `grade-confirmation` | 查询成绩确认当前时间窗口和状态 |
 | `enrollment-status-changes` | 查询原/新学籍、班级、在校状态和异动终审状态 |
 | `drop-course-applications` | 可退课程、课程属性和退课审核状态 |
 | `student-status-changes` | 个人信息修改历史、审核状态和修改说明 |

@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -87,6 +87,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicGraduateExamRegistration(ctx, args[1:])
 	case "grade-recognition-applications", "grade-recognition-application", "grade-review-applications":
 		return a.academicStructuredPageWithField(ctx, args[1:], "grade-recognition-applications", "/jsxsd/kscj/cjfh_list", academicGradeRecognitionField)
+	case "grade-confirmation", "grade-confirmation-status":
+		return a.academicGradeConfirmation(ctx)
 	case "enrollment-proof-applications", "enrollment-proof-application":
 		return a.academicStructuredPageWithField(ctx, args[1:], "enrollment-proof-applications", "/jsxsd/kscj/xjzdzmsq_query", academicEnrollmentProofField)
 	case "enrollment-status-changes", "academic-status-changes", "status-change-history":
@@ -515,6 +517,33 @@ func (a NativeSite) academicDeferredExamRegistration(ctx context.Context, args [
 		"kind": "deferred-exam-registration", "path": listPath, "term": nullableString(term),
 		"exam_project": nullableString(examProject), "campus": nullableString(campus),
 		"status_message": nullableString(statusMessage), "items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func (a NativeSite) academicGradeConfirmation(ctx context.Context) (map[string]any, *siteError) {
+	const path = "/jsxsd/kscj/cjqr_list"
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	text := strings.TrimSpace(pageDisplayText(document))
+	statusMessage := ""
+	for _, marker := range []string{"当前学年学期不在时间范围内", "成绩确认时间未到"} {
+		if index := strings.Index(text, marker); index >= 0 {
+			statusMessage = strings.TrimSpace(text[index:])
+			break
+		}
+	}
+	return academicWrap(map[string]any{
+		"kind": "grade-confirmation", "path": path, "status_message": nullableString(statusMessage), "text": text, "page": page,
 	}), nil
 }
 

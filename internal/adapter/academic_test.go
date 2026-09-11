@@ -304,6 +304,17 @@ func TestAcademicGradeRecognitionRowsKeepApplicationFields(t *testing.T) {
 	}
 }
 
+func TestAcademicGradeConfirmationKeepsStatusMessage(t *testing.T) {
+	document, err := parsePage(`<html><body><div>成绩认定</div><div>成绩确认</div><div>当前学年学期不在时间范围内</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.TrimSpace(pageDisplayText(document))
+	if index := strings.Index(text, "当前学年学期不在时间范围内"); index < 0 || strings.TrimSpace(text[index:]) != "当前学年学期不在时间范围内" {
+		t.Fatalf("unexpected grade confirmation status: %q", text)
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
