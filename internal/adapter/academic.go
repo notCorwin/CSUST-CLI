@@ -337,18 +337,20 @@ func academicRetakeRows(document *pageNode, keyword string) []map[string]any {
 		rows = rows[1:]
 	}
 	items := make([]map[string]any, 0)
+	lastItem := -1
 	for _, row := range rows {
 		values := rowValues(row)
 		text := strings.TrimSpace(pageDisplayText(row))
 		if len(values) < len(header) {
-			if len(items) > 0 {
+			if lastItem >= 0 {
 				if match := retakeCourseIDPattern.FindStringSubmatch(text); len(match) > 1 {
-					items[len(items)-1]["course_id"] = match[1]
+					items[lastItem]["course_id"] = match[1]
 				}
 			}
 			continue
 		}
 		if allEmpty(values) || academicNoDataRow(text) || (keyword != "" && !strings.Contains(strings.ToLower(text), strings.ToLower(keyword))) {
+			lastItem = -1
 			continue
 		}
 		item := map[string]any{"index": len(items) + 1, "cells": values, "text": text}
@@ -358,6 +360,7 @@ func academicRetakeRows(document *pageNode, keyword string) []map[string]any {
 			}
 		}
 		items = append(items, item)
+		lastItem = len(items) - 1
 	}
 	return items
 }
