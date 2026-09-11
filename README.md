@@ -80,6 +80,7 @@ password=密码
 ./csust enrollment-proof-applications --json
 ./csust teaching-calendar --term 2026-2027-1 --json
 ./csust exempt-exam-applications --term 2026-2027-1 --assessment-method exam --json
+./csust graduate-exam-registration --term 2026-2027-1 --exam-project 开学补考 --campus yuntang --json
 ./csust enrollment-status-changes --json
 ./csust drop-course-applications --json
 ./csust student-status-changes --json
@@ -110,6 +111,7 @@ password=密码
 | `enrollment-proof-applications` | 查询学生在读证明申请记录 |
 | `teaching-calendar` | 查询指定学期的教学周历 |
 | `exempt-exam-applications` | 按学期、课程和考试方式查询免考申请记录 |
+| `graduate-exam-registration` | 查询毕业生插考项目、报名资格状态和已有记录 |
 | `enrollment-status-changes` | 查询原/新学籍、班级、在校状态和异动终审状态 |
 | `drop-course-applications` | 可退课程、课程属性和退课审核状态 |
 | `student-status-changes` | 个人信息修改历史、审核状态和修改说明 |

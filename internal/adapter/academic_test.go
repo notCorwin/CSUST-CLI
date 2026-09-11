@@ -273,6 +273,15 @@ func TestAcademicEnrollmentStatusChangeRowsKeepBeforeAndAfterFields(t *testing.T
 	}
 }
 
+func TestGraduateExamCampusUsesSemanticValues(t *testing.T) {
+	if name, value, err := graduateExamCampus("yuntang"); err != nil || name != "云塘校区" || value != "1" {
+		t.Fatalf("unexpected yuntang campus: %q %q %v", name, value, err)
+	}
+	if _, _, err := graduateExamCampus("unknown"); err == nil || err.Code != "invalid_argument" {
+		t.Fatalf("invalid campus was accepted: %#v", err)
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")

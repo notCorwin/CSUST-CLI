@@ -23,6 +23,7 @@ func nativeUsage(args []string) []byte {
   teaching-calendar           学期教学周历
   deferred-exam-applications  缓考申请记录（按学期/课程/状态查询）
   exempt-exam-applications    免考申请记录（按学期/课程/考试方式查询）
+  graduate-exam-registration  毕业生插考报名状态/记录查询
   enrollment-proof-applications 在读证明申请记录
   enrollment-status-changes  学籍异动历史
   drop-course-applications    可退课程及退课审核状态

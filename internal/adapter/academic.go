@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "exempt-exam-applications", "exempt-exam-application", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -81,6 +81,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicDeferredExamApplications(ctx, args[1:])
 	case "exempt-exam-applications", "exempt-exam-application":
 		return a.academicExemptExamApplications(ctx, args[1:])
+	case "graduate-exam-registration":
+		return a.academicGraduateExamRegistration(ctx, args[1:])
 	case "enrollment-proof-applications", "enrollment-proof-application":
 		return a.academicStructuredPageWithField(ctx, args[1:], "enrollment-proof-applications", "/jsxsd/kscj/xjzdzmsq_query", academicEnrollmentProofField)
 	case "enrollment-status-changes", "academic-status-changes", "status-change-history":
@@ -410,6 +412,85 @@ func exemptExamAssessmentMethod(value string) (string, string, *siteError) {
 		return "不考试", "8", nil
 	default:
 		return "", "", &siteError{Code: "invalid_argument", Message: "--assessment-method 只能是 exam、other、assessment、no-exam 或 all"}
+	}
+}
+
+func (a NativeSite) academicGraduateExamRegistration(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const queryPath = "/jsxsd/xsks/bysckbm_query"
+	const listPath = "/jsxsd/xsks/bysckbm_list"
+	queryBody, queryURL, err := a.academicPage(ctx, "GET", queryPath, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	queryDocument, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	term := strings.TrimSpace(flagValue(args, "--term"))
+	if term == "" {
+		term = selectedOptionPage(queryDocument, "xnxqid")
+	}
+	examProject := strings.TrimSpace(flagValue(args, "--exam-project"))
+	examProjectID := ""
+	if examProject != "" {
+		var optionFound bool
+		for _, option := range pageOptions(queryDocument, "kw0401id") {
+			label := strings.TrimSpace(fmt.Sprint(option["label"]))
+			value := strings.TrimSpace(fmt.Sprint(option["value"]))
+			if label == examProject || strings.Contains(strings.ToLower(label), strings.ToLower(examProject)) {
+				if optionFound {
+					return nil, &siteError{Code: "ambiguous_target", Message: "毕业生插考项目名称对应多个项目，请使用完整名称", Details: map[string]any{"exam_project": examProject}}
+				}
+				examProject, examProjectID, optionFound = label, value, true
+			}
+		}
+		if !optionFound {
+			return nil, &siteError{Code: "not_found", Message: "当前页面找不到对应毕业生插考项目", Details: map[string]any{"exam_project": examProject, "choices": pageOptions(queryDocument, "kw0401id")}}
+		}
+	}
+	campus, campusID, campusErr := graduateExamCampus(flagValue(args, "--campus"))
+	if campusErr != nil {
+		return nil, campusErr
+	}
+	data := []pair{{"xnxqid", term}, {"kw0401id", examProjectID}, {"qssj", strings.TrimSpace(flagValue(args, "--start"))}, {"jssj", strings.TrimSpace(flagValue(args, "--end"))}, {"xq", campusID}}
+	body, pageURL, err := a.academicPage(ctx, "POST", listPath, data, []pair{{"Referer", queryURL}})
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	items := academicStructuredRowsWithLinks(document, "", academicGraduateExamField, pageURL)
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	statusMessage := ""
+	if messages, ok := page["messages"].([]string); ok && len(messages) > 0 {
+		statusMessage = messages[0]
+	}
+	if len(items) == 0 && statusMessage == "" && len(document.findAll("table")) == 0 && page["kind"] == "html" {
+		return nil, &siteError{Code: "parse_error", Message: "毕业生插考查询未返回记录或状态消息；请使用 web get 查看页面结构"}
+	}
+	return academicWrap(map[string]any{
+		"kind": "graduate-exam-registration", "path": listPath, "term": nullableString(term),
+		"exam_project": nullableString(examProject), "campus": nullableString(campus),
+		"start": nullableString(strings.TrimSpace(flagValue(args, "--start"))), "end": nullableString(strings.TrimSpace(flagValue(args, "--end"))),
+		"status_message": nullableString(statusMessage), "items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func graduateExamCampus(value string) (string, string, *siteError) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "all", "全部":
+		return "", "", nil
+	case "yuntang", "云塘", "云塘校区", "1":
+		return "云塘校区", "1", nil
+	case "jinpenling", "金盆岭", "金盆岭校区", "2":
+		return "金盆岭校区", "2", nil
+	default:
+		return "", "", &siteError{Code: "invalid_argument", Message: "--campus 只能是 yuntang、jinpenling 或 all"}
 	}
 }
 
@@ -1284,6 +1365,34 @@ func academicEnrollmentStatusChangeField(value string) string {
 		return "final_review_status"
 	case value == "详情":
 		return "detail"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicGraduateExamField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "学年学期"):
+		return "term"
+	case strings.Contains(value, "课程编号") || strings.Contains(value, "课程代码"):
+		return "course_id"
+	case strings.Contains(value, "课程名称") || value == "课程":
+		return "course"
+	case strings.Contains(value, "考试性质"):
+		return "exam_nature"
+	case strings.Contains(value, "考试方式"):
+		return "assessment_method"
+	case strings.Contains(value, "考试时间") || strings.Contains(value, "考试日期"):
+		return "exam_time"
+	case strings.Contains(value, "考场") || strings.Contains(value, "教室"):
+		return "room"
+	case strings.Contains(value, "校区"):
+		return "campus"
+	case strings.Contains(value, "报名状态") || strings.Contains(value, "审核状态"):
+		return "status"
+	case value == "操作":
+		return "action"
 	default:
 		return academicPageField(value)
 	}
