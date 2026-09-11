@@ -16,7 +16,7 @@
 - VPN：登录、状态、退出、工作台应用/分组、消息、审批、页面/控件/API 目录、文件资源和已映射 API 调用。
 - 网络教学与教学质量保障：课程、课程详情、页面请求、教学评价和页面目录。
 - eHall：当前账号可用服务目录、服务详情、权限、消息、企业邮箱状态、新闻和服务周期提醒。
-- 其他业务服务：录取通知书、期刊、云就业、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、实验室仪器、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
+- 其他业务服务：录取通知书、期刊、云就业、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、实验室仪器、人才招聘、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
 - 全站适配：对 `csust.edu.cn` 根域名和子域名提供结构化页面、表单、动作和通用请求能力。
 
 业务命令使用语义参数；需要保留网页特有能力时，再使用 `web`、`teaching`、`quality`、`vpn` 或 `site` 的通用映射命令。服务目录和页面/API 目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
@@ -145,6 +145,7 @@ password=密码
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
 | `equipment` | 实验室仪器列表、筛选字典、列定义和详情 |
+| `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
@@ -243,6 +244,12 @@ password=密码
 ./csust equipment filters --json
 ./csust equipment list --keyword 压力 --department-id 118 --page-size 20 --json
 ./csust equipment detail --id 20180390SB --json
+# 人才招聘：频道、公告、单位筛选、岗位和岗位详情
+./csust recruitment home --json
+./csust recruitment notices --channel faculty --page 1 --json
+./csust recruitment filters --channel postdoc --json
+./csust recruitment positions --channel faculty --unit 交通学院 --keyword 教学科研 --json
+./csust recruitment position --channel faculty --id POSITION_ID --json
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json
