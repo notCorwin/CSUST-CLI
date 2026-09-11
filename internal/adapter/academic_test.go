@@ -315,6 +315,17 @@ func TestAcademicGradeConfirmationKeepsStatusMessage(t *testing.T) {
 	}
 }
 
+func TestAcademicClassChangeRowsKeepBeforeAndAfterSchedule(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>课程编号</th><th>课程名称</th><th>上课教师</th><th>上课班级</th><th>课程开课院系</th><th>调课类型</th><th>上课周次</th><th>调前时间</th><th>调前地点</th><th>调整周次</th><th>调后周次</th><th>调后时间</th><th>调后地点</th><th>调课方式</th><th>状态</th></tr><tr><td>1</td><td>CS001</td><td>数据结构</td><td>张老师</td><td>计科24-1</td><td>计算机学院</td><td>调课</td><td>1-8</td><td>周一1-2</td><td>A101</td><td>4</td><td>4</td><td>周二3-4</td><td>B202</td><td>系统调整</td><td>有效</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicClassChangeField)
+	if len(rows) != 1 || rows[0]["course_id"] != "CS001" || rows[0]["original_time"] != "周一1-2" || rows[0]["original_room"] != "A101" || rows[0]["new_time"] != "周二3-4" || rows[0]["new_room"] != "B202" || rows[0]["status"] != "有效" {
+		t.Fatalf("unexpected class change row: %#v", rows)
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
