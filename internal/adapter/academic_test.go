@@ -197,3 +197,14 @@ func TestAcademicStatusWarningRowsKeepDecisionFields(t *testing.T) {
 		t.Fatalf("unexpected academic warning row: %#v", rows)
 	}
 }
+
+func TestAcademicAnnouncementRowsKeepDetailPath(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>标题</th><th>类别</th><th>发送人</th><th>发送时间</th><th>操作</th></tr><tr><td>1</td><td>选课通知</td><td>通知公告</td><td>教务处</td><td>2026-09-11</td><td><a href="javascript:void(0);" onclick="openWindow('/jsxsd/ggly/ggly_show?ggid=ABC',500,400)">查看</a></td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRowsWithLinks(document, "", academicAnnouncementField, "http://xk.csust.edu.cn/jsxsd/ggly/ysgg_query")
+	if len(rows) != 1 || rows[0]["title"] != "选课通知" || rows[0]["category"] != "通知公告" || rows[0]["sender"] != "教务处" || rows[0]["detail_path"] != "/jsxsd/ggly/ggly_show?ggid=ABC" {
+		t.Fatalf("unexpected announcement row: %#v", rows)
+	}
+}

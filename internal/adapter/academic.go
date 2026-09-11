@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -73,6 +73,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credit-applications", "/jsxsd/pyfa/cxxfsb_query", academicSecondClassCreditField)
 	case "status-warnings", "academic-warnings":
 		return a.academicStructuredPageWithField(ctx, args[1:], "status-warnings", "/jsxsd/xsxj/xsyjxx.do", academicStatusWarningField)
+	case "announcements", "notices", "received-announcements":
+		return a.academicAnnouncements(ctx, args[1:])
 	case "classroom-request", "room-request":
 		return a.academicStructuredPage(ctx, args[1:], "classroom-request", "/jsxsd/kbxx/jsjy_query")
 	case "minor", "minor-registration":
@@ -235,6 +237,31 @@ func (a NativeSite) academicStructuredPageWithField(ctx context.Context, args []
 	}
 	return academicWrap(map[string]any{
 		"kind": kind, "path": path, "keyword": nullableString(keyword),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func (a NativeSite) academicAnnouncements(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const path = "/jsxsd/ggly/ysgg_query"
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicStructuredRowsWithLinks(document, keyword, academicAnnouncementField, pageURL)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "公告页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "announcements", "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
 }
@@ -422,6 +449,10 @@ func trainingProgressCategory(values []string) string {
 }
 
 func academicStructuredRows(document *pageNode, keyword string, field func(string) string) []map[string]any {
+	return academicStructuredRowsWithLinks(document, keyword, field, "")
+}
+
+func academicStructuredRowsWithLinks(document *pageNode, keyword string, field func(string) string, pageURL string) []map[string]any {
 	table := (*pageNode)(nil)
 	score := 0
 	for _, candidate := range document.findAll("table") {
@@ -467,6 +498,35 @@ func academicStructuredRows(document *pageNode, keyword string, field func(strin
 			for index, title := range header {
 				if name := field(title); name != "" && index < len(values) {
 					item[name] = values[index]
+				}
+			}
+		}
+		if pageURL != "" {
+			for _, link := range row.findAll("a") {
+				href := link.attr("href")
+				if href == "" {
+					continue
+				}
+				candidates := []string{href}
+				if strings.HasPrefix(strings.ToLower(href), "javascript:") {
+					candidates = candidates[:0]
+					for _, source := range []string{href, link.attr("onclick")} {
+						for _, match := range pageEndpointLiteral.FindAllStringSubmatch(source, -1) {
+							if len(match) > 1 {
+								candidates = append(candidates, match[1])
+							}
+						}
+					}
+				}
+				for _, candidate := range candidates {
+					target := resolvePageURL(pageURL, candidate)
+					if path, pathErr := academicPath(target); pathErr == nil {
+						item["detail_path"] = path
+						break
+					}
+				}
+				if item["detail_path"] != nil {
+					break
 				}
 			}
 		}
@@ -584,6 +644,24 @@ func academicStatusWarningField(value string) string {
 		return "object"
 	case strings.Contains(value, "实际值"):
 		return "actual_value"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicAnnouncementField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "标题"):
+		return "title"
+	case strings.Contains(value, "类别"):
+		return "category"
+	case strings.Contains(value, "发送人"):
+		return "sender"
+	case strings.Contains(value, "发送时间"):
+		return "sent_at"
+	case value == "操作":
+		return "action"
 	default:
 		return academicPageField(value)
 	}
