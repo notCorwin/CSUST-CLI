@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -75,6 +75,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicStructuredPageWithField(ctx, args[1:], "status-warnings", "/jsxsd/xsxj/xsyjxx.do", academicStatusWarningField)
 	case "announcements", "notices", "received-announcements":
 		return a.academicAnnouncements(ctx, args[1:])
+	case "retake-courses", "retake-registration":
+		return a.academicRetakeCourses(ctx, args[1:])
 	case "classroom-request", "room-request":
 		return a.academicStructuredPage(ctx, args[1:], "classroom-request", "/jsxsd/kbxx/jsjy_query")
 	case "minor", "minor-registration":
@@ -264,6 +266,75 @@ func (a NativeSite) academicAnnouncements(ctx context.Context, args []string) (m
 		"kind": "announcements", "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+var retakeCourseIDPattern = regexp.MustCompile(`课程编号\s*[:：]\s*([A-Za-z0-9_-]+)`)
+
+func (a NativeSite) academicRetakeCourses(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const path = "/jsxsd/kscj/cxbmxk_query"
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicRetakeRows(document, keyword)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "重修报名页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "retake-courses", "path": path, "keyword": nullableString(keyword),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func academicRetakeRows(document *pageNode, keyword string) []map[string]any {
+	var rows []*pageNode
+	for _, table := range document.findAll("table") {
+		candidate := directTableRows(table)
+		if len(candidate) > 0 && containsValue(rowValues(candidate[0]), "重修报名类别") {
+			rows = candidate
+			break
+		}
+	}
+	if len(rows) == 0 {
+		return []map[string]any{}
+	}
+	header := rowValues(rows[0])
+	if cells := directCells(rows[0]); len(cells) > 0 && cells[0].tag == "th" {
+		rows = rows[1:]
+	}
+	items := make([]map[string]any, 0)
+	for _, row := range rows {
+		values := rowValues(row)
+		text := strings.TrimSpace(pageDisplayText(row))
+		if len(values) < len(header) {
+			if len(items) > 0 {
+				if match := retakeCourseIDPattern.FindStringSubmatch(text); len(match) > 1 {
+					items[len(items)-1]["course_id"] = match[1]
+				}
+			}
+			continue
+		}
+		if allEmpty(values) || academicNoDataRow(text) || (keyword != "" && !strings.Contains(strings.ToLower(text), strings.ToLower(keyword))) {
+			continue
+		}
+		item := map[string]any{"index": len(items) + 1, "cells": values, "text": text}
+		for index, title := range header {
+			if name := academicRetakeField(title); name != "" && index < len(values) {
+				item[name] = values[index]
+			}
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func (a NativeSite) academicTrainingPlan(ctx context.Context, args []string) (map[string]any, *siteError) {
@@ -664,6 +735,52 @@ func academicAnnouncementField(value string) string {
 		return "action"
 	default:
 		return academicPageField(value)
+	}
+}
+
+func academicRetakeField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "是否报名"):
+		return "enrolled"
+	case strings.Contains(value, "上课院审"):
+		return "class_review"
+	case strings.Contains(value, "开课院审"):
+		return "course_review"
+	case strings.Contains(value, "取得资格"):
+		return "eligible"
+	case value == "学年学期":
+		return "term"
+	case value == "开课学期":
+		return "course_term"
+	case value == "课程名称":
+		return "course"
+	case value == "学时":
+		return "hours"
+	case value == "学分":
+		return "credit"
+	case value == "最好成绩":
+		return "best_score"
+	case strings.Contains(value, "替代课程编号"):
+		return "substitute_course_id"
+	case strings.Contains(value, "替代课程名称"):
+		return "substitute_course"
+	case strings.Contains(value, "替代课程学时"):
+		return "substitute_hours"
+	case strings.Contains(value, "替代课程学分"):
+		return "substitute_credit"
+	case strings.Contains(value, "是否选课"):
+		return "selected"
+	case strings.Contains(value, "是否收费"):
+		return "fee_required"
+	case strings.Contains(value, "是否缴费"):
+		return "paid"
+	case strings.Contains(value, "重修报名类别"):
+		return "registration_type"
+	case value == "操作":
+		return "action"
+	default:
+		return ""
 	}
 }
 

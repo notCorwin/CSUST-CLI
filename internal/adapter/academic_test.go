@@ -208,3 +208,14 @@ func TestAcademicAnnouncementRowsKeepDetailPath(t *testing.T) {
 		t.Fatalf("unexpected announcement row: %#v", rows)
 	}
 }
+
+func TestAcademicRetakeRowsKeepEligibilityAndCourseID(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>是否报名</th><th>上课院审</th><th>开课院审</th><th>取得资格</th><th>学年学期</th><th>开课学期</th><th>课程名称</th><th>学时</th><th>学分</th><th>最好成绩</th><th>替代课程编号</th><th>替代课程名称</th><th>替代课程学时</th><th>替代课程学分</th><th>是否选课</th><th>是否收费</th><th>是否缴费</th><th>重修报名类别</th><th>操作</th></tr><tr><td>1</td><td>×</td><td>√</td><td>√</td><td>×</td><td>2026-2027-1</td><td>2025-2026-1</td><td>线性代数</td><td>40</td><td>2.5</td><td>46</td><td>×</td><td>×</td><td>×</td><td>×</td><td>√</td><td>×</td><td>×</td><td>必选</td><td>+</td></tr><tr><td colspan="20">课程编号:0701001215; 考试性质:重修一</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicRetakeRows(document, "")
+	if len(rows) != 1 || rows[0]["course"] != "线性代数" || rows[0]["eligible"] != "×" || rows[0]["best_score"] != "46" || rows[0]["registration_type"] != "必选" || rows[0]["course_id"] != "0701001215" {
+		t.Fatalf("unexpected retake row: %#v", rows)
+	}
+}
