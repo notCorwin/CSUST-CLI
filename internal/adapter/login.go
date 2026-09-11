@@ -321,11 +321,29 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, password string, options loginOptions) (map[string]any, *siteError) {
 	cookiePath := academicCookiePath()
 	root := *base
-	root.Path = "/jsxsd/"
+	root.Path = "/"
 	root.RawQuery = ""
 	root.Fragment = ""
 	if _, err := a.loginHTTP(ctx, siteRequest{Target: &root, SessionTarget: &root, CookieFile: cookiePath, Method: "GET", ReadOnly: true, Yes: true}); err != nil {
 		return nil, err
+	}
+	seedTarget := root
+	seedTarget.Path = "/Logon.do"
+	seedQuery := seedTarget.Query()
+	seedQuery.Set("method", "logon")
+	seedQuery.Set("flag", "sess")
+	seedTarget.RawQuery = seedQuery.Encode()
+	seed, seedErr := a.loginHTTP(ctx, siteRequest{Target: &seedTarget, SessionTarget: &root, CookieFile: cookiePath, Method: "POST", Data: []pair{}, ReadOnly: true, Yes: true})
+	if seedErr != nil {
+		return nil, seedErr
+	}
+	seedBody, _, seedBodyErr := loginBody(seed)
+	if seedBodyErr != nil {
+		return nil, seedBodyErr
+	}
+	encoded, encodedErr := generateEncodedGo(account, password, strings.TrimSpace(seedBody))
+	if encodedErr != nil {
+		return nil, encodedErr
 	}
 	path, fetchErr := a.fetchLoginCaptcha(ctx, root, cookiePath, false, options.captchaImage)
 	if fetchErr != nil {
@@ -335,10 +353,9 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 		return nil, &siteError{Code: "captcha_required", Message: "教务登录需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": path}}
 	}
 	loginTarget := root
-	loginTarget.Path = "/jsxsd/xk/LoginToXk"
-	loginTarget.RawQuery = ""
-	encoded := generateSelectionEncodedGo(account, password)
-	response, requestErr := a.loginHTTP(ctx, siteRequest{Target: &loginTarget, SessionTarget: &root, CookieFile: cookiePath, Method: "POST", Data: []pair{{"userAccount", account}, {"userPassword", password}, {"RANDOMCODE", options.captcha}, {"encoded", encoded}}, Headers: []pair{{"Referer", root.String()}}, ReadOnly: true, Yes: true})
+	loginTarget.Path = "/Logon.do"
+	loginTarget.RawQuery = "method=logon"
+	response, requestErr := a.loginHTTP(ctx, siteRequest{Target: &loginTarget, SessionTarget: &root, CookieFile: cookiePath, Method: "POST", Data: []pair{{"userAccount", ""}, {"userPassword", ""}, {"RANDOMCODE", options.captcha}, {"encoded", encoded}}, Headers: []pair{{"Referer", root.String()}}, ReadOnly: true, Yes: true})
 	if requestErr != nil {
 		if requestErr.Code == "business_rejected" {
 			if failure := loginFailure(requestErr.Message); failure != nil {
@@ -382,10 +399,6 @@ func casLoginFieldIgnored(name string) bool {
 	default:
 		return false
 	}
-}
-
-func generateSelectionEncodedGo(account, password string) string {
-	return base64.StdEncoding.EncodeToString([]byte(account)) + "%%%" + base64.StdEncoding.EncodeToString([]byte(password))
 }
 
 func (a NativeSite) loginHTTP(ctx context.Context, request siteRequest) (map[string]any, *siteError) {
