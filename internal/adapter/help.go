@@ -22,6 +22,8 @@ func nativeUsage(args []string) []byte {
   second-class-credit-applications 第二课堂学分申报记录
   status-warnings             学籍预警查询
   announcements               已收公告与详情
+  announcement --id ID        查看公告正文
+  retake-courses               重修报名可报课程
   terms/semester-start        学期信息
   textbooks                   教材操作
   evaluation                  学生评价
