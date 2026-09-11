@@ -504,7 +504,7 @@ func loginPageBody(source string) bool {
 }
 func loginFailure(source string) *siteError {
 	lower := strings.ToLower(source)
-	if strings.Contains(source, "验证码错误") || strings.Contains(source, "验证码不正确") || strings.Contains(source, "随机码错误") {
+	if strings.Contains(source, "验证码错误") || strings.Contains(source, "验证码不正确") || strings.Contains(source, "验证码无效") || strings.Contains(source, "随机码错误") {
 		return &siteError{Code: "captcha_failed", Message: "验证码错误"}
 	}
 	if strings.Contains(source, "密码错误") || strings.Contains(source, "账号不存在") || strings.Contains(source, "用户不存在") || strings.Contains(lower, "用户名或密码") {

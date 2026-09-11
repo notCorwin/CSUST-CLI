@@ -35,6 +35,10 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 				_, _ = writer.Write([]byte("密码错误"))
 				return
 			}
+			if captcha == "captcha-bad" {
+				_, _ = writer.Write([]byte("验证码无效,请重新登录!"))
+				return
+			}
 			if captcha == "page" {
 				_, _ = writer.Write([]byte(`<form id="loginForm"><input name="userAccount"><input name="userPassword"></form>`))
 				return
@@ -80,6 +84,9 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 	if _, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local", captcha: "bad"}); err == nil || err.Code != "authentication_failed" {
 		t.Fatalf("expected invalid credentials to map to authentication_failed, got %v", err)
+	}
+	if _, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local", captcha: "captcha-bad"}); err == nil || err.Code != "captcha_failed" {
+		t.Fatalf("expected current captcha error to map to captcha_failed, got %v", err)
 	}
 	if _, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local", captcha: "page"}); err == nil || err.Code != "authentication_failed" {
 		t.Fatalf("expected login page response to map to authentication_failed, got %v", err)
