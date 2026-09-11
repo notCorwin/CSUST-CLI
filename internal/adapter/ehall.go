@@ -34,6 +34,9 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "service-cycles" {
 		return a.ehallServiceCycles(ctx, cookie)
 	}
+	if args[0] == "news" {
+		return a.ehallNews(ctx, args[1:], cookie)
+	}
 	if args[0] == "favorite" {
 		if len(args) == 1 {
 			return a.ehallFavorites(ctx, cookie)
@@ -59,39 +62,13 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、favorite add/remove、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、news、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
-	base, _, resolveErr := resolveSite(siteRequest{Service: "ehall", CookieFile: cookie})
-	if resolveErr != nil {
-		return nil, resolveErr
-	}
-	originalURL := (&url.URL{Scheme: base.Scheme, Host: base.Host, Path: ehallHomePath, Fragment: "/"}).String()
-	options := ehallRequestOptions(cookie)
-	pageResult, requestErr := a.businessGet(ctx, "ehall", "/getPageView", []pair{
-		{name: "pageCode", value: ""},
-		{name: "originalUrl", value: originalURL},
-		{name: "lang", value: "zh_CN"},
-	}, options)
-	if requestErr != nil {
-		return nil, requestErr
-	}
-	pageData, dataErr := ehallEnvelopeData(pageResult)
-	if dataErr != nil {
-		return nil, dataErr
-	}
-	pageContext, ok := pageData["pageContext"].(map[string]any)
-	if !ok {
-		return nil, &siteError{Code: "parse_error", Message: "eHall 页面响应缺少 pageContext"}
-	}
-	pageInfo, ok := pageContext["pageInfoEntity"].(map[string]any)
-	if !ok {
-		return nil, &siteError{Code: "parse_error", Message: "eHall 页面响应缺少 pageInfoEntity"}
-	}
-	layout, layoutErr := ehallCardLayout(pageInfo["cardLayout"])
-	if layoutErr != nil {
-		return nil, layoutErr
+	base, pageData, layout, pageErr := a.ehallPageView(ctx, cookie)
+	if pageErr != nil {
+		return nil, pageErr
 	}
 	card := findEhallCard(layout, "SYS_CARD_SERVICEBUS")
 	if card == nil {
@@ -102,17 +79,7 @@ func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[strin
 	if cardID == "" || cardWid == "" {
 		return nil, &siteError{Code: "parse_error", Message: "eHall 服务直通车卡片缺少标识"}
 	}
-	renderPath := "/execCardMethod/" + url.PathEscape(cardWid) + "/" + url.PathEscape(cardID)
-	renderResult, requestErr := a.businessPostJSON(ctx, "ehall", renderPath, map[string]any{
-		"cardId":  cardID,
-		"cardWid": cardWid,
-		"method":  "renderData",
-		"param":   map[string]any{"fromMaster": true},
-	}, options)
-	if requestErr != nil {
-		return nil, requestErr
-	}
-	renderData, dataErr := ehallEnvelopeData(renderResult)
+	renderData, dataErr := a.ehallCardMethod(ctx, cardID, cardWid, "renderData", map[string]any{"fromMaster": true}, cookie)
 	if dataErr != nil {
 		return nil, dataErr
 	}
@@ -125,7 +92,7 @@ func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[strin
 		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
 		"service": "ehall", "operation": "services", "scope": "available-to-current-user",
 		"source": base.Scheme + "://" + base.Host,
-		"api":    map[string]any{"page_view": "/getPageView", "render_card": renderPath},
+		"api":    map[string]any{"page_view": "/getPageView", "render_card": ehallCardMethodPath(cardID, cardWid)},
 		"card":   map[string]any{"card_id": cardID, "card_wid": cardWid},
 		"portal": map[string]any{
 			"site_wid": pageData["siteWid"], "portal_name": pageData["portalName"],
@@ -135,6 +102,55 @@ func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[strin
 		"categories": categories, "category_count": len(categories),
 		"data": renderData,
 	}, nil
+}
+
+func (a NativeSite) ehallPageView(ctx context.Context, cookie string) (*url.URL, map[string]any, any, *siteError) {
+	base, _, resolveErr := resolveSite(siteRequest{Service: "ehall", CookieFile: cookie})
+	if resolveErr != nil {
+		return nil, nil, nil, resolveErr
+	}
+	originalURL := (&url.URL{Scheme: base.Scheme, Host: base.Host, Path: ehallHomePath, Fragment: "/"}).String()
+	options := ehallRequestOptions(cookie)
+	options.headers = append(options.headers, pair{name: "Referer", value: originalURL})
+	pageResult, requestErr := a.businessGet(ctx, "ehall", "/getPageView", []pair{
+		{name: "pageCode", value: ""},
+		{name: "originalUrl", value: originalURL},
+		{name: "lang", value: "zh_CN"},
+	}, options)
+	if requestErr != nil {
+		return nil, nil, nil, requestErr
+	}
+	pageData, dataErr := ehallEnvelopeData(pageResult)
+	if dataErr != nil {
+		return nil, nil, nil, dataErr
+	}
+	pageContext, ok := pageData["pageContext"].(map[string]any)
+	if !ok {
+		return nil, nil, nil, &siteError{Code: "parse_error", Message: "eHall 页面响应缺少 pageContext"}
+	}
+	pageInfo, ok := pageContext["pageInfoEntity"].(map[string]any)
+	if !ok {
+		return nil, nil, nil, &siteError{Code: "parse_error", Message: "eHall 页面响应缺少 pageInfoEntity"}
+	}
+	layout, layoutErr := ehallCardLayout(pageInfo["cardLayout"])
+	if layoutErr != nil {
+		return nil, nil, nil, layoutErr
+	}
+	return base, pageData, layout, nil
+}
+
+func (a NativeSite) ehallCardMethod(ctx context.Context, cardID, cardWid, method string, param map[string]any, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessPostJSON(ctx, "ehall", ehallCardMethodPath(cardID, cardWid), map[string]any{
+		"cardId": cardID, "cardWid": cardWid, "method": method, "param": param,
+	}, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	return ehallEnvelopeData(result)
+}
+
+func ehallCardMethodPath(cardID, cardWid string) string {
+	return "/execCardMethod/" + url.PathEscape(cardWid) + "/" + url.PathEscape(cardID)
 }
 
 func (a NativeSite) ehallService(ctx context.Context, id, cookie string) (map[string]any, *siteError) {
@@ -266,6 +282,133 @@ func (a NativeSite) ehallServiceCycles(ctx context.Context, cookie string) (map[
 		"service": "ehall", "operation": "service-cycles", "cycles": cycles,
 		"cycle_count": len(cycles), "data": value,
 	}, nil
+}
+
+func (a NativeSite) ehallNews(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	channelFilter, found, valueErr := businessValue(args, "--channel")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	channelFilter = strings.TrimSpace(channelFilter)
+	if found && channelFilter == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "--channel 不能为空"}
+	}
+	_, _, layout, pageViewErr := a.ehallPageView(ctx, cookie)
+	if pageViewErr != nil {
+		return nil, pageViewErr
+	}
+	cards := findEhallCards(layout, "SYS_CARD_NEWSANNOUNCEMENT")
+	if len(cards) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 页面未找到新闻通知公告卡片"}
+	}
+	resultCards := make([]map[string]any, 0, len(cards))
+	itemCount := 0
+	choices := []string{}
+	for _, card := range cards {
+		cardID, _ := card["cardId"].(string)
+		cardWid, _ := card["cardWid"].(string)
+		if cardID == "" || cardWid == "" {
+			return nil, &siteError{Code: "parse_error", Message: "eHall 新闻卡片缺少标识"}
+		}
+		config, configErr := a.ehallCardMethod(ctx, cardID, cardWid, "getNewsConfig", map[string]any{}, cookie)
+		if configErr != nil {
+			return nil, configErr
+		}
+		channelData, channelErr := a.ehallCardMethod(ctx, cardID, cardWid, "getConfiguredAndSubscribedChannel", map[string]any{}, cookie)
+		if channelErr != nil {
+			return nil, channelErr
+		}
+		configured, _ := channelData["configuredChannel"].([]any)
+		subscribed, _ := channelData["subscribedChannel"].([]any)
+		selected := make([]any, 0, len(subscribed))
+		channelIDs, programIDs := make([]string, 0), make([]string, 0)
+		for _, raw := range subscribed {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := strings.TrimSpace(fmt.Sprint(entry["name"]))
+			if name != "" && !containsFold(choices, name) {
+				choices = append(choices, name)
+			}
+			if channelFilter != "" && !strings.Contains(strings.ToLower(name), strings.ToLower(channelFilter)) {
+				continue
+			}
+			selected = append(selected, entry)
+			id := strings.TrimSpace(fmt.Sprint(entry["wid"]))
+			if id == "" {
+				continue
+			}
+			if fmt.Sprint(entry["type"]) == "1" {
+				programIDs = append(programIDs, id)
+			} else {
+				channelIDs = append(channelIDs, id)
+			}
+		}
+		if channelFilter != "" && len(selected) == 0 {
+			continue
+		}
+		newsData, newsErr := a.ehallCardMethod(ctx, cardID, cardWid, "getChannelNews", map[string]any{
+			"channelIds": strings.Join(channelIDs, ","), "programIds": strings.Join(programIDs, ","), "pageNumber": page,
+		}, cookie)
+		if newsErr != nil {
+			return nil, newsErr
+		}
+		datas, ok := newsData["datas"].(map[string]any)
+		if !ok {
+			return nil, &siteError{Code: "parse_error", Message: "eHall 新闻响应缺少 datas"}
+		}
+		items, ok := datas["data"].([]any)
+		if !ok {
+			if datas["data"] == nil {
+				items = []any{}
+			} else {
+				return nil, &siteError{Code: "parse_error", Message: "eHall 新闻响应缺少 data 数组"}
+			}
+		}
+		itemCount += len(items)
+		resultCards = append(resultCards, map[string]any{
+			"card_id": cardID, "card_wid": cardWid, "title": ehallCardTitle(card),
+			"config": config, "configured_channels": configured, "channels": subscribed, "selected_channels": selected,
+			"subscription_data": channelData,
+			"items":             items, "item_count": len(items), "total_count": datas["totalSize"],
+			"page_size": datas["pageSize"], "page": datas["pageNumber"], "data": newsData,
+		})
+	}
+	if channelFilter != "" && len(resultCards) == 0 {
+		return nil, &siteError{Code: "not_found", Message: "没有匹配的 eHall 新闻订阅栏目", Details: map[string]any{"channel": channelFilter, "choices": choices}}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "news", "page": page, "channel": nullableString(channelFilter),
+		"cards": resultCards, "card_count": len(resultCards), "item_count": itemCount,
+		"api": map[string]any{"page_view": "/getPageView", "card_config": "getNewsConfig", "subscriptions": "getConfiguredAndSubscribedChannel", "news": "getChannelNews"},
+	}, nil
+}
+
+func ehallCardTitle(card map[string]any) string {
+	if title, ok := card["layoutCardTitle"].(map[string]any); ok {
+		if value, ok := title["cardTitle"].(string); ok {
+			return value
+		}
+	}
+	if value, ok := card["cardName"].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func containsFold(values []string, wanted string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, wanted) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a NativeSite) ehallFavoriteMutation(ctx context.Context, operation string, args []string, cookie string) (map[string]any, *siteError) {
@@ -422,22 +565,27 @@ func ehallCardLayout(value any) (any, *siteError) {
 }
 
 func findEhallCard(value any, cardID string) map[string]any {
+	cards := findEhallCards(value, cardID)
+	if len(cards) == 0 {
+		return nil
+	}
+	return cards[0]
+}
+
+func findEhallCards(value any, cardID string) []map[string]any {
+	var cards []map[string]any
 	switch typed := value.(type) {
 	case map[string]any:
 		if typed["cardId"] == cardID {
-			return typed
+			cards = append(cards, typed)
 		}
 		for _, nested := range typed {
-			if card := findEhallCard(nested, cardID); card != nil {
-				return card
-			}
+			cards = append(cards, findEhallCards(nested, cardID)...)
 		}
 	case []any:
 		for _, nested := range typed {
-			if card := findEhallCard(nested, cardID); card != nil {
-				return card
-			}
+			cards = append(cards, findEhallCards(nested, cardID)...)
 		}
 	}
-	return nil
+	return cards
 }

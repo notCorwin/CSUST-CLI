@@ -11,6 +11,7 @@ import (
 
 func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	var pageQuery url.Values
+	var pageReferer string
 	var cardRequest map[string]any
 	var favoriteState bool
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -53,6 +54,29 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"type": 0, "cycleName": "考试报名", "list": []any{}}},
 			})
+		case "/execCardMethod/news-card/SYS_CARD_NEWSANNOUNCEMENT":
+			var body map[string]any
+			if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&body) != nil {
+				t.Fatalf("news card request was not JSON POST")
+			}
+			switch body["method"] {
+			case "getNewsConfig":
+				_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{"newsTotal": 3}})
+			case "getConfiguredAndSubscribedChannel":
+				_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
+					"configuredChannel": []any{map[string]any{"id": "configured-1", "name": "教务通知"}}, "subscribedChannel": []any{map[string]any{"wid": "channel-1", "name": "教务通知", "type": 0}},
+				}})
+			case "getChannelNews":
+				param := body["param"].(map[string]any)
+				if param["channelIds"] != "channel-1" || param["programIds"] != "" || param["pageNumber"] != float64(2) {
+					t.Fatalf("news query params were not semantic: %#v", param)
+				}
+				_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
+					"datas": map[string]any{"data": []any{map[string]any{"wid": "news-1", "title": "选课通知"}}, "totalSize": 4, "pageSize": 3, "pageNumber": 2},
+				}})
+			default:
+				t.Fatalf("unexpected news card method: %v", body["method"])
+			}
 		case "/getLoginUserAndGuest":
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
@@ -64,8 +88,11 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			})
 		case "/getPageView":
 			pageQuery = request.URL.Query()
+			pageReferer = request.Header.Get("Referer")
 			layout, _ := json.Marshal([]any{map[string]any{"columns": []any{map[string]any{"card": map[string]any{
 				"cardId": "SYS_CARD_SERVICEBUS", "cardWid": "card-1",
+			}}, map[string]any{"card": map[string]any{
+				"cardId": "SYS_CARD_NEWSANNOUNCEMENT", "cardWid": "news-card", "cardName": "通知公告",
 			}}}}})
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
@@ -121,7 +148,7 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	cookie := filepath.Join(t.TempDir(), "ehall.cookies")
 
 	result := runIssueJSON(t, "ehall", "services", "--cookie-file", cookie)
-	if pageQuery.Get("pageCode") != "" || pageQuery.Get("lang") != "zh_CN" || pageQuery.Get("originalUrl") == "" {
+	if pageQuery.Get("pageCode") != "" || pageQuery.Get("lang") != "zh_CN" || pageQuery.Get("originalUrl") == "" || pageReferer == "" {
 		t.Fatalf("unexpected page query: %s", pageQuery.Encode())
 	}
 	if cardRequest["cardId"] != "SYS_CARD_SERVICEBUS" || cardRequest["cardWid"] != "card-1" || cardRequest["method"] != "renderData" {
@@ -164,6 +191,17 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	cycles := runIssueJSON(t, "ehall", "service-cycles", "--cookie-file", cookie)
 	if cycles["cycle_count"] != float64(1) || cycles["cycles"].([]any)[0].(map[string]any)["cycleName"] != "考试报名" {
 		t.Fatalf("eHall service cycles were not preserved: %#v", cycles)
+	}
+	news := runIssueJSON(t, "ehall", "news", "--channel", "教务", "--page", "2", "--cookie-file", cookie)
+	if news["item_count"] != float64(1) || news["card_count"] != float64(1) {
+		t.Fatalf("eHall news was not normalized: %#v", news)
+	}
+	newsCard := news["cards"].([]any)[0].(map[string]any)
+	if newsCard["title"] != "通知公告" || newsCard["items"].([]any)[0].(map[string]any)["title"] != "选课通知" {
+		t.Fatalf("eHall news item was not preserved: %#v", newsCard)
+	}
+	if newsCard["configured_channels"].([]any)[0].(map[string]any)["id"] != "configured-1" {
+		t.Fatalf("eHall configured channels were not preserved: %#v", newsCard)
 	}
 
 	added := runIssueJSON(t, "ehall", "favorite", "add", "--service-id", "svc-1", "--yes", "--cookie-file", cookie)
