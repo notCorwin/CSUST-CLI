@@ -383,7 +383,7 @@ func (a NativeSite) loginSSODynamic(ctx context.Context, callback, serviceTarget
 func (a NativeSite) loginSSOQR(ctx context.Context, callback, serviceTarget *url.URL, cookiePath string, options loginOptions) (map[string]any, *siteError) {
 	session := *serviceTarget
 	session.Path, session.RawQuery, session.Fragment = "/", "", ""
-	form, responseURL, pageErr := a.loginSSOPage(ctx, callback, &session, cookiePath, "qrLoginForm", "qrLogin")
+	form, responseURL, pageErr := a.loginSSOPage(ctx, callback, &session, cookiePath, "qrLoginForm", "qrcode")
 	if pageErr != nil {
 		return nil, pageErr
 	}
