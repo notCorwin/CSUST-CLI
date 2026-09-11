@@ -22,6 +22,7 @@ func nativeUsage(args []string) []byte {
   training-progress           培养方案完成情况
   teaching-calendar           学期教学周历
   deferred-exam-applications  缓考申请记录（按学期/课程/状态查询）
+  deferred-exam-registration  缓考报名状态/记录查询
   exempt-exam-applications    免考申请记录（按学期/课程/考试方式查询）
   graduate-exam-registration  毕业生插考报名状态/记录查询
   enrollment-proof-applications 在读证明申请记录
@@ -42,7 +43,7 @@ func nativeUsage(args []string) []byte {
   textbooks                   教材操作
   evaluation                  学生评价
   web/routes                  教务网页入口
-  vpn                         VPN 门户、工作台/分组、申请、设备、分享与 API
+  vpn                         VPN 门户、工作台/分组、申请、设备、资料、分享与 API
   teaching                    网络教学平台
   quality                     教学质量保障系统
   services                    已映射业务服务目录

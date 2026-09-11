@@ -282,6 +282,17 @@ func TestGraduateExamCampusUsesSemanticValues(t *testing.T) {
 	}
 }
 
+func TestAcademicRegistrationStatusMessageKeepsVisibleStatus(t *testing.T) {
+	document, err := parsePage(`<html><body><b>当前不在报名时间范围内或未启用报名！</b></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, pageErr := pageInspect(`<html><body><b>当前不在报名时间范围内或未启用报名！</b></body></html>`, "http://xk.csust.edu.cn/jsxsd/kscj/hkbm_list")
+	if pageErr != nil || academicRegistrationStatusMessage(document, page) != "当前不在报名时间范围内或未启用报名！" {
+		t.Fatalf("unexpected registration status: %#v %v", page, pageErr)
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")

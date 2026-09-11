@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -81,6 +81,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicDeferredExamApplications(ctx, args[1:])
 	case "exempt-exam-applications", "exempt-exam-application":
 		return a.academicExemptExamApplications(ctx, args[1:])
+	case "deferred-exam-registration":
+		return a.academicDeferredExamRegistration(ctx, args[1:])
 	case "graduate-exam-registration":
 		return a.academicGraduateExamRegistration(ctx, args[1:])
 	case "enrollment-proof-applications", "enrollment-proof-application":
@@ -430,23 +432,9 @@ func (a NativeSite) academicGraduateExamRegistration(ctx context.Context, args [
 	if term == "" {
 		term = selectedOptionPage(queryDocument, "xnxqid")
 	}
-	examProject := strings.TrimSpace(flagValue(args, "--exam-project"))
-	examProjectID := ""
-	if examProject != "" {
-		var optionFound bool
-		for _, option := range pageOptions(queryDocument, "kw0401id") {
-			label := strings.TrimSpace(fmt.Sprint(option["label"]))
-			value := strings.TrimSpace(fmt.Sprint(option["value"]))
-			if label == examProject || strings.Contains(strings.ToLower(label), strings.ToLower(examProject)) {
-				if optionFound {
-					return nil, &siteError{Code: "ambiguous_target", Message: "毕业生插考项目名称对应多个项目，请使用完整名称", Details: map[string]any{"exam_project": examProject}}
-				}
-				examProject, examProjectID, optionFound = label, value, true
-			}
-		}
-		if !optionFound {
-			return nil, &siteError{Code: "not_found", Message: "当前页面找不到对应毕业生插考项目", Details: map[string]any{"exam_project": examProject, "choices": pageOptions(queryDocument, "kw0401id")}}
-		}
+	examProject, examProjectID, optionErr := academicNamedPageOption(queryDocument, "kw0401id", flagValue(args, "--exam-project"), "毕业生插考项目")
+	if optionErr != nil {
+		return nil, optionErr
 	}
 	campus, campusID, campusErr := graduateExamCampus(flagValue(args, "--campus"))
 	if campusErr != nil {
@@ -479,6 +467,105 @@ func (a NativeSite) academicGraduateExamRegistration(ctx context.Context, args [
 		"start": nullableString(strings.TrimSpace(flagValue(args, "--start"))), "end": nullableString(strings.TrimSpace(flagValue(args, "--end"))),
 		"status_message": nullableString(statusMessage), "items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+func (a NativeSite) academicDeferredExamRegistration(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const queryPath = "/jsxsd/kscj/hkbm_query"
+	const listPath = "/jsxsd/kscj/hkbm_list"
+	queryBody, queryURL, err := a.academicPage(ctx, "GET", queryPath, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	queryDocument, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	term := strings.TrimSpace(flagValue(args, "--term"))
+	if term == "" {
+		term = selectedOptionPage(queryDocument, "xnxq")
+	}
+	examProject, examProjectID, optionErr := academicNamedPageOption(queryDocument, "ksxm", flagValue(args, "--exam-project"), "缓考考试项目")
+	if optionErr != nil {
+		return nil, optionErr
+	}
+	campus, campusID, campusErr := graduateExamCampus(flagValue(args, "--campus"))
+	if campusErr != nil {
+		return nil, campusErr
+	}
+	body, pageURL, err := a.academicPage(ctx, "POST", listPath, []pair{{"xnxq", term}, {"ksxm", examProjectID}, {"kcxq", campusID}}, []pair{{"Referer", queryURL}})
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	items := academicStructuredRowsWithLinks(document, "", academicGraduateExamField, pageURL)
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	statusMessage := academicRegistrationStatusMessage(document, page)
+	if len(items) == 0 && statusMessage == "" && len(document.findAll("table")) == 0 && page["kind"] == "html" {
+		return nil, &siteError{Code: "parse_error", Message: "缓考报名查询未返回记录或状态消息；请使用 web get 查看页面结构"}
+	}
+	return academicWrap(map[string]any{
+		"kind": "deferred-exam-registration", "path": listPath, "term": nullableString(term),
+		"exam_project": nullableString(examProject), "campus": nullableString(campus),
+		"status_message": nullableString(statusMessage), "items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func academicNamedPageOption(document *pageNode, id, wanted, description string) (string, string, *siteError) {
+	wanted = strings.TrimSpace(wanted)
+	if wanted == "" {
+		return "", "", nil
+	}
+	options := pageOptions(document, id)
+	for _, option := range options {
+		label := strings.TrimSpace(fmt.Sprint(option["label"]))
+		if label == wanted {
+			return label, strings.TrimSpace(fmt.Sprint(option["value"])), nil
+		}
+	}
+	matches := make([]map[string]any, 0)
+	for _, option := range options {
+		label := strings.TrimSpace(fmt.Sprint(option["label"]))
+		if label != "" && strings.Contains(strings.ToLower(label), strings.ToLower(wanted)) {
+			matches = append(matches, option)
+		}
+	}
+	if len(matches) == 1 {
+		return strings.TrimSpace(fmt.Sprint(matches[0]["label"])), strings.TrimSpace(fmt.Sprint(matches[0]["value"])), nil
+	}
+	if len(matches) > 1 {
+		choices := make([]string, 0, len(matches))
+		for _, option := range matches {
+			choices = append(choices, strings.TrimSpace(fmt.Sprint(option["label"])))
+		}
+		return "", "", &siteError{Code: "ambiguous_target", Message: description + "名称对应多个项目，请使用完整名称", Details: map[string]any{"target": wanted, "choices": choices}}
+	}
+	return "", "", &siteError{Code: "not_found", Message: "当前页面找不到对应" + description, Details: map[string]any{"target": wanted, "choices": options}}
+}
+
+func academicRegistrationStatusMessage(document *pageNode, page map[string]any) string {
+	if messages, ok := page["messages"].([]string); ok && len(messages) > 0 {
+		return messages[0]
+	}
+	text := strings.TrimSpace(pageDisplayText(document))
+	for _, marker := range []string{"当前不在报名时间范围内或未启用报名", "未查询到数据", "暂无数据"} {
+		if index := strings.Index(text, marker); index >= 0 {
+			status := strings.TrimSpace(text[index:])
+			if len(status) <= 160 {
+				return status
+			}
+			return marker
+		}
+	}
+	if len(text) <= 240 {
+		return text
+	}
+	return ""
 }
 
 func graduateExamCampus(value string) (string, string, *siteError) {

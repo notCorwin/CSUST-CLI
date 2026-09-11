@@ -80,6 +80,7 @@ password=密码
 ./csust enrollment-proof-applications --json
 ./csust teaching-calendar --term 2026-2027-1 --json
 ./csust exempt-exam-applications --term 2026-2027-1 --assessment-method exam --json
+./csust deferred-exam-registration --term 2026-2027-1 --exam-project 开学补考 --campus yuntang --json
 ./csust graduate-exam-registration --term 2026-2027-1 --exam-project 开学补考 --campus yuntang --json
 ./csust enrollment-status-changes --json
 ./csust drop-course-applications --json
@@ -111,6 +112,7 @@ password=密码
 | `enrollment-proof-applications` | 查询学生在读证明申请记录 |
 | `teaching-calendar` | 查询指定学期的教学周历 |
 | `exempt-exam-applications` | 按学期、课程和考试方式查询免考申请记录 |
+| `deferred-exam-registration` | 查询缓考报名窗口、资格状态和已有记录 |
 | `graduate-exam-registration` | 查询毕业生插考项目、报名资格状态和已有记录 |
 | `enrollment-status-changes` | 查询原/新学籍、班级、在校状态和异动终审状态 |
 | `drop-course-applications` | 可退课程、课程属性和退课审核状态 |
@@ -176,6 +178,7 @@ password=密码
 ./csust vpn apply cancel-account --reason 注销原因 --yes --json
 ./csust vpn shares --view received --search 文件名 --json
 ./csust vpn links --search 文件名 --json
+./csust vpn profile password --current-password-stdin --new-password "$CSUST_VPN_NEW_PASSWORD" --yes --json
 ./csust vpn api --name users-info --json
 ./csust teaching courses --json
 ./csust quality status --json
@@ -236,6 +239,7 @@ CSUST_EXPLORATION=1 ./csust site scripts --service map --path / --json
 - `CSUST_BASE_URL`：站点适配器的基地址，适合测试或受控环境
 - `CSUST_ENV_FILE`：替代默认 `.env` 文件
 - `CSUST_VPN_BASE_URL`、`CSUST_VPN_COOKIE_FILE`、`CSUST_VPN_SESSION_FILE`：VPN 会话配置
+- `CSUST_VPN_CURRENT_PASSWORD`、`CSUST_VPN_NEW_PASSWORD`：VPN 修改密码时的密码来源
 - 支持 `--cookie-file` 的业务命令可使用独立会话文件
 
 验证码不会自动依赖 Python 或 OCR。命令会保存验证码图片并返回 `captcha_required`，随后使用 `--captcha` 重试；可用 `--captcha-image` 指定图片位置。不同业务的密码环境变量也不同，命令缺少密码时会明确提示所需变量或 `--password-stdin`。
