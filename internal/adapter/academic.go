@@ -992,8 +992,6 @@ func (a NativeSite) academicMessageReply(ctx context.Context, args []string) (ma
 	}), nil
 }
 
-var retakeCourseIDPattern = regexp.MustCompile(`课程编号\s*[:：]\s*([A-Za-z0-9_-]+)`)
-
 func (a NativeSite) academicRetakeCourses(ctx context.Context, args []string) (map[string]any, *siteError) {
 	const path = "/jsxsd/kscj/cxbmxk_query"
 	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
@@ -1042,8 +1040,8 @@ func academicRetakeRows(document *pageNode, keyword string) []map[string]any {
 		text := strings.TrimSpace(pageDisplayText(row))
 		if len(values) < len(header) {
 			if lastItem >= 0 {
-				if match := retakeCourseIDPattern.FindStringSubmatch(text); len(match) > 1 {
-					items[lastItem]["course_id"] = match[1]
+				for name, value := range academicRetakeDetailFields(text) {
+					items[lastItem][name] = value
 				}
 			}
 			continue
@@ -1062,6 +1060,26 @@ func academicRetakeRows(document *pageNode, keyword string) []map[string]any {
 		lastItem = len(items) - 1
 	}
 	return items
+}
+
+func academicRetakeDetailFields(value string) map[string]string {
+	fields := make(map[string]string)
+	for _, part := range strings.Split(value, ";") {
+		index := strings.IndexAny(part, ":：")
+		if index < 0 {
+			continue
+		}
+		label, fieldValue := strings.TrimSpace(part[:index]), strings.TrimSpace(part[index+1:])
+		name := map[string]string{
+			"课程编号": "course_id", "考试性质": "exam_nature", "课程属性": "course_attribute",
+			"课程性质": "course_nature", "成绩标识": "score_mark", "上课校区": "campus",
+			"上课班级": "class", "上课教师": "teacher", "教师院系": "department",
+		}[label]
+		if name != "" {
+			fields[name] = fieldValue
+		}
+	}
+	return fields
 }
 
 func (a NativeSite) academicTrainingPlan(ctx context.Context, args []string) (map[string]any, *siteError) {

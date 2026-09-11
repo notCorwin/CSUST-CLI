@@ -572,7 +572,7 @@ func TestAcademicRetakeRowsKeepEligibilityAndCourseID(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := academicRetakeRows(document, "线性")
-	if len(rows) != 1 || rows[0]["course"] != "线性代数" || rows[0]["eligible"] != "×" || rows[0]["best_score"] != "46" || rows[0]["registration_type"] != "必选" || rows[0]["course_id"] != "0701001215" {
+	if len(rows) != 1 || rows[0]["course"] != "线性代数" || rows[0]["eligible"] != "×" || rows[0]["best_score"] != "46" || rows[0]["registration_type"] != "必选" || rows[0]["course_id"] != "0701001215" || rows[0]["exam_nature"] != "重修一" {
 		t.Fatalf("unexpected retake row: %#v", rows)
 	}
 }
