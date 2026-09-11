@@ -1225,9 +1225,13 @@ func (a NativeSite) academicRetakeCourses(ctx context.Context, args []string) (m
 	if pageErr != nil {
 		return nil, pageErr
 	}
+	statusMessage := ""
+	if messages, ok := page["messages"].([]string); ok && len(messages) > 0 {
+		statusMessage = messages[0]
+	}
 	return academicWrap(map[string]any{
 		"kind": "retake-courses", "path": path, "keyword": nullableString(keyword),
-		"items": items, "item_count": len(items), "page": page,
+		"status_message": nullableString(statusMessage), "items": items, "item_count": len(items), "page": page,
 	}), nil
 }
 
