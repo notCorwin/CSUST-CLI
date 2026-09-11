@@ -79,6 +79,8 @@ password=密码
 ./csust status-warnings --json
 ./csust announcements --json
 ./csust announcement --id ANNOUNCEMENT_ID --json
+./csust messages --json
+./csust message --id MESSAGE_ID --json
 ./csust retake-courses --json
 ```
 
@@ -97,6 +99,8 @@ password=密码
 | `status-warnings` | 学籍预警及处理结果 |
 | `announcements` | 已收公告及详情路径 |
 | `announcement --id` | 查看单条公告正文 |
+| `messages` | 已收留言及详情路径 |
+| `message --id` | 查看单条留言正文 |
 | `retake-courses` | 重修报名可报课程、资格和缴费状态 |
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
