@@ -173,6 +173,8 @@ password=密码
 
 ./csust ehall me --json
 ./csust ehall favorites --json
+./csust ehall message-count --json
+./csust ehall notifications --json
 ./csust ehall favorite add --service-id SERVICE_ID --yes --json
 ./csust ehall favorite remove --service-id SERVICE_ID --yes --json
 

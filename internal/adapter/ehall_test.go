@@ -34,6 +34,18 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"wid": "folder-1", "folderName": "默认收藏夹"}},
 			})
+		case "/getMessageCount":
+			if request.Method != http.MethodGet {
+				t.Fatalf("message count method = %s", request.Method)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": "3"})
+		case "/userNotify/getNewsNotify":
+			if request.Method != http.MethodGet {
+				t.Fatalf("notifications method = %s", request.Method)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"title": "通知", "read": false}},
+			})
 		case "/getLoginUserAndGuest":
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
@@ -133,6 +145,14 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	favorites := runIssueJSON(t, "ehall", "favorites", "--cookie-file", cookie)
 	if favorites["folder_count"] != float64(1) || favorites["folders"].([]any)[0].(map[string]any)["folderName"] != "默认收藏夹" {
 		t.Fatalf("eHall favorites were not preserved: %#v", favorites)
+	}
+	messageCount := runIssueJSON(t, "ehall", "message-count", "--cookie-file", cookie)
+	if messageCount["message_count"] != float64(3) || messageCount["data"] != "3" {
+		t.Fatalf("eHall message count was not normalized: %#v", messageCount)
+	}
+	notifications := runIssueJSON(t, "ehall", "notifications", "--cookie-file", cookie)
+	if notifications["notification_count"] != float64(1) || notifications["notifications"].([]any)[0].(map[string]any)["title"] != "通知" {
+		t.Fatalf("eHall notifications were not preserved: %#v", notifications)
 	}
 
 	added := runIssueJSON(t, "ehall", "favorite", "add", "--service-id", "svc-1", "--yes", "--cookie-file", cookie)

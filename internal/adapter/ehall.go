@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -23,6 +24,12 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	}
 	if args[0] == "favorites" {
 		return a.ehallFavorites(ctx, cookie)
+	}
+	if args[0] == "message-count" {
+		return a.ehallMessageCount(ctx, cookie)
+	}
+	if args[0] == "notifications" {
+		return a.ehallNotifications(ctx, cookie)
 	}
 	if args[0] == "favorite" {
 		if len(args) == 1 {
@@ -49,7 +56,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、favorite add/remove、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -196,6 +203,45 @@ func (a NativeSite) ehallFavorites(ctx context.Context, cookie string) (map[stri
 		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
 		"service": "ehall", "operation": "favorites", "scope": "current-user",
 		"folders": folders, "folder_count": len(folders),
+	}, nil
+}
+
+func (a NativeSite) ehallMessageCount(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessGet(ctx, "ehall", "/getMessageCount", nil, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	count, parseErr := strconv.Atoi(strings.TrimSpace(fmt.Sprint(value)))
+	if parseErr != nil || count < 0 {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 消息数量不是非负整数"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "message-count", "message_count": count, "data": value,
+	}, nil
+}
+
+func (a NativeSite) ehallNotifications(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessGet(ctx, "ehall", "/userNotify/getNewsNotify", nil, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	notifications, ok := value.([]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 通知响应不是数组"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "notifications", "notifications": notifications,
+		"notification_count": len(notifications), "data": value,
 	}, nil
 }
 
