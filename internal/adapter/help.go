@@ -21,6 +21,7 @@ func nativeUsage(args []string) []byte {
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况
   deferred-exam-applications  缓考申请记录（按学期/课程/状态查询）
+  enrollment-proof-applications 在读证明申请记录
   drop-course-applications    可退课程及退课审核状态
   student-status-changes      个人信息修改审核历史
   second-class-credits        第二课堂学分查询

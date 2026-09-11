@@ -122,6 +122,17 @@ func TestGraduationInfoCheckKeepsVisibleFieldsAndStatus(t *testing.T) {
 	}
 }
 
+func TestEnrollmentProofRowsKeepSemanticFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>学号</th><th>姓名</th><th>性别</th><th>籍贯</th><th>民族</th><th>培养层次</th><th>入学日期</th><th>身份证号</th><th>出生日期</th><th>备注</th><th>申请时间</th></tr><tr><td>1</td><td>202401150107</td><td>张三</td><td>男</td><td>湖南</td><td>汉族</td><td>普通本科</td><td>2024-09-01</td><td>ID</td><td>2006-01-01</td><td>在读</td><td>2026-09-11</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := academicStructuredRows(document, "", academicEnrollmentProofField)
+	if len(items) != 1 || items[0]["student_id"] != "202401150107" || items[0]["study_level"] != "普通本科" || items[0]["enrollment_date"] != "2024-09-01" || items[0]["applied_at"] != "2026-09-11" {
+		t.Fatalf("unexpected enrollment proof row: %#v", items)
+	}
+}
+
 func TestAcademicSelectionEntryFindsCrossMajorWindow(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>名称</th><th>操作</th></tr><tr><td>跨专业选修课补选</td><td><a href="/jsxsd/xsxk/xklc_view?jx0502zbid=abc">进入选课</a></td></tr></table>`)
 	if err != nil {

@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "enrollment-proof-applications", "enrollment-proof-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -77,6 +77,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicTrainingProgress(ctx, args[1:])
 	case "deferred-exam-applications", "deferred-exam-application":
 		return a.academicDeferredExamApplications(ctx, args[1:])
+	case "enrollment-proof-applications", "enrollment-proof-application":
+		return a.academicStructuredPageWithField(ctx, args[1:], "enrollment-proof-applications", "/jsxsd/kscj/xjzdzmsq_query", academicEnrollmentProofField)
 	case "drop-course-applications", "drop-course-application":
 		return a.academicStructuredPageWithField(ctx, args[1:], "drop-course-applications", "/jsxsd/xkgl/xstk_list", academicDropCourseField)
 	case "student-status-changes", "student-status-management", "student-status-change-history":
@@ -1128,6 +1130,36 @@ func academicDeferredExamField(value string) string {
 		return "submitted_at"
 	case value == "操作":
 		return "action"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicEnrollmentProofField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case value == "学号":
+		return "student_id"
+	case value == "姓名":
+		return "name"
+	case value == "性别":
+		return "gender"
+	case value == "籍贯":
+		return "native_place"
+	case value == "民族":
+		return "ethnicity"
+	case strings.Contains(value, "培养层次"):
+		return "study_level"
+	case strings.Contains(value, "入学日期"):
+		return "enrollment_date"
+	case strings.Contains(value, "身份证号"):
+		return "id_number"
+	case strings.Contains(value, "出生日期"):
+		return "birth_date"
+	case value == "备注":
+		return "note"
+	case strings.Contains(value, "申请时间"):
+		return "applied_at"
 	default:
 		return academicPageField(value)
 	}
