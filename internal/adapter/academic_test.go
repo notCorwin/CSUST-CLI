@@ -112,3 +112,43 @@ func TestAcademicCourseSelectionFollowsCrossMajorWindow(t *testing.T) {
 		t.Fatalf("cross-major entry was not followed: %#v", result)
 	}
 }
+
+func TestAcademicCourseSelectionNormalizesWindows(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = writer.Write([]byte(`<table id="tbKxkc"><tr><th>学年学期</th><th>选课名称</th><th>选课时间</th><th>操作</th></tr><tr><td>2026-2027-1</td><td>公共选修课</td><td>2026-09-11 14:00~23:00</td><td><a href="/jsxsd/xsxk/xsxk_index?jx0502zbid=ABC123">进入选课</a></td></tr></table>`))
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicCourseSelection(context.Background(), []string{"--scope", "center"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, ok := result["items"].([]map[string]any)
+	if !ok || len(items) != 1 || items[0]["term"] != "2026-2027-1" || items[0]["selection_name"] != "公共选修课" || items[0]["selection_time"] != "2026-09-11 14:00~23:00" || items[0]["entry_path"] != "/jsxsd/xsxk/xsxk_index?jx0502zbid=ABC123" {
+		t.Fatalf("unexpected selection window: %#v", result)
+	}
+}
+
+func TestAcademicTrainingPlanUsesSemanticFields(t *testing.T) {
+	method := ""
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		method = request.Method
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = writer.Write([]byte(`<table><tr><th>学期</th><th>课程代码</th><th>课程名称</th><th>开课单位</th><th>学分</th><th>考核方式</th><th>是否考试</th></tr><tr><td>第1学期</td><td>CS001</td><td>数据结构</td><td>计算机学院</td><td>3</td><td>考试</td><td>是</td></tr></table>`))
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicTrainingPlan(context.Background(), nil)
+	if err != nil || method != "POST" {
+		t.Fatalf("unexpected training plan request: method=%s result=%#v err=%v", method, result, err)
+	}
+	items, ok := result["items"].([]map[string]any)
+	if !ok || len(items) != 1 || items[0]["term"] != "第1学期" || items[0]["course_id"] != "CS001" || items[0]["department"] != "计算机学院" || items[0]["assessment_method"] != "考试" || items[0]["exam"] != "是" {
+		t.Fatalf("unexpected semantic training plan: %#v", result)
+	}
+}

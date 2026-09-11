@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -63,6 +63,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicSemesterStart(ctx, args[1:])
 	case "course-selection", "course-select":
 		return a.academicCourseSelection(ctx, args[1:])
+	case "training-plan", "plan", "cultivation-plan":
+		return a.academicTrainingPlan(ctx, args[1:])
 	case "classroom-request", "room-request":
 		return a.academicStructuredPage(ctx, args[1:], "classroom-request", "/jsxsd/kbxx/jsjy_query")
 	case "minor", "minor-registration":
@@ -117,6 +119,9 @@ func (a NativeSite) academicCourseSelection(ctx context.Context, args []string) 
 	}
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicCourseRows(document, keyword)
+	if scope == "center" {
+		items = academicSelectionWindowRows(document, keyword, pageURL)
+	}
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
 		return nil, &siteError{Code: "parse_error", Message: "未找到选课表；请使用 web get 查看页面结构"}
 	}
@@ -128,6 +133,47 @@ func (a NativeSite) academicCourseSelection(ctx context.Context, args []string) 
 		"scope": scope, "entry_path": nullableString(entryPath), "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+func academicSelectionWindowRows(document *pageNode, keyword, pageURL string) []map[string]any {
+	table := academicTable(document, "tbKxkc")
+	if table == nil {
+		return []map[string]any{}
+	}
+	rows := directTableRows(table)
+	if len(rows) == 0 {
+		return []map[string]any{}
+	}
+	header := rowValues(rows[0])
+	if len(directCells(rows[0])) > 0 && directCells(rows[0])[0].tag == "th" {
+		rows = rows[1:]
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		values := rowValues(row)
+		text := strings.TrimSpace(pageDisplayText(row))
+		if len(values) == 0 || allEmpty(values) || academicNoDataRow(text) || (keyword != "" && !strings.Contains(strings.ToLower(text), strings.ToLower(keyword))) {
+			continue
+		}
+		item := map[string]any{"index": len(items) + 1, "cells": values, "text": text}
+		for index, title := range header {
+			if name := academicSelectionWindowField(title); name != "" && index < len(values) {
+				item[name] = values[index]
+			}
+		}
+		for _, link := range row.findAll("a") {
+			target := resolvePageURL(pageURL, link.attr("href"))
+			if target == "" {
+				continue
+			}
+			if path, pathErr := academicPath(target); pathErr == nil {
+				item["entry_path"] = path
+				break
+			}
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func academicSelectionEntry(document *pageNode, pageURL, keyword string) string {
@@ -177,6 +223,30 @@ func (a NativeSite) academicStructuredPage(ctx context.Context, args []string, k
 	}
 	return academicWrap(map[string]any{
 		"kind": kind, "path": path, "keyword": nullableString(keyword),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func (a NativeSite) academicTrainingPlan(ctx context.Context, args []string) (map[string]any, *siteError) {
+	body, pageURL, err := a.academicPage(ctx, "POST", "/jsxsd/pyfa/pyfa_query", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicStructuredRows(document, keyword, academicTrainingPlanField)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "培养方案页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "training-plan", "path": "/jsxsd/pyfa/pyfa_query", "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
 }
@@ -270,6 +340,40 @@ func academicPageField(value string) string {
 		return "major"
 	default:
 		return ""
+	}
+}
+
+func academicTrainingPlanField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "开课学期") || strings.Contains(value, "计划学期") || value == "学期":
+		return "term"
+	case strings.Contains(value, "开课单位") || strings.Contains(value, "开课院系"):
+		return "department"
+	case strings.Contains(value, "考核方式"):
+		return "assessment_method"
+	case strings.Contains(value, "课程属性"):
+		return "course_attribute"
+	case strings.Contains(value, "是否考试"):
+		return "exam"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicSelectionWindowField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch value {
+	case "学年学期":
+		return "term"
+	case "选课名称":
+		return "selection_name"
+	case "选课时间":
+		return "selection_time"
+	case "操作":
+		return "action"
+	default:
+		return academicCourseField(value)
 	}
 }
 
