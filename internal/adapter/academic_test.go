@@ -136,6 +136,24 @@ func TestAcademicSocialExamRegistrationSeparatesAvailableAndEnrolled(t *testing.
 	}
 }
 
+func TestAcademicMakeUpExamRegistrationKeepsClosedWindowStatus(t *testing.T) {
+	page, err := pageInspect(`<html><head><title>补考报名</title></head><body><b>当前不在报名时间范围内或未启用报名！</b><script>function bkbm_bm(){}</script></body></html>`, "http://xk.csust.edu.cn/jsxsd/kscj/bkbm_query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if academicMakeUpExamStatus(page) != "当前不在报名时间范围内或未启用报名！" {
+		t.Fatalf("unexpected make-up status: %#v", page)
+	}
+	document, parseErr := parsePage(`<table><tr><th>课程编号</th><th>课程名称</th><th>考试性质</th><th>考试时间</th><th>考场</th><th>报名状态</th></tr><tr><td>CS001</td><td>数据结构</td><td>补考</td><td>2026-09-20 09:00</td><td>A101</td><td>未报名</td></tr></table>`)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	rows := academicStructuredRows(document, "数据", academicMakeUpExamField)
+	if len(rows) != 1 || rows[0]["course_id"] != "CS001" || rows[0]["registration_status"] != "未报名" || rows[0]["room"] != "A101" {
+		t.Fatalf("unexpected make-up rows: %#v", rows)
+	}
+}
+
 func TestAcademicStructuredRowsNormalizeRequestFields(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>申请编号</th><th>教室</th><th>借用日期</th><th>状态</th></tr><tr><td>R001</td><td>A101</td><td>2026-09-10</td><td>待审核</td></tr></table>`)
 	if err != nil {
