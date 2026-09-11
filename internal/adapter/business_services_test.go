@@ -2,6 +2,12 @@ package adapter
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +18,11 @@ func TestBusinessAdaptersKeepSemanticAndRawData(t *testing.T) {
 	items := catalog["catalog"].([]map[string]any)
 	if len(items) != 1 || items[0]["name"] != "onlinejudge" || items[0]["confidence_evidence"] == "" {
 		t.Fatalf("unexpected business catalog: %#v", catalog)
+	}
+	staffCatalog := businessCatalogNames("staff-record-appointment")
+	staff := staffCatalog["catalog"].([]map[string]any)
+	if len(staff) != 1 || !strings.Contains(staff[0]["url"].(string), "fid=4") || staff[0]["entrypoints"] == nil {
+		t.Fatalf("staff appointment catalog lost its two form entrypoints: %#v", staffCatalog)
 	}
 
 	result := businessResult(map[string]any{
@@ -66,5 +77,75 @@ func TestBusinessAdaptersKeepSemanticAndRawData(t *testing.T) {
 	}
 	if got := redactSiteJSON(map[string]any{"results": []any{1}, "password": "secret"}); !reflect.DeepEqual(got, map[string]any{"results": []any{1}, "password": "<redacted>"}) {
 		t.Fatalf("sensitive redaction changed ordinary result fields: %#v", got)
+	}
+}
+
+func TestStaffRecordUnitRequestUploadsAndMapsSemanticFields(t *testing.T) {
+	var submitted, uploaded bool
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		query := request.URL.Query()
+		if query.Get("c") == "upload" {
+			uploaded = request.Method == http.MethodPost
+			if _, _, err := request.FormFile("file"); err != nil {
+				t.Fatalf("introduction file was not uploaded: %v", err)
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"state":"success","msg":"uploaded-token"}`))
+			return
+		}
+		if query.Get("c") == "form" && request.Method == http.MethodGet {
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(writer, `<form method="post"><input type="hidden" name="token" value="form-token"><input name="mymyunit"><input name="myintroduce"><input name="myquery_name"><input name="mytel"><textarea name="myname"></textarea><textarea name="mycompany"></textarea><input name="mygoal[]"><textarea name="mymatter"></textarea><textarea name="mycontent"></textarea><input name="mytime"><input name="code"></form>`)
+			return
+		}
+		if query.Get("c") == "form" && request.Method == http.MethodPost {
+			if err := request.ParseForm(); err != nil {
+				t.Fatalf("parse appointment form: %v", err)
+			}
+			submitted = request.Form.Get("mymyunit") == "校外单位" &&
+				request.Form.Get("myintroduce") == "uploaded-token" &&
+				request.Form.Get("myquery_name") == "申请人" &&
+				request.Form.Get("mytel") == "13800138000" &&
+				request.Form.Get("myname") == "档案对象" &&
+				request.Form.Get("mycompany") == "对象单位" &&
+				request.Form.Get("mygoal[]") == "查阅" &&
+				request.Form.Get("mymatter") == "工作核查" &&
+				request.Form.Get("mycontent") == "个人材料" &&
+				request.Form.Get("mytime") == "2026-09-15" &&
+				request.Form.Get("code") == "1234" &&
+				request.Form.Get("token") == "form-token"
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(writer, `<script>alert('预约成功')</script>`)
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	file := filepath.Join(root, "introduction.txt")
+	if err := os.WriteFile(file, []byte("介绍信"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(root, "cookies.txt"))
+	result := runIssueJSON(t, "staff-record", "request", "--kind", "unit", "--yes", "--unit", "校外单位", "--applicant-name", "申请人", "--phone", "13800138000", "--subject-name", "档案对象", "--subject-unit", "对象单位", "--usage", "查阅", "--reason", "工作核查", "--content", "个人材料", "--appointment-date", "2026-09-15", "--captcha", "1234", "--introduction-file", file)
+	if !uploaded || !submitted {
+		t.Fatalf("staff record request was not fully mapped: uploaded=%v submitted=%v result=%#v", uploaded, submitted, result)
+	}
+	if result["ok"] != true || result["submitted"] != true || result["confirmed"] != true || result["kind"] != "unit" {
+		t.Fatalf("appointment success evidence missing: %#v", result)
+	}
+
+	personal, err := staffRecordFields([]string{"--subject-name", "本人", "--birth-date", "1980-01-02", "--employee-id", "工号1", "--subject-unit", "本单位", "--applicant-name", "本人", "--phone", "13800138000", "--usage", "开具证明", "--reason", "落户", "--appointment-date", "2026-09-16"}, "personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := make(map[string][]string)
+	for _, item := range personal {
+		fields[item.name] = append(fields[item.name], item.value)
+	}
+	if fields["mydate"][0] != "1980-01-02" || fields["mygoal[]"][0] != "开具证明" {
+		encoded, _ := json.Marshal(fields)
+		t.Fatalf("personal appointment fields were not mapped: %s", encoded)
 	}
 }

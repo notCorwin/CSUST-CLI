@@ -12,7 +12,7 @@
 - 网页映射：教务菜单、页面快照、表单和动作调用、公开入口及毕业设计跳转。
 - VPN：登录、状态、退出、页面/控件/API 目录、文件资源和已映射 API 调用。
 - 网络教学与教学质量保障：课程、课程详情、页面请求、教学评价和页面目录。
-- 其他业务服务：录取通知书、期刊、云就业、OnlineJudge、党校考试、档案、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
+- 其他业务服务：录取通知书、期刊、云就业、OnlineJudge、党校考试、学生/教工档案、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
 - 全站适配：对 `csust.edu.cn` 根域名和子域名提供结构化页面、表单、动作和通用请求能力。
 
 业务命令使用语义参数；需要保留网页特有能力时，再使用 `web`、`teaching`、`quality`、`vpn` 或 `site` 的通用映射命令。服务目录和页面/API 目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
@@ -77,6 +77,7 @@ password=密码
 | `schedule`, `grades`, `profile`, `exams` | 教务查询 |
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |
 | `textbooks` | 教材列表、账目和选订/退订 |
+| `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、会话、目录和 API |
@@ -106,12 +107,20 @@ password=密码
 ./csust textbooks subscribe --index 1 --yes --json
 ./csust textbooks unsubscribe --index 1 --yes --json
 
+# 教职工人事档案预约；单位预约的介绍信可在提交前自动上传
+./csust staff-record form --kind personal --json
+./csust staff-record request --kind personal --subject-name 姓名 --birth-date 1980-01-02 --employee-id 工号 --subject-unit 单位 --applicant-name 姓名 --phone 手机 --usage 查阅 --reason 业务办理 --appointment-date 2026-09-15 --captcha 验证码 --yes --json
+
 # VPN 和网络教学
 ./csust vpn login --auth cas --password-stdin --json
 ./csust vpn status --json
 ./csust vpn api --name users-info --json
 ./csust teaching courses --json
 ./csust quality status --json
+
+# eHall 的当前 SSO 回调由 adapter 处理，成功后再访问门户
+./csust site login --service ehall --auth sso --password-stdin --json
+./csust site get --service ehall --path /index.html --require-login --json
 
 # 语义化业务服务
 ./csust journal search --journal transport --query 软岩 --page-size 20 --json

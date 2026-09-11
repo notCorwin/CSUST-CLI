@@ -31,6 +31,7 @@ func nativeUsage(args []string) []byte {
   party-exam                  党校课程与成绩
   archive                     学生/综合档案系统
   student-record              学籍档案预约
+  staff-record                教工人事档案预约
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心
   library-center              图书馆个人中心

@@ -55,6 +55,7 @@ var businessServices = []businessService{
 	{"library-personal", "图书馆个人中心", "library-personal", "图书馆", "medium", "book.csust.edu.cn redirects ClientWeb personal center into authserver CAS"},
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data and exposes student/company modules"},
 	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "linked external page returned title 统招生学籍查询_长沙理工大学档案馆 查询预约系统"},
+	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
 	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
@@ -72,7 +73,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -117,6 +118,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeArchive(ctx, args[1:])
 	case "student-record", "records":
 		return a.executeStudentRecord(ctx, args[1:])
+	case "staff-record":
+		return a.executeStaffRecord(ctx, args[1:])
 	case "continuing-education":
 		return a.executeContinuingEducation(ctx, args[1:])
 	case "virtual-lab":
@@ -257,6 +260,16 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "request":
 			add("--yes", "--type", "--name", "--id-card", "--phone", "--education", "--enroll", "--graduate", "--class", "--origin", "--college", "--major", "--recipient-phone", "--recipient-email", "--captcha", "--purpose", "--content", "--school", "--work", "--unit-letter-token", "--photo-token", "--recipient-address", "--recipient-name", "--notes")
 		}
+	case "staff-record":
+		common()
+		switch operation {
+		case "form":
+			add("--kind")
+		case "upload":
+			add("--kind", "--yes", "--file")
+		case "request":
+			add("--kind", "--yes", "--subject-name", "--birth-date", "--employee-id", "--subject-unit", "--applicant-name", "--phone", "--unit", "--introduction-token", "--introduction-file", "--usage", "--reason", "--content", "--appointment-date", "--captcha", "--captcha-image")
+		}
 	case "continuing-education":
 		common()
 		if operation == "login" {
@@ -307,7 +320,7 @@ func businessCatalog() map[string]any {
 	items := make([]map[string]any, 0, len(businessServices))
 	for _, item := range businessServices {
 		info := knownSites[item.service]
-		items = append(items, map[string]any{
+		entry := map[string]any{
 			"name":                item.name,
 			"label":               item.label,
 			"service":             item.service,
@@ -316,7 +329,12 @@ func businessCatalog() map[string]any {
 			"url":                 info.scheme + "://" + info.host + info.path,
 			"confidence":          item.confidence,
 			"confidence_evidence": item.evidence,
-		})
+		}
+		if item.name == "staff-record-appointment" {
+			entry["url"] = info.scheme + "://" + info.host + staffRecordFormPath("personal")
+			entry["entrypoints"] = map[string]string{"personal": staffRecordFormPath("personal"), "unit": staffRecordFormPath("unit")}
+		}
+		items = append(items, entry)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i]["name"].(string) < items[j]["name"].(string) })
 	return map[string]any{
@@ -1239,6 +1257,292 @@ func (a NativeSite) studentRecordRequest(ctx context.Context, args []string) (ma
 	result["service"], result["operation"] = "student-record-query", "request"
 	result["request_type"] = typeValue
 	return result, nil
+}
+
+const staffRecordService = "student-record-query"
+
+func (a NativeSite) executeStaffRecord(ctx context.Context, args []string) (map[string]any, *siteError) {
+	if len(args) == 0 || args[0] == "catalog" {
+		return businessCatalogFilter("staff-record-appointment"), nil
+	}
+	kind, kindErr := staffRecordKind(args[1:])
+	if kindErr != nil {
+		return nil, kindErr
+	}
+	switch args[0] {
+	case "form":
+		cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
+		if valueErr != nil {
+			return nil, valueErr
+		}
+		result, requestErr := a.businessGet(ctx, staffRecordService, staffRecordFormPath(kind), nil, businessRequestOptions{cookieFile: cookie})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		result = sitePageResult(result)
+		result["service"], result["operation"], result["kind"] = "staff-record-appointment", "form", kind
+		return result, nil
+	case "upload":
+		return a.staffRecordUpload(ctx, args[1:], kind)
+	case "request":
+		return a.staffRecordRequest(ctx, args[1:], kind)
+	default:
+		return nil, &siteError{Code: "invalid_argument", Message: "staff-record 只支持 form、upload、request、catalog"}
+	}
+}
+
+func staffRecordKind(args []string) (string, *siteError) {
+	kind, err := businessRequired(args, "--kind", "staff-record 必须提供 --kind personal 或 unit")
+	if err != nil {
+		return "", err
+	}
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "personal", "个人":
+		return "personal", nil
+	case "unit", "单位":
+		return "unit", nil
+	default:
+		return "", &siteError{Code: "invalid_argument", Message: "--kind 只能是 personal 或 unit"}
+	}
+}
+
+func staffRecordFormPath(kind string) string {
+	return "/?c=form&a=add&fid=" + map[string]string{"personal": "4", "unit": "5"}[kind]
+}
+
+func (a NativeSite) staffRecordCaptcha(ctx context.Context, args []string, kind, cookie string) (string, *siteError) {
+	if captcha := flagValue(args, "--captcha"); captcha != "" {
+		return captcha, nil
+	}
+	_, cookiePath, resolveErr := resolveSite(siteRequest{Service: staffRecordService, CookieFile: cookie})
+	if resolveErr != nil {
+		return "", resolveErr
+	}
+	imagePath := flagValue(args, "--captcha-image")
+	if imagePath == "" {
+		imagePath = filepath.Join(filepath.Dir(cookiePath), "staff-record-"+kind+"-captcha.png")
+	}
+	imagePath = expandUserPath(imagePath)
+	if _, imageErr := a.execute(ctx, siteRequest{Service: staffRecordService, Path: "/?c=form&a=code", CookieFile: cookie, Output: imagePath, ReadOnly: true, Yes: true}); imageErr != nil {
+		return "", imageErr
+	}
+	return "", &siteError{Code: "captcha_required", Message: "教工人事档案预约需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": imagePath}}
+}
+
+func (a NativeSite) staffRecordUpload(ctx context.Context, args []string, kind string) (map[string]any, *siteError) {
+	if kind != "unit" {
+		return nil, &siteError{Code: "invalid_argument", Message: "只有 unit 预约需要上传单位介绍信"}
+	}
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "上传单位介绍信会写入远端，必须加 --yes"}
+	}
+	filePath, fileErr := businessRequired(args, "--file", "upload 必须提供 --file")
+	if fileErr != nil {
+		return nil, fileErr
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	form, requestErr := a.businessGet(ctx, staffRecordService, staffRecordFormPath(kind), nil, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	return a.uploadRecordMaterial(ctx, "staff-record-appointment", "upload", "introduction", filePath, cookie, form)
+}
+
+func (a NativeSite) uploadRecordMaterial(ctx context.Context, service, operation, field, filePath, cookie string, form map[string]any) (map[string]any, *siteError) {
+	filePath = expandUserPath(filePath)
+	file, fileErr := siteFilePart("file", filePath, "上传文件")
+	if fileErr != nil {
+		return nil, fileErr
+	}
+	if file.size == 0 {
+		return nil, &siteError{Code: "invalid_argument", Message: "上传文件不能为空"}
+	}
+	result, requestErr := (NativeSite{}).execute(ctx, siteRequest{
+		Service: staffRecordService, Method: "POST", Path: "/?c=upload&a=upfile&type=1", CookieFile: cookie,
+		Headers: []pair{{"Referer", safeResponseURL(form)}}, Files: []filePart{file},
+		ReadOnly: false, Yes: true, RawJSON: true,
+	})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if !strings.EqualFold(fmt.Sprint(payload["state"]), "success") {
+		return nil, &siteError{Code: "mutation_unverified", Message: "上传响应未返回 state=success", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "unknown"}}
+	}
+	result = businessResult(result, service, operation)
+	result["field"], result["filename"] = field, filepath.Base(filePath)
+	result["verified_by"] = "upload-response-state-success"
+	if token, ok := payload["msg"].(string); ok && strings.TrimSpace(token) != "" {
+		result["upload_token"] = token
+	} else {
+		return nil, &siteError{Code: "mutation_unverified", Message: "上传响应成功但未返回可提交的文件令牌", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "upload-response-missing-token"}}
+	}
+	return result, nil
+}
+
+func (a NativeSite) staffRecordRequest(ctx context.Context, args []string, kind string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "教工人事档案预约会提交个人资料，必须加 --yes"}
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	form, requestErr := a.businessGet(ctx, staffRecordService, staffRecordFormPath(kind), nil, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	tokenMatch := recordFormToken.FindStringSubmatch(businessBody(form))
+	if len(tokenMatch) < 2 {
+		return nil, &siteError{Code: "parse_error", Message: "教工人事档案预约表单缺少动态 token"}
+	}
+	data, dataErr := staffRecordFields(args, kind)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	captcha, captchaErr := a.staffRecordCaptcha(ctx, args, kind, cookie)
+	if captchaErr != nil {
+		return nil, captchaErr
+	}
+	introFile, introFound, introErr := businessValue(args, "--introduction-file")
+	if introErr != nil {
+		return nil, introErr
+	}
+	introToken, tokenFound, tokenErr := businessValue(args, "--introduction-token")
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	if kind == "unit" {
+		if introFound && tokenFound {
+			return nil, &siteError{Code: "invalid_argument", Message: "--introduction-file 与 --introduction-token 只能二选一"}
+		}
+		if introFound {
+			upload, uploadErr := a.uploadRecordMaterial(ctx, "staff-record-appointment", "upload", "introduction", introFile, cookie, form)
+			if uploadErr != nil {
+				return nil, uploadErr
+			}
+			introToken, _ = upload["upload_token"].(string)
+		}
+		if strings.TrimSpace(introToken) == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "unit 预约必须提供 --introduction-token 或 --introduction-file"}
+		}
+		data = append(data, pair{"myintroduce", introToken})
+	}
+	data = append(data, pair{"code", captcha}, pair{"token", tokenMatch[1]})
+	result, requestErr := businessRequest(ctx, staffRecordService, "POST", staffRecordFormPath(kind), nil, data, []pair{{"Referer", safeResponseURL(form)}}, businessRequestOptions{cookieFile: cookie}, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result = sitePageResult(result)
+	result["service"], result["operation"], result["kind"] = "staff-record-appointment", "request", kind
+	return result, nil
+}
+
+func staffRecordFields(args []string, kind string) ([]pair, *siteError) {
+	date := func(flag, message string) (string, *siteError) {
+		value, err := businessRequired(args, flag, message)
+		if err != nil {
+			return "", err
+		}
+		if _, parseErr := time.Parse("2006-01-02", value); parseErr != nil {
+			return "", &siteError{Code: "invalid_argument", Message: flag + " 必须是 YYYY-MM-DD"}
+		}
+		return value, nil
+	}
+	text := func(flag, message string) (string, *siteError) {
+		return businessRequired(args, flag, message)
+	}
+	multiline := func(flag, message string) (string, *siteError) {
+		items, valueErr := businessValues(args, flag)
+		if valueErr != nil {
+			return "", valueErr
+		}
+		if len(items) == 0 {
+			return "", &siteError{Code: "invalid_argument", Message: message}
+		}
+		return strings.Join(items, "\n"), nil
+	}
+	appointment, err := date("--appointment-date", "request 必须提供 --appointment-date")
+	if err != nil {
+		return nil, err
+	}
+	reason, err := text("--reason", "request 必须提供 --reason")
+	if err != nil {
+		return nil, err
+	}
+	usage, err := businessValues(args, "--usage")
+	if err != nil {
+		return nil, err
+	}
+	if len(usage) == 0 {
+		return nil, &siteError{Code: "invalid_argument", Message: "request 至少需要一个 --usage"}
+	}
+	allowed := map[string]bool{}
+	if kind == "personal" {
+		allowed = map[string]bool{"查阅": true, "复制": true, "开具证明": true}
+	} else {
+		allowed = map[string]bool{"查阅": true, "复印材料": true, "借阅": true}
+	}
+	data := []pair{}
+	for _, item := range usage {
+		if !allowed[item] {
+			return nil, &siteError{Code: "invalid_argument", Message: "--usage 不符合当前预约类型"}
+		}
+		data = append(data, pair{"mygoal[]", item})
+	}
+	data = append(data, pair{"mymatter", reason}, pair{"mytime", appointment})
+	if kind == "personal" {
+		fields := []struct{ flag, name, message string }{
+			{"--subject-name", "myquery_name", "request 必须提供 --subject-name"},
+			{"--birth-date", "mydate", "request 必须提供 --birth-date"},
+			{"--employee-id", "myquery_sfz", "request 必须提供 --employee-id"},
+			{"--subject-unit", "myquery_work", "request 必须提供 --subject-unit"},
+			{"--applicant-name", "mytransactors", "request 必须提供 --applicant-name"},
+			{"--phone", "mycontact", "request 必须提供 --phone"},
+		}
+		for _, field := range fields {
+			value, valueErr := text(field.flag, field.message)
+			if valueErr != nil {
+				return nil, valueErr
+			}
+			if field.flag == "--birth-date" {
+				if _, parseErr := time.Parse("2006-01-02", value); parseErr != nil {
+					return nil, &siteError{Code: "invalid_argument", Message: field.flag + " 必须是 YYYY-MM-DD"}
+				}
+			}
+			data = append(data, pair{field.name, value})
+		}
+	} else {
+		fields := []struct{ flag, name, message string }{
+			{"--unit", "mymyunit", "request 必须提供 --unit"},
+			{"--applicant-name", "myquery_name", "request 必须提供 --applicant-name"},
+			{"--phone", "mytel", "request 必须提供 --phone"},
+			{"--subject-name", "myname", "request 必须提供 --subject-name"},
+			{"--subject-unit", "mycompany", "request 必须提供 --subject-unit"},
+		}
+		for _, field := range fields {
+			value, valueErr := text(field.flag, field.message)
+			if field.name == "myname" || field.name == "mycompany" {
+				value, valueErr = multiline(field.flag, field.message)
+			}
+			if valueErr != nil {
+				return nil, valueErr
+			}
+			data = append(data, pair{field.name, value})
+		}
+		content, contentErr := text("--content", "unit request 必须提供 --content")
+		if contentErr != nil {
+			return nil, contentErr
+		}
+		data = append(data, pair{"mycontent", content})
+	}
+	return data, nil
 }
 
 func businessValues(args []string, flag string) ([]string, *siteError) {

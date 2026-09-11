@@ -204,7 +204,26 @@ func (a NativeSite) loginSSOService(ctx context.Context, serviceTarget *url.URL,
 	if options.captcha == "" {
 		options.captcha = envValueGo("CSUST_CAPTCHA")
 	}
-	return a.loginSSOWith(ctx, serviceTarget, serviceTarget, account, password, options, cookiePath, false)
+	callback := ssoServiceTarget(serviceTarget)
+	result, loginErr := a.loginSSOWith(ctx, callback, serviceTarget, account, password, options, cookiePath, false)
+	if result != nil {
+		result["service"] = safeSiteURL(serviceTarget)
+	}
+	return result, loginErr
+}
+
+func ssoServiceTarget(target *url.URL) *url.URL {
+	if target == nil || !strings.EqualFold(target.Hostname(), "ehall.csust.edu.cn") {
+		return target
+	}
+	portal := *target
+	portal.Path, portal.RawQuery, portal.Fragment = "/index.html", "", "/"
+	callback := *target
+	callback.Path, callback.RawQuery, callback.Fragment = "/login", "", ""
+	query := callback.Query()
+	query.Set("portalService", portal.String())
+	callback.RawQuery = query.Encode()
+	return &callback
 }
 
 func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget *url.URL, account, password string, options loginOptions, cookiePath string, useHandoff bool) (map[string]any, *siteError) {

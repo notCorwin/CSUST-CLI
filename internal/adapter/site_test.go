@@ -86,6 +86,19 @@ func TestSiteRedirectPolicy(t *testing.T) {
 	}
 }
 
+func TestEHallSSOUsesCurrentPortalCallback(t *testing.T) {
+	target, _ := url.Parse("https://ehall.csust.edu.cn/")
+	callback := ssoServiceTarget(target)
+	want := "https://ehall.csust.edu.cn/login?portalService=https%3A%2F%2Fehall.csust.edu.cn%2Findex.html%23%2F"
+	if callback.String() != want {
+		t.Fatalf("unexpected eHall SSO callback: got %s want %s", callback, want)
+	}
+	other, _ := url.Parse("https://www.csust.edu.cn/")
+	if ssoServiceTarget(other) != other {
+		t.Fatal("ordinary SSO service target should not be rewritten")
+	}
+}
+
 func TestSiteBusinessStateAndBinaryResponse(t *testing.T) {
 	if state, known, decoded := businessState([]byte(`{"success":true,"data":{"value":1}}`), "application/json"); !state || !known || decoded == nil {
 		t.Fatalf("unexpected JSON success state: %v %v %#v", state, known, decoded)
@@ -98,6 +111,9 @@ func TestSiteBusinessStateAndBinaryResponse(t *testing.T) {
 	}
 	if state, known, _ := businessState([]byte("操作成功"), "text/plain"); !state || !known {
 		t.Fatalf("plain success was not recognized: %v %v", state, known)
+	}
+	if state, known, _ := businessState([]byte("预约成功"), "text/plain"); !state || !known {
+		t.Fatalf("appointment success was not recognized: %v %v", state, known)
 	}
 	if !isBinarySiteResponse(&http.Response{Header: http.Header{"Content-Type": []string{"application/pdf"}}}) {
 		t.Fatal("PDF should require --output")
