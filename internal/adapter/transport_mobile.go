@@ -112,7 +112,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance":
 		return a.transportMobileFinanceDetail(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、logout、profile、pending、dictionaries、defenses、defense、finances、finance、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、catalog"}
 	}
 }
 
