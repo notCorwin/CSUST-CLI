@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "announcement", "notice", "announcement-detail", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "announcement", "notice", "announcement-detail", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -51,6 +51,12 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 			return nil, err
 		}
 		return academicWrap(parseProfilePage(body, pageURL)), nil
+	case "graduation-conclusion", "graduation-status":
+		body, pageURL, err := a.academicPage(ctx, "GET", "/jsxsd/bygl/bygl_ckxsList", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		return academicWrap(parseGraduationConclusionPage(body, pageURL)), nil
 	case "exams", "exam":
 		return a.academicExams(ctx, args[1:])
 	case "classrooms", "rooms":
@@ -1338,6 +1344,34 @@ func parseProfilePage(source, pageURL string) map[string]any {
 	}
 	return map[string]any{"url": safeSiteURL(mustParseURL(pageURL)), "fields": fields, "values": values, "rows": rows}
 }
+
+func parseGraduationConclusionPage(source, pageURL string) map[string]any {
+	profile := parseProfilePage(source, pageURL)
+	values, _ := profile["values"].(map[string]string)
+	return map[string]any{
+		"kind":                  "graduation-conclusion",
+		"url":                   profile["url"],
+		"name":                  graduationField(values, "姓名"),
+		"enrollment_year":       graduationField(values, "入学年份"),
+		"major":                 graduationField(values, "上课专业", "专业"),
+		"graduation_conclusion": graduationField(values, "毕业结论"),
+		"degree_conclusion":     graduationField(values, "学位结论"),
+		"fields":                profile["fields"],
+	}
+}
+
+func graduationField(values map[string]string, names ...string) string {
+	for key, value := range values {
+		key = strings.Join(strings.Fields(key), "")
+		for _, name := range names {
+			if key == strings.Join(strings.Fields(name), "") {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
 func colonField(value string) (string, string, bool) {
 	index := strings.IndexAny(value, "：:")
 	if index < 1 {

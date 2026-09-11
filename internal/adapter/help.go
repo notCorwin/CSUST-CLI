@@ -14,6 +14,7 @@ func nativeUsage(args []string) []byte {
 命令：
   login/logout                 教务会话
   schedule/grades/profile     教务查询
+  graduation-conclusion       毕业结论查询
   exams/classrooms/selections 教务查询
   course-selection            选课中心/跨专业选修课程
   training-plan               培养方案执行计划
@@ -28,7 +29,7 @@ func nativeUsage(args []string) []byte {
   textbooks                   教材操作
   evaluation                  学生评价
   web/routes                  教务网页入口
-  vpn                         VPN 门户与 API
+  vpn                         VPN 门户、工作台/分组、申请、设备、分享与 API
   teaching                    网络教学平台
   quality                     教学质量保障系统
   services                    已映射业务服务目录

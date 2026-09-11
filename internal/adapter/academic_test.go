@@ -81,6 +81,14 @@ func TestAcademicPathAcceptsSchoolDetailURL(t *testing.T) {
 	}
 }
 
+func TestGraduationConclusionKeepsSemanticFields(t *testing.T) {
+	document := `<table id="xjkpTable"><tr><td></td><td>姓&nbsp;&nbsp;名: 张三</td></tr><tr><td>入学年份: 2024</td></tr><tr><td>上课专业: 道路工程</td></tr><tr><td>毕业结论: 合格</td></tr><tr><td>学位结论: 授予</td></tr></table>`
+	result := parseGraduationConclusionPage(document, "http://xk.csust.edu.cn/jsxsd/bygl/bygl_ckxsList")
+	if result["name"] != "张三" || result["enrollment_year"] != "2024" || result["major"] != "道路工程" || result["graduation_conclusion"] != "合格" || result["degree_conclusion"] != "授予" {
+		t.Fatalf("unexpected graduation conclusion: %#v", result)
+	}
+}
+
 func TestAcademicSelectionEntryFindsCrossMajorWindow(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>名称</th><th>操作</th></tr><tr><td>跨专业选修课补选</td><td><a href="/jsxsd/xsxk/xklc_view?jx0502zbid=abc">进入选课</a></td></tr></table>`)
 	if err != nil {
