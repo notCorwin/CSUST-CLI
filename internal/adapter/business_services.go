@@ -74,7 +74,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -105,6 +105,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 	switch args[0] {
 	case "services", "service":
 		return businessCatalog(), nil
+	case "ehall":
+		return a.executeEhall(ctx, args[1:])
 	case "admission-notice", "admission":
 		return a.executeAdmissionNotice(ctx, args[1:])
 	case "journal":
@@ -282,6 +284,11 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--id")
 		case "send-code":
 			add("--phone", "--yes")
+		}
+	case "ehall":
+		common()
+		if operation == "service" || operation == "detail" {
+			add("--id")
 		}
 	case "continuing-education":
 		common()

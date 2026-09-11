@@ -15,6 +15,7 @@
 - 网页映射：教务菜单、页面快照、表单和动作调用、公开入口及毕业设计跳转。
 - VPN：登录、状态、退出、页面/控件/API 目录、文件资源和已映射 API 调用。
 - 网络教学与教学质量保障：课程、课程详情、页面请求、教学评价和页面目录。
+- eHall：当前账号可用服务目录、服务详情、权限和统一跳转入口。
 - 其他业务服务：录取通知书、期刊、云就业、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
 - 全站适配：对 `csust.edu.cn` 根域名和子域名提供结构化页面、表单、动作和通用请求能力。
 
@@ -103,6 +104,7 @@ password=密码
 | `vpn` | VPN 门户、会话、目录和 API |
 | `teaching` | 网络教学平台页面和课程 |
 | `quality` | 教学质量保障系统及评价 |
+| `ehall` | eHall 当前可用服务及服务详情 |
 | `services` | 已映射业务服务及依据 |
 | `site` | 任意官方子域名的通用适配器 |
 
@@ -141,6 +143,8 @@ password=密码
 # eHall 的当前 SSO 回调由 adapter 处理，成功后再访问门户
 ./csust site login --service ehall --auth sso --password-stdin --json
 ./csust site get --service ehall --path /index.html --require-login --json
+./csust ehall services --json
+./csust ehall service --id SERVICE_ID --json
 
 # 无密码认证：扫码，或先发送动态码再登录
 ./csust site login --service ehall --auth qr --qr-image ./ehall-qr.png --json
