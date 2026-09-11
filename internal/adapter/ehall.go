@@ -35,7 +35,10 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 		}
 		return a.ehallHealth(ctx, id, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、service、detail、health、catalog"}
+	if args[0] == "me" || args[0] == "identity" {
+		return a.ehallMe(ctx, cookie)
+	}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -162,6 +165,29 @@ func (a NativeSite) ehallHealth(ctx context.Context, id, cookie string) (map[str
 		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
 		"service": "ehall", "operation": "health", "service_id": id,
 		"health": data,
+	}, nil
+}
+
+func (a NativeSite) ehallMe(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessGet(ctx, "ehall", "/getLoginUserAndGuest", nil, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, dataErr := ehallEnvelopeData(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "me", "logged_in": true,
+		"user": map[string]any{
+			"id": data["wid"], "account": data["userAccount"], "name": data["userName"],
+			"category": data["categoryName"], "category_id": data["categoryWid"],
+			"department": data["deptName"], "department_id": data["deptWid"],
+			"groups": data["groups"], "organizations": data["orgs"],
+			"preferred_language": data["preferredLanguage"], "portal_language": data["portalDefaultLang"],
+		},
+		"data": data,
 	}, nil
 }
 

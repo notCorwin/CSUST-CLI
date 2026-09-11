@@ -18,6 +18,15 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			t.Fatalf("eHall headers were not sent: %#v", request.Header)
 		}
 		switch request.URL.Path {
+		case "/getLoginUserAndGuest":
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
+					"wid": "user-1", "userAccount": "account-1", "userName": "张三",
+					"categoryName": "学生/本专科生", "categoryWid": "category-1",
+					"deptName": "计算机学院", "deptWid": "dept-1", "groups": []any{map[string]any{"wid": "group-1"}},
+					"orgs": []any{map[string]any{"wid": "org-1"}}, "preferredLanguage": "zh_CN", "portalDefaultLang": "zh_CN",
+				},
+			})
 		case "/getPageView":
 			pageQuery = request.URL.Query()
 			layout, _ := json.Marshal([]any{map[string]any{"columns": []any{map[string]any{"card": map[string]any{
@@ -98,5 +107,10 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	health := runIssueJSON(t, "ehall", "health", "--id", "svc-1", "--cookie-file", cookie)
 	if health["service_id"] != "svc-1" || health["health"].(map[string]any)["pcHttpCode"] != float64(200) {
 		t.Fatalf("service health was not preserved: %#v", health)
+	}
+
+	me := runIssueJSON(t, "ehall", "me", "--cookie-file", cookie)
+	if me["logged_in"] != true || me["user"].(map[string]any)["category"] != "学生/本专科生" {
+		t.Fatalf("eHall identity was not normalized: %#v", me)
 	}
 }

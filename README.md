@@ -160,6 +160,7 @@ password=密码
 ./csust ehall service --id SERVICE_ID --json
 ./csust ehall health --id SERVICE_ID --json
 
+./csust ehall me --json
 # 无密码认证：扫码，或先发送动态码再登录
 ./csust site login --service ehall --auth qr --qr-image ./ehall-qr.png --json
 ./csust site login --service ehall --auth dynamic --mobile 手机号 --send-code --yes --json
