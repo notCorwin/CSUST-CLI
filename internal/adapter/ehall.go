@@ -21,8 +21,16 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "services" || args[0] == "catalog" || strings.HasPrefix(args[0], "--") {
 		return a.ehallServices(ctx, cookie)
 	}
-	if args[0] == "favorites" || args[0] == "favorite" {
+	if args[0] == "favorites" {
 		return a.ehallFavorites(ctx, cookie)
+	}
+	if args[0] == "favorite" {
+		if len(args) == 1 {
+			return a.ehallFavorites(ctx, cookie)
+		}
+		if args[1] == "add" || args[1] == "remove" {
+			return a.ehallFavoriteMutation(ctx, args[1], args[2:], cookie)
+		}
 	}
 	if args[0] == "service" || args[0] == "detail" {
 		id, requiredErr := businessRequired(args[1:], "--id", "ehall service 必须提供 --id")
@@ -41,7 +49,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -189,6 +197,80 @@ func (a NativeSite) ehallFavorites(ctx context.Context, cookie string) (map[stri
 		"service": "ehall", "operation": "favorites", "scope": "current-user",
 		"folders": folders, "folder_count": len(folders),
 	}, nil
+}
+
+func (a NativeSite) ehallFavoriteMutation(ctx context.Context, operation string, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "修改 eHall 收藏状态必须加 --yes"}
+	}
+	id, requiredErr := businessRequired(args, "--service-id", "ehall favorite 必须提供 --service-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	operate := "0"
+	wantFavorite := false
+	if operation == "add" {
+		operate, wantFavorite = "1", true
+	}
+	params := []pair{{name: "id", value: id}, {name: "operate", value: operate}}
+	if folder, found, valueErr := businessValue(args, "--folder-id"); valueErr != nil {
+		return nil, valueErr
+	} else if found {
+		if strings.TrimSpace(folder) == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "--folder-id 不能为空"}
+		}
+		params = append(params, pair{name: "folderWid", value: folder})
+	}
+	result, requestErr := a.execute(ctx, siteRequest{
+		Service: "ehall", Method: "GET", Path: "/collectService", Params: params,
+		Headers: ehallRequestOptions(cookie).headers, CookieFile: cookie, AllowSSO: true,
+		RequireLogin: true, AllowBusinessFailure: true, ReadOnly: false, Yes: true, RawJSON: true,
+	})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		if dataErr.Code == "business_rejected" {
+			dataErr.Code = "mutation_rejected"
+			dataErr.Details = map[string]any{"submitted": true, "confirmed": false, "evidence": "response", "service_id": id}
+		}
+		return nil, dataErr
+	}
+	catalog, readbackErr := a.ehallServices(ctx, cookie)
+	if readbackErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "收藏请求已发送但服务目录回读失败", Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "readback-error", "service_id": id, "cause": readbackErr.Error(),
+		}}
+	}
+	favorite, found := ehallServiceFavorite(catalog, id)
+	if !found || favorite != wantFavorite {
+		return nil, &siteError{Code: "mutation_unverified", Message: "收藏请求已发送但未从服务目录确认最终状态", Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "readback", "service_id": id,
+			"expected": wantFavorite, "actual": favorite, "found": found,
+		}}
+	}
+	return map[string]any{
+		"ok": true, "submitted": true, "confirmed": true, "evidence": "readback",
+		"service": "ehall", "operation": "favorite-" + operation, "service_id": id,
+		"favorite": favorite, "verified_by": "service-catalog.appFavorite", "api_data": value,
+	}, nil
+}
+
+func ehallServiceFavorite(result map[string]any, id string) (bool, bool) {
+	services, ok := result["services"].([]any)
+	if !ok {
+		return false, false
+	}
+	for _, item := range services {
+		service, ok := item.(map[string]any)
+		if !ok || fmt.Sprint(service["serviceId"]) != id {
+			continue
+		}
+		favorite, ok := service["appFavorite"].(bool)
+		return favorite, ok
+	}
+	return false, false
 }
 
 func (a NativeSite) ehallMe(ctx context.Context, cookie string) (map[string]any, *siteError) {

@@ -290,6 +290,9 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		if operation == "service" || operation == "detail" || operation == "health" {
 			add("--id")
 		}
+		if operation == "favorite" {
+			add("--service-id", "--folder-id", "--yes")
+		}
 	case "continuing-education":
 		common()
 		if operation == "login" {

@@ -12,12 +12,21 @@ import (
 func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	var pageQuery url.Values
 	var cardRequest map[string]any
+	var favoriteState bool
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		if request.Header.Get("X-Requested-With") != "XMLHttpRequest" || request.Header.Get("localeLang") != "zh_CN" {
 			t.Fatalf("eHall headers were not sent: %#v", request.Header)
 		}
 		switch request.URL.Path {
+		case "/collectService":
+			if request.Method != http.MethodGet || request.URL.Query().Get("id") != "svc-1" {
+				t.Fatalf("favorite request = %s %s", request.Method, request.URL.RawQuery)
+			}
+			favoriteState = request.URL.Query().Get("operate") == "1"
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{"changed": true},
+			})
 		case "/queryFolderAndService":
 			if request.Method != http.MethodPost {
 				t.Fatalf("favorites method = %s", request.Method)
@@ -55,7 +64,7 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			}
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
-					"appData":      []any{map[string]any{"serviceId": "svc-1", "serviceName": "教务系统", "permission": true}},
+					"appData":      []any{map[string]any{"serviceId": "svc-1", "serviceName": "教务系统", "permission": true, "appFavorite": favoriteState}},
 					"classifyData": []any{map[string]any{"typeId": "type-1", "typeName": "本科生单点", "count": 1}},
 				},
 			})
@@ -124,5 +133,14 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	favorites := runIssueJSON(t, "ehall", "favorites", "--cookie-file", cookie)
 	if favorites["folder_count"] != float64(1) || favorites["folders"].([]any)[0].(map[string]any)["folderName"] != "默认收藏夹" {
 		t.Fatalf("eHall favorites were not preserved: %#v", favorites)
+	}
+
+	added := runIssueJSON(t, "ehall", "favorite", "add", "--service-id", "svc-1", "--yes", "--cookie-file", cookie)
+	if added["operation"] != "favorite-add" || added["favorite"] != true || added["evidence"] != "readback" {
+		t.Fatalf("favorite add was not read back: %#v", added)
+	}
+	removed := runIssueJSON(t, "ehall", "favorite", "remove", "--service-id", "svc-1", "--yes", "--cookie-file", cookie)
+	if removed["operation"] != "favorite-remove" || removed["favorite"] != false || removed["evidence"] != "readback" {
+		t.Fatalf("favorite remove was not read back: %#v", removed)
 	}
 }

@@ -166,6 +166,8 @@ password=密码
 
 ./csust ehall me --json
 ./csust ehall favorites --json
+./csust ehall favorite add --service-id SERVICE_ID --yes --json
+./csust ehall favorite remove --service-id SERVICE_ID --yes --json
 
 # 无密码认证：扫码，或先发送动态码再登录
 ./csust site login --service ehall --auth qr --qr-image ./ehall-qr.png --json

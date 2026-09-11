@@ -920,6 +920,14 @@ func jsonBusinessState(value any) (bool, bool) {
 					}
 				}
 			}
+			if code, ok := typed["errcode"]; ok {
+				switch numeric := code.(type) {
+				case float64:
+					states = append(states, numeric == 0)
+				case string:
+					states = append(states, numeric == "0")
+				}
+			}
 			if state, ok := typed["state"].(string); ok {
 				switch strings.ToLower(strings.TrimSpace(state)) {
 				case "success", "ok", "1":
@@ -985,7 +993,7 @@ func jsonRequiresLogin(value any) bool {
 }
 
 var successPattern = regexp.MustCompile(`^(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序|预约|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
-var sideEffectSitePattern = regexp.MustCompile(`(?i)(?:/(?:logout|delete|remove|add|join|bind|ignore|favorite|recommend|subscribe|unsubscribe|cancel|submit|save|update|sort)(?:[/?._]|$)|[?&](?:action|op|ACTION|operation)=)`)
+var sideEffectSitePattern = regexp.MustCompile(`(?i)(?:/(?:logout|delete|remove|add|join|bind|ignore|favorite|collectService|collectServiceItem|recommend|subscribe|unsubscribe|cancel|submit|save|update|sort)(?:[/?._]|$)|[?&](?:action|op|ACTION|operation)=)`)
 var sensitiveSiteParam = regexp.MustCompile(`(?i)pass|password|pwd|encrypted|token|secret|sign|randomcode|ticket|cookie|session|csrf|nonce|execution|flowexecutionkey|(?:^|[_-])(?:state|lt)(?:$|[_-])`)
 var siteURLPattern = regexp.MustCompile(`https?://[^\s"']+`)
 
