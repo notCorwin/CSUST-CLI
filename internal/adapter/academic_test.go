@@ -218,6 +218,46 @@ func TestAcademicSecondClassCreditRowsKeepApplicationStates(t *testing.T) {
 	}
 }
 
+func TestAcademicSecondClassCreditApplicationRowsKeepWorkflowID(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>组织方式</th><th>学年学期</th><th>分类名称</th><th>获得项目时间</th><th>认定学分</th><th>审核状态</th><th>认定状态</th><th>备注</th><th>操作</th></tr><tr><td>1</td><td>个人</td><td>2025-2026-1</td><td>学科竞赛</td><td>2026-01-01</td><td>2</td><td>已通过</td><td>已认定</td><td>备注</td><td><a href="javascript:void(0);" onclick="openWindow('/jsxsd/pyfa/cxxfsb_shyj?cxxf04id=APP001',500,400)">流程</a></td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicSecondClassCreditApplicationRows(document, "", "http://xk.csust.edu.cn/jsxsd/pyfa/cxxfsb_query")
+	if len(rows) != 1 || rows[0]["application_id"] != "APP001" || rows[0]["workflow_path"] != "/jsxsd/pyfa/cxxfsb_shyj?cxxf04id=APP001" || rows[0]["detail_path"] != nil {
+		t.Fatalf("unexpected second-class credit application row: %#v", rows)
+	}
+}
+
+func TestAcademicSecondClassCreditApplicationDetailKeepsHistories(t *testing.T) {
+	document, err := parsePage(`<table><tr><td>项目获得时间：</td><td>2025-02-27</td></tr><tr><td>审核状态：</td><td>2025-02-28 申请；2025-03-01 审核通过</td></tr><tr><td>认定状态：</td><td>2025-03-02 认定通过</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, detailErr := parseSecondClassCreditApplicationPage(document, "http://xk.csust.edu.cn/jsxsd/pyfa/cxxfsb_shyj?cxxf04id=APP001")
+	if detailErr != nil || detail["project_time"] != "2025-02-27" || detail["review_history"] != "2025-02-28 申请；2025-03-01 审核通过" || detail["recognition_history"] != "2025-03-02 认定通过" {
+		t.Fatalf("unexpected second-class credit application detail: %#v %v", detail, detailErr)
+	}
+}
+
+func TestAcademicSecondClassCreditApplicationUsesSemanticID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/jsxsd/pyfa/cxxfsb_shyj" || request.URL.Query().Get("cxxf04id") != "APP001" {
+			t.Fatalf("unexpected second-class credit application request: %s", request.URL.String())
+		}
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = writer.Write([]byte(`<table><tr><td>项目获得时间：</td><td>2025-02-27</td></tr><tr><td>审核状态：</td><td>审核通过</td></tr><tr><td>认定状态：</td><td>认定通过</td></tr></table>`))
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicSecondClassCreditApplication(context.Background(), []string{"--id", "APP001"})
+	if err != nil || result["application_id"] != "APP001" || result["project_time"] != "2025-02-27" {
+		t.Fatalf("unexpected second-class credit application result: %#v %v", result, err)
+	}
+}
+
 func TestAcademicStatusWarningRowsKeepDecisionFields(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>序号</th><th>预警学期</th><th>预警名称</th><th>预警条件</th><th>处理结果</th><th>提示信息</th><th>对象名称</th><th>实际值</th></tr><tr><td>1</td><td>2025-2026-1</td><td>学分预警</td><td>已修学分不足</td><td>未处理</td><td>请及时处理</td><td>学分</td><td>10</td></tr></table>`)
 	if err != nil {

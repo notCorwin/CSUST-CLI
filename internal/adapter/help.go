@@ -21,6 +21,7 @@ func nativeUsage(args []string) []byte {
   training-progress           培养方案完成情况
   second-class-credits        第二课堂学分查询
   second-class-credit-applications 第二课堂学分申报记录
+  second-class-credit-application --id ID 查看申报审核流程
   status-warnings             学籍预警查询
   announcements               已收公告与详情
   announcement --id ID        查看公告正文

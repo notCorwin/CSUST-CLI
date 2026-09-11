@@ -77,6 +77,7 @@ password=密码
 ./csust training-progress --json
 ./csust second-class-credits --json
 ./csust second-class-credit-applications --json
+./csust second-class-credit-application --id APPLICATION_ID --json
 ./csust status-warnings --json
 ./csust announcements --json
 ./csust announcement --id ANNOUNCEMENT_ID --json
@@ -97,7 +98,8 @@ password=密码
 | `training-plan` | 培养方案执行计划课程 |
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
 | `second-class-credits` | 第二课堂学分认定查询 |
-| `second-class-credit-applications` | 第二课堂学分申报及审核状态 |
+| `second-class-credit-applications` | 第二课堂学分申报及审核状态，包含 `application_id` 和流程详情路径 |
+| `second-class-credit-application --id` | 查看申报项目获得时间、审核历史和认定历史 |
 | `status-warnings` | 学籍预警及处理结果 |
 | `announcements` | 已收公告及详情路径 |
 | `announcement --id` | 查看单条公告正文 |

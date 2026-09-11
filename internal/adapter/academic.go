@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -76,7 +76,9 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 	case "second-class-credits", "innovation-credits", "second-class-credit-query":
 		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credits", "/jsxsd/pyfa/cxxf_query", academicSecondClassCreditField)
 	case "second-class-credit-applications", "innovation-credit-applications":
-		return a.academicStructuredPageWithField(ctx, args[1:], "second-class-credit-applications", "/jsxsd/pyfa/cxxfsb_query", academicSecondClassCreditField)
+		return a.academicSecondClassCreditApplications(ctx, args[1:])
+	case "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow":
+		return a.academicSecondClassCreditApplication(ctx, args[1:])
 	case "status-warnings", "academic-warnings":
 		return a.academicStructuredPageWithField(ctx, args[1:], "status-warnings", "/jsxsd/xsxj/xsyjxx.do", academicStatusWarningField)
 	case "announcements", "notices", "received-announcements":
@@ -258,6 +260,111 @@ func (a NativeSite) academicStructuredPageWithField(ctx context.Context, args []
 		"kind": kind, "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+func (a NativeSite) academicSecondClassCreditApplications(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const path = "/jsxsd/pyfa/cxxfsb_query"
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicSecondClassCreditApplicationRows(document, keyword, pageURL)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "第二课堂学分申报页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "second-class-credit-applications", "path": path, "keyword": nullableString(keyword),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func academicSecondClassCreditApplicationRows(document *pageNode, keyword, pageURL string) []map[string]any {
+	items := academicStructuredRowsWithLinks(document, keyword, academicSecondClassCreditField, pageURL)
+	for _, item := range items {
+		workflowPath, _ := item["detail_path"].(string)
+		if parsed, parseErr := url.Parse(workflowPath); parseErr == nil {
+			if id := parsed.Query().Get("cxxf04id"); id != "" {
+				item["application_id"] = id
+				item["workflow_path"] = workflowPath
+				delete(item, "detail_path")
+			}
+		}
+	}
+	return items
+}
+
+func (a NativeSite) academicSecondClassCreditApplication(ctx context.Context, args []string) (map[string]any, *siteError) {
+	id := strings.TrimSpace(flagValue(args, "--id"))
+	if id == "" || strings.ContainsAny(id, "/?#&") {
+		return nil, &siteError{Code: "invalid_argument", Message: "second-class-credit-application 必须提供不含路径的 --id"}
+	}
+	path := "/jsxsd/pyfa/cxxfsb_shyj?cxxf04id=" + url.QueryEscape(id)
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	detail, detailErr := parseSecondClassCreditApplicationPage(document, pageURL)
+	if detailErr != nil {
+		return nil, detailErr
+	}
+	detail["kind"], detail["application_id"] = "second-class-credit-application", id
+	page, detailPageErr := pageInspect(body, pageURL)
+	if detailPageErr != nil {
+		return nil, detailPageErr
+	}
+	detail["page"] = page
+	return academicWrap(detail), nil
+}
+
+func parseSecondClassCreditApplicationPage(document *pageNode, pageURL string) (map[string]any, *siteError) {
+	fields := map[string]string{}
+	for _, table := range document.findAll("table") {
+		for _, row := range directTableRows(table) {
+			values := rowValues(row)
+			if len(values) < 2 {
+				continue
+			}
+			for index := 0; index+1 < len(values); index += 2 {
+				label := strings.Trim(strings.TrimSpace(values[index]), " ：:")
+				value := strings.TrimSpace(values[index+1])
+				if label == "" || value == "" {
+					continue
+				}
+				fields[label] = value
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "未找到第二课堂学分申报流程详情"}
+	}
+	result := map[string]any{
+		"url":    safeSiteURL(mustParseURL(pageURL)),
+		"fields": fields,
+		"text":   pageDisplayText(document),
+	}
+	for label, name := range map[string]string{
+		"项目获得时间": "project_time",
+		"审核状态":   "review_history",
+		"认定状态":   "recognition_history",
+	} {
+		if value := fields[label]; value != "" {
+			result[name] = value
+		}
+	}
+	return result, nil
 }
 
 func (a NativeSite) academicAnnouncements(ctx context.Context, args []string) (map[string]any, *siteError) {
