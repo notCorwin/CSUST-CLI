@@ -146,6 +146,8 @@ password=密码
 | `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
 | `equipment` | 实验室仪器列表、筛选字典、列定义和详情 |
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
+| `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
+| `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
@@ -250,6 +252,13 @@ password=密码
 ./csust recruitment filters --channel postdoc --json
 ./csust recruitment positions --channel faculty --unit 交通学院 --keyword 教学科研 --json
 ./csust recruitment position --channel faculty --id POSITION_ID --json
+# 继续教育：课程筛选、分类、详情和通知（默认只读）
+./csust professional-learning courses --kind professional --keyword 建筑 --page-size 20 --json
+./csust professional-learning categories --json
+./csust professional-learning course --code COURSE_CODE --json
+./csust professional-learning notices --json
+./csust professional-learning notice --id NOTICE_ID --json
+./csust institutional-learning courses --kind public --year 2026 --json
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json

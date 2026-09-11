@@ -67,6 +67,8 @@ func nativeUsage(args []string) []byte {
   sunshine                    教育阳光服务诉求提交/查询与短信验证
   equipment                   实验室仪器列表、筛选和详情
   recruitment                 人才招聘频道、公告、岗位筛选和详情
+  professional-learning       专业技术人员继续教育课程、分类、通知和详情
+  institutional-learning      事业单位工作人员继续教育课程、分类、通知和详情
   ehall                       eHall 服务、身份、收藏、消息、邮箱、新闻、评价、服务项收藏、周期与详情
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心

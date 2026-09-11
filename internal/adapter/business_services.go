@@ -59,6 +59,8 @@ var businessServices = []businessService{
 	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
 	{"equipment", "实验室仪器", "equipment", "实验", "high", "live equipmentlist.js exposes encrypted GetApparatusList_Nei, GetIndexDevBm, GetDevListCols and GetApparatusOne APIs"},
 	{"recruitment", "人才招聘", "recruitment", "招聘", "high", "live rczpw public SM2 ajaxService exposes channels, notices, organizations, positions and position detail"},
+	{"professional-learning", "专业技术人员继续教育", "jxjy", "继续教育", "high", "live jxjy public course, category, notice and course-detail APIs"},
+	{"institutional-learning", "事业单位工作人员继续教育", "zyjx", "继续教育", "high", "live zyjx public course, category, notice and course-detail APIs"},
 	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
@@ -76,7 +78,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -131,6 +133,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeEquipment(ctx, args[1:])
 	case "recruitment":
 		return a.executeRecruitment(ctx, args[1:])
+	case "professional-learning", "institutional-learning":
+		return a.executeLearning(ctx, args[1:], args[0])
 	case "continuing-education":
 		return a.executeContinuingEducation(ctx, args[1:])
 	case "virtual-lab":
@@ -312,6 +316,19 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--channel", "--unit", "--keyword", "--page", "--page-size")
 		case "position", "detail":
 			add("--channel", "--id")
+		}
+	case "professional-learning", "institutional-learning":
+		common()
+		switch operation {
+		case "courses", "list":
+			add("--keyword", "--kind", "--category-id", "--year", "--level", "--plan-type", "--min-hours", "--max-hours", "--page", "--page-size")
+		case "categories":
+		case "course", "detail":
+			add("--code", "--id", "--include-video-url")
+		case "notices":
+			add("--page", "--page-size")
+		case "notice":
+			add("--id")
 		}
 	case "ehall":
 		common()
