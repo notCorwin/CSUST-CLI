@@ -25,6 +25,9 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "favorites" {
 		return a.ehallFavorites(ctx, cookie)
 	}
+	if args[0] == "service-item-favorites" || args[0] == "item-favorites" {
+		return a.ehallServiceItemFavorites(ctx, cookie)
+	}
 	if args[0] == "message-count" {
 		return a.ehallMessageCount(ctx, cookie)
 	}
@@ -68,7 +71,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、mail-status、news、rating、favorite add/remove、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、service-item-favorites、message-count、notifications、service-cycles、mail-status、news、rating、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -227,6 +230,26 @@ func (a NativeSite) ehallFavorites(ctx context.Context, cookie string) (map[stri
 	return map[string]any{
 		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
 		"service": "ehall", "operation": "favorites", "scope": "current-user",
+		"folders": folders, "folder_count": len(folders),
+	}, nil
+}
+
+func (a NativeSite) ehallServiceItemFavorites(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessPostJSON(ctx, "ehall", "/queryFolderAndItem", map[string]any{}, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	folders, ok := value.([]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 服务项收藏夹响应不是数组"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "service-item-favorites", "scope": "current-user",
 		"folders": folders, "folder_count": len(folders),
 	}, nil
 }

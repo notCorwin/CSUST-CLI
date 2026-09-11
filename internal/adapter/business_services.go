@@ -287,7 +287,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		}
 	case "ehall":
 		common()
-		if operation == "mail-status" || operation == "mail" {
+		if operation == "mail-status" || operation == "mail" || operation == "service-item-favorites" || operation == "item-favorites" {
 			return allowed
 		}
 		if operation == "news" {
