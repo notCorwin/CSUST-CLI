@@ -10,6 +10,7 @@
 
 - 教务：课表、成绩、个人信息、考试、空教室、选课结果、培养方案、第二课堂学分、学期信息、教材和教学评价。
 - 学籍：学籍预警、学籍卡片及毕业相关页面的结构化入口。
+- 公告：已收公告列表及详情入口。
 - 网页映射：教务菜单、页面快照、表单和动作调用、公开入口及毕业设计跳转。
 - VPN：登录、状态、退出、页面/控件/API 目录、文件资源和已映射 API 调用。
 - 网络教学与教学质量保障：课程、课程详情、页面请求、教学评价和页面目录。
@@ -73,6 +74,7 @@ password=密码
 ./csust second-class-credits --json
 ./csust second-class-credit-applications --json
 ./csust status-warnings --json
+./csust announcements --json
 ```
 
 ## 常用命令
@@ -87,6 +89,7 @@ password=密码
 | `second-class-credits` | 第二课堂学分认定查询 |
 | `second-class-credit-applications` | 第二课堂学分申报及审核状态 |
 | `status-warnings` | 学籍预警及处理结果 |
+| `announcements` | 已收公告及详情路径 |
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `sunshine` | 教育阳光服务公开诉求、详情、部门、统计和短信验证 |
