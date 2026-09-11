@@ -42,6 +42,17 @@ func TestAcademicParsersKeepSemanticRows(t *testing.T) {
 	}
 }
 
+func TestAcademicGradesExtractJavascriptDetailLink(t *testing.T) {
+	document, err := parsePage(`<table id="dataList"><tr><th>学期</th><th>课程名称</th><th>成绩</th><th>学分</th><th>学时</th><th>绩点</th></tr><tr><td>2025-2026-1</td><td>线性代数</td><td><a href="javascript:openWindow('/jsxsd/kscj/pscj_list.do?cj0708id=ABC&amp;zcj=95',700,500)">95</a></td><td>3</td><td>48</td><td>4.0</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, parseErr := parseGradesPage(document, "http://xk.csust.edu.cn/jsxsd/kscj/cjcx_list")
+	if parseErr != nil || len(rows) != 1 || rows[0]["grade_detail_url"] != "http://xk.csust.edu.cn/jsxsd/kscj/pscj_list.do?cj0708id=ABC&zcj=95" {
+		t.Fatalf("javascript grade detail link was not normalized: %#v %v", rows, parseErr)
+	}
+}
+
 func TestAcademicCourseSelectionRowsNormalizeCrossMajorFields(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>课程代码</th><th>课程名称</th><th>教师</th><th>学分</th><th>课程性质</th></tr><tr><td>CS001</td><td>跨专业选修</td><td>张老师</td><td>2</td><td>选修</td></tr><tr><td>CS002</td><td>不相关课程</td><td>李老师</td><td>3</td><td>选修</td></tr></table>`)
 	if err != nil {

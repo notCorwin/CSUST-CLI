@@ -716,34 +716,18 @@ func academicStructuredRowsWithLinks(document *pageNode, keyword string, field f
 		}
 		if pageURL != "" {
 			for _, link := range row.findAll("a") {
-				href := link.attr("href")
-				if href == "" {
+				target := academicLinkTarget(link, pageURL)
+				if target == "" {
 					continue
 				}
-				candidates := []string{href}
-				if strings.HasPrefix(strings.ToLower(href), "javascript:") {
-					candidates = candidates[:0]
-					for _, source := range []string{href, link.attr("onclick")} {
-						for _, match := range pageEndpointLiteral.FindAllStringSubmatch(source, -1) {
-							if len(match) > 1 {
-								candidates = append(candidates, match[1])
-							}
-						}
+				path, _ := academicPath(target)
+				item["detail_path"] = path
+				if parsed, parseErr := url.Parse(path); parseErr == nil {
+					if id := parsed.Query().Get("ggid"); id != "" {
+						item["announcement_id"] = id
 					}
 				}
-				for _, candidate := range candidates {
-					target := resolvePageURL(pageURL, candidate)
-					if path, pathErr := academicPath(target); pathErr == nil {
-						item["detail_path"] = path
-						if parsed, parseErr := url.Parse(path); parseErr == nil {
-							if id := parsed.Query().Get("ggid"); id != "" {
-								item["announcement_id"] = id
-							}
-						}
-						break
-					}
-				}
-				if item["detail_path"] != nil {
+				if path != "" {
 					break
 				}
 			}
@@ -1694,8 +1678,8 @@ func parseGradesPage(document *pageNode, pageURL string) ([]map[string]any, *sit
 		} else {
 			item["course"], item["score"] = values[0], values[len(values)-1]
 		}
-		if anchor := row.first("a", ""); anchor != nil && anchor.attr("href") != "" {
-			if target := resolvePageURL(pageURL, anchor.attr("href")); target != "" {
+		if anchor := row.first("a", ""); anchor != nil {
+			if target := academicLinkTarget(anchor, pageURL); target != "" {
 				item["grade_detail_url"] = safeSiteURL(mustParseURL(target))
 			}
 		}
@@ -1703,6 +1687,36 @@ func parseGradesPage(document *pageNode, pageURL string) ([]map[string]any, *sit
 	}
 	return result, nil
 }
+
+func academicLinkTarget(link *pageNode, pageURL string) string {
+	if link == nil {
+		return ""
+	}
+	href := link.attr("href")
+	if href == "" {
+		return ""
+	}
+	candidates := []string{href}
+	if strings.HasPrefix(strings.ToLower(href), "javascript:") {
+		candidates = candidates[:0]
+		for _, source := range []string{href, link.attr("onclick")} {
+			for _, match := range pageEndpointLiteral.FindAllStringSubmatch(source, -1) {
+				if len(match) > 1 {
+					candidates = append(candidates, match[1])
+				}
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		if target := resolvePageURL(pageURL, candidate); target != "" {
+			if _, pathErr := academicPath(target); pathErr == nil {
+				return target
+			}
+		}
+	}
+	return ""
+}
+
 func gradeHeaderPage(value string) string {
 	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
 	switch {

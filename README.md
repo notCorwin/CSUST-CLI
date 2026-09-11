@@ -68,6 +68,7 @@ password=密码
 ```bash
 ./csust schedule --json
 ./csust grades --term 2025-2026-1 --json
+./csust grades detail --term 2025-2026-1 --course-name 课程名称 --json
 ./csust profile --json
 ./csust graduation-conclusion --json
 ./csust exams --json
