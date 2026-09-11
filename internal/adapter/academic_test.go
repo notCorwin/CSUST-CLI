@@ -293,6 +293,17 @@ func TestAcademicRegistrationStatusMessageKeepsVisibleStatus(t *testing.T) {
 	}
 }
 
+func TestAcademicGradeRecognitionRowsKeepApplicationFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>学年学期</th><th>课程编号</th><th>课程名称</th><th>学分</th><th>总学时</th><th>成绩项目</th><th>原成绩</th><th>申请时间</th><th>审核状态</th><th>操作</th></tr><tr><td>1</td><td>2025-2026-1</td><td>CS001</td><td>数据结构</td><td>3</td><td>48</td><td>平时成绩</td><td>90</td><td>2026-01-02</td><td>通过</td><td>查看</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicGradeRecognitionField)
+	if len(rows) != 1 || rows[0]["term"] != "2025-2026-1" || rows[0]["course_id"] != "CS001" || rows[0]["grade_item"] != "平时成绩" || rows[0]["original_score"] != "90" || rows[0]["review_status"] != "通过" {
+		t.Fatalf("unexpected grade recognition row: %#v", rows)
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -85,6 +85,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicDeferredExamRegistration(ctx, args[1:])
 	case "graduate-exam-registration":
 		return a.academicGraduateExamRegistration(ctx, args[1:])
+	case "grade-recognition-applications", "grade-recognition-application", "grade-review-applications":
+		return a.academicStructuredPageWithField(ctx, args[1:], "grade-recognition-applications", "/jsxsd/kscj/cjfh_list", academicGradeRecognitionField)
 	case "enrollment-proof-applications", "enrollment-proof-application":
 		return a.academicStructuredPageWithField(ctx, args[1:], "enrollment-proof-applications", "/jsxsd/kscj/xjzdzmsq_query", academicEnrollmentProofField)
 	case "enrollment-status-changes", "academic-status-changes", "status-change-history":
@@ -1478,6 +1480,34 @@ func academicGraduateExamField(value string) string {
 		return "campus"
 	case strings.Contains(value, "报名状态") || strings.Contains(value, "审核状态"):
 		return "status"
+	case value == "操作":
+		return "action"
+	default:
+		return academicPageField(value)
+	}
+}
+
+func academicGradeRecognitionField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "学年学期"):
+		return "term"
+	case strings.Contains(value, "课程编号") || strings.Contains(value, "课程代码"):
+		return "course_id"
+	case strings.Contains(value, "课程名称") || value == "课程":
+		return "course"
+	case value == "学分":
+		return "credit"
+	case strings.Contains(value, "总学时") || strings.Contains(value, "学时"):
+		return "hours"
+	case strings.Contains(value, "成绩项目"):
+		return "grade_item"
+	case strings.Contains(value, "原成绩"):
+		return "original_score"
+	case strings.Contains(value, "申请时间"):
+		return "submitted_at"
+	case strings.Contains(value, "审核状态"):
+		return "review_status"
 	case value == "操作":
 		return "action"
 	default:
