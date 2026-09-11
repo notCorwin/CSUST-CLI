@@ -12,16 +12,17 @@ import (
 
 func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	temp := t.TempDir()
+	var encoded, account, password, captcha string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/verifycode.servlet":
+		case "/jsxsd/":
+			_, _ = writer.Write([]byte(`<form id="Form1" action="/jsxsd/xk/LoginToXk" method="post"><input name="userAccount"><input name="userPassword" type="password"><input name="RANDOMCODE"><input name="encoded"></form>`))
+		case "/jsxsd/verifycode.servlet":
 			writer.Header().Set("Content-Type", "image/png")
 			_, _ = writer.Write([]byte("captcha"))
-		case "/Logon.do":
-			if request.URL.Query().Get("flag") == "sess" {
-				_, _ = writer.Write([]byte(strings.Repeat("a", 20) + "#" + strings.Repeat("0", 20)))
-				return
-			}
+		case "/jsxsd/xk/LoginToXk":
+			_ = request.ParseForm()
+			account, password, captcha, encoded = request.Form.Get("userAccount"), request.Form.Get("userPassword"), request.Form.Get("RANDOMCODE"), request.Form.Get("encoded")
 			http.SetCookie(writer, &http.Cookie{Name: "AUTH", Value: "1", Path: "/"})
 			_, _ = writer.Write([]byte("登录成功"))
 		case academicProbePath:
@@ -32,7 +33,7 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 			writer.Header().Set("Content-Type", "text/html")
 			_, _ = writer.Write([]byte(`<table id="kbtable"><tr><th>星期一</th></tr></table>`))
 		default:
-			_, _ = writer.Write([]byte(`<form id="loginForm"><input name="userAccount"><input name="userPassword" type="password"></form>`))
+			http.NotFound(writer, request)
 		}
 	}))
 	defer server.Close()
@@ -47,6 +48,9 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 	if result["auth"] != "local" || result["confirmed"] != true {
 		t.Fatalf("unexpected login result: %#v", result)
+	}
+	if account != "student" || password != "password" || captcha != "good" || encoded != "c3R1ZGVudA==%%%cGFzc3dvcmQ=" {
+		t.Fatalf("unexpected selection login payload: account=%q password=%q captcha=%q encoded=%q", account, password, captcha, encoded)
 	}
 	if _, statErr := os.Stat(cookieFile); statErr != nil {
 		t.Fatal(statErr)
