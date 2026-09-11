@@ -57,6 +57,7 @@ var businessServices = []businessService{
 	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "linked external page returned title 统招生学籍查询_长沙理工大学档案馆 查询预约系统"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
 	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
+	{"equipment", "实验室仪器", "equipment", "实验", "high", "live equipmentlist.js exposes encrypted GetApparatusList_Nei, GetIndexDevBm, GetDevListCols and GetApparatusOne APIs"},
 	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
@@ -74,7 +75,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -125,6 +126,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeStaffRecord(ctx, args[1:])
 	case "sunshine":
 		return a.executeSunshine(ctx, args[1:])
+	case "equipment":
+		return a.executeEquipment(ctx, args[1:])
 	case "continuing-education":
 		return a.executeContinuingEducation(ctx, args[1:])
 	case "virtual-lab":
@@ -286,6 +289,14 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--title", "--name", "--department", "--department-id", "--content", "--type", "--expected-date", "--date-expected", "--reporter", "--phone", "--email", "--role", "--code", "--attachment", "--public", "--private", "--yes")
 		case "send-code":
 			add("--phone", "--yes")
+		}
+	case "equipment":
+		common()
+		switch operation {
+		case "list", "instruments":
+			add("--keyword", "--department-id", "--lab-id", "--category-id", "--discipline", "--year", "--year-to", "--page", "--page-size", "--all")
+		case "detail":
+			add("--id")
 		}
 	case "ehall":
 		common()
