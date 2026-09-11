@@ -368,16 +368,7 @@ func (a NativeSite) vpnCASLogin(ctx context.Context, base *url.URL, cookie strin
 	if form == nil {
 		return nil, &siteError{Code: "authentication_failed", Message: "VPN 统一认证登录页缺少账号密码表单"}
 	}
-	fields := make([]pair, 0)
-	reserved := map[string]bool{"username": true, "password": true, "passwordText": true, "pwdEncryptSalt": true, "captcha": true, "_eventId": true, "cllt": true, "dllt": true}
-	for _, field := range form.findAll("input") {
-		name := strings.TrimSpace(field.attr("name"))
-		kind := strings.ToLower(firstNonEmpty(field.attr("type"), "text"))
-		if name == "" || reserved[name] || field.disabled() || kind == "button" || kind == "file" || kind == "reset" || kind == "submit" || (kind == "checkbox" || kind == "radio") && !field.has("checked") {
-			continue
-		}
-		fields = append(fields, pair{name, field.attr("value")})
-	}
+	fields := casLoginFields(form)
 	salt := ""
 	if field := form.first("input", "pwdEncryptSalt"); field != nil {
 		salt = field.attr("value")

@@ -257,16 +257,7 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 	if field := form.first("input", "pwdEncryptSalt"); field != nil {
 		salt = field.attr("value")
 	}
-	fields := make([]pair, 0)
-	reserved := map[string]bool{"username": true, "password": true, "passwordText": true, "pwdEncryptSalt": true, "captcha": true, "_eventId": true, "cllt": true, "dllt": true}
-	for _, field := range form.findAll("input") {
-		name := strings.TrimSpace(field.attr("name"))
-		kind := strings.ToLower(firstNonEmpty(field.attr("type"), "text"))
-		if name == "" || reserved[name] || field.disabled() || kind == "button" || kind == "file" || kind == "reset" || kind == "submit" || (kind == "checkbox" || kind == "radio") && !field.has("checked") {
-			continue
-		}
-		fields = append(fields, pair{name, field.attr("value")})
-	}
+	fields := casLoginFields(form)
 	encrypted, encryptErr := encryptCASPassword(password, salt)
 	if encryptErr != nil {
 		return nil, encryptErr
@@ -369,6 +360,28 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 		return nil, &siteError{Code: "authentication_failed", Message: "登录失败，教务系统未建立有效会话", Details: map[string]any{"cause": probeErr.Code}}
 	}
 	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "username": account, "auth": "local", "cookie_file": cookiePath, "attempts": 1}, nil
+}
+
+func casLoginFields(form *pageNode) []pair {
+	fields := make([]pair, 0)
+	for _, field := range form.findAll("input") {
+		name := strings.TrimSpace(field.attr("name"))
+		kind := strings.ToLower(firstNonEmpty(field.attr("type"), "text"))
+		if name == "" || casLoginFieldIgnored(name) || field.disabled() || kind == "button" || kind == "file" || kind == "reset" || kind == "submit" || (kind == "checkbox" || kind == "radio") && !field.has("checked") {
+			continue
+		}
+		fields = append(fields, pair{name, field.attr("value")})
+	}
+	return fields
+}
+
+func casLoginFieldIgnored(name string) bool {
+	switch name {
+	case "username", "password", "passwordText", "pwdEncryptSalt", "captcha", "_eventId", "cllt", "dllt":
+		return true
+	default:
+		return false
+	}
 }
 
 func generateSelectionEncodedGo(account, password string) string {

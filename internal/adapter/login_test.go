@@ -60,6 +60,22 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 }
 
+func TestCASLoginFieldsExcludeBrowserPasswordInput(t *testing.T) {
+	document, err := parsePage(`<form id="pwdFromId"><input name="username"><input name="passwordText" type="password"><input id="saltPassword" name="password" type="hidden"><input name="execution" value="e1s1"></form>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := casLoginFields(document.first("form", "pwdFromId"))
+	for _, field := range fields {
+		if field.name == "password" || field.name == "passwordText" || field.name == "username" {
+			t.Fatalf("browser-controlled credential field leaked into CAS fields: %#v", fields)
+		}
+	}
+	if len(fields) != 1 || fields[0].name != "execution" || fields[0].value != "e1s1" {
+		t.Fatalf("unexpected CAS fields: %#v", fields)
+	}
+}
+
 func TestNativeLogoutVerifiesRemoteSessionAndClearsCookie(t *testing.T) {
 	logoutCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
