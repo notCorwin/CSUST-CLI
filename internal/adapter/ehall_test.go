@@ -46,6 +46,13 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"title": "通知", "read": false}},
 			})
+		case "/userNotify/getRecommendCycle":
+			if request.Method != http.MethodGet {
+				t.Fatalf("service cycles method = %s", request.Method)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"type": 0, "cycleName": "考试报名", "list": []any{}}},
+			})
 		case "/getLoginUserAndGuest":
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
@@ -153,6 +160,10 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	notifications := runIssueJSON(t, "ehall", "notifications", "--cookie-file", cookie)
 	if notifications["notification_count"] != float64(1) || notifications["notifications"].([]any)[0].(map[string]any)["title"] != "通知" {
 		t.Fatalf("eHall notifications were not preserved: %#v", notifications)
+	}
+	cycles := runIssueJSON(t, "ehall", "service-cycles", "--cookie-file", cookie)
+	if cycles["cycle_count"] != float64(1) || cycles["cycles"].([]any)[0].(map[string]any)["cycleName"] != "考试报名" {
+		t.Fatalf("eHall service cycles were not preserved: %#v", cycles)
 	}
 
 	added := runIssueJSON(t, "ehall", "favorite", "add", "--service-id", "svc-1", "--yes", "--cookie-file", cookie)

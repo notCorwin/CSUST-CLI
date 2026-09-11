@@ -31,6 +31,9 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "notifications" {
 		return a.ehallNotifications(ctx, cookie)
 	}
+	if args[0] == "service-cycles" {
+		return a.ehallServiceCycles(ctx, cookie)
+	}
 	if args[0] == "favorite" {
 		if len(args) == 1 {
 			return a.ehallFavorites(ctx, cookie)
@@ -56,7 +59,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、favorite add/remove、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -242,6 +245,26 @@ func (a NativeSite) ehallNotifications(ctx context.Context, cookie string) (map[
 		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
 		"service": "ehall", "operation": "notifications", "notifications": notifications,
 		"notification_count": len(notifications), "data": value,
+	}, nil
+}
+
+func (a NativeSite) ehallServiceCycles(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessGet(ctx, "ehall", "/userNotify/getRecommendCycle", nil, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	cycles, ok := value.([]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 服务周期响应不是数组"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "service-cycles", "cycles": cycles,
+		"cycle_count": len(cycles), "data": value,
 	}, nil
 }
 
