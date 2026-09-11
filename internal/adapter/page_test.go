@@ -30,6 +30,19 @@ func TestPageSnapshotExtractsControlsAndStableActions(t *testing.T) {
 	}
 }
 
+func TestPageSnapshotRedactsStudentIdentityControls(t *testing.T) {
+	page, err := pageInspect(`<form><input type="hidden" name="ysfzjh" value="身份证号"><input type="hidden" name="yxm" value="姓名"><input type="hidden" name="yxmpy" value="Name Pinyin"></form>`, "https://www.csust.edu.cn/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controls := page["forms"].([]map[string]any)[0]["controls"].([]map[string]any)
+	for _, control := range controls {
+		if control["value"] != "<redacted>" {
+			t.Fatalf("student identity control was not redacted: %#v", control)
+		}
+	}
+}
+
 func TestPageFeedbackRequiresDirectEvidence(t *testing.T) {
 	if state, known := pageFeedback("操作成功", "text/plain"); !state || !known {
 		t.Fatalf("plain success was not confirmed: %v %v", state, known)

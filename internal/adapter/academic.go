@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -57,6 +57,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 			return nil, err
 		}
 		return academicWrap(parseGraduationConclusionPage(body, pageURL)), nil
+	case "graduation-info-check", "graduate-info-check":
+		return a.academicGraduationInfoCheck(ctx)
 	case "exams", "exam":
 		return a.academicExams(ctx, args[1:])
 	case "classrooms", "rooms":
@@ -266,6 +268,25 @@ func (a NativeSite) academicStructuredPageWithField(ctx context.Context, args []
 		"kind": kind, "path": path, "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+func (a NativeSite) academicGraduationInfoCheck(ctx context.Context) (map[string]any, *siteError) {
+	const path = "/jsxsd/bygl/bysxx"
+	body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	result := parseGraduationInfoCheckPage(document, pageURL)
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	result["page"] = page
+	return academicWrap(result), nil
 }
 
 func (a NativeSite) academicDeferredExamApplications(ctx context.Context, args []string) (map[string]any, *siteError) {
@@ -1800,6 +1821,51 @@ func parseGraduationConclusionPage(source, pageURL string) map[string]any {
 		"degree_conclusion":     graduationField(values, "学位结论"),
 		"fields":                profile["fields"],
 	}
+}
+
+func parseGraduationInfoCheckPage(document *pageNode, pageURL string) map[string]any {
+	labels := map[string]string{
+		"所属学院": "college",
+		"所属专业": "major",
+		"所在班级": "class",
+		"培养层次": "study_level",
+		"学制":   "duration_years",
+		"性别":   "gender",
+		"证件类型": "id_type",
+		"证件号":  "id_number",
+		"学号":   "student_id",
+		"姓名":   "name",
+		"姓名拼音": "name_pinyin",
+	}
+	fields := map[string]string{}
+	statusMessage := ""
+	for _, table := range document.findAll("table") {
+		for _, row := range directTableRows(table) {
+			values := rowValues(row)
+			for _, value := range values {
+				if strings.Contains(value, "注：") || strings.Contains(value, "注:") {
+					statusMessage = strings.TrimSpace(value)
+				}
+			}
+			for index := 0; index+1 < len(values); index += 2 {
+				label := strings.Join(strings.Fields(strings.Trim(values[index], " ：:")), "")
+				if name, ok := labels[label]; ok {
+					fields[name] = strings.TrimSpace(values[index+1])
+				}
+			}
+		}
+	}
+	result := map[string]any{
+		"kind":           "graduation-info-check",
+		"url":            safeSiteURL(mustParseURL(pageURL)),
+		"fields":         fields,
+		"status_message": nullableString(statusMessage),
+		"text":           pageDisplayText(document),
+	}
+	for name, value := range fields {
+		result[name] = value
+	}
+	return result
 }
 
 func graduationField(values map[string]string, names ...string) string {

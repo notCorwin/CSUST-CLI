@@ -111,6 +111,17 @@ func TestGraduationConclusionKeepsSemanticFields(t *testing.T) {
 	}
 }
 
+func TestGraduationInfoCheckKeepsVisibleFieldsAndStatus(t *testing.T) {
+	document, err := parsePage(`<table><tr><td>所属学院:</td><td>交通学院</td><td>所属专业:</td><td>道路桥梁与渡河工程</td></tr><tr><td>所在班级:</td><td>道桥渡24-1</td><td>培养层次:</td><td>普通本科</td></tr><tr><td>学制:</td><td>4</td><td>性别:</td><td>男</td></tr><tr><td>证件类型:</td><td>身份证</td><td>证件号:</td><td></td></tr><tr><td>学号:</td><td>202401150107</td><td>姓名:</td><td></td></tr><tr><td></td><td>注：毕业生信息核对时间未到！</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := parseGraduationInfoCheckPage(document, "http://xk.csust.edu.cn/jsxsd/bygl/bysxx")
+	if result["college"] != "交通学院" || result["major"] != "道路桥梁与渡河工程" || result["class"] != "道桥渡24-1" || result["student_id"] != "202401150107" || result["id_number"] != "" || result["status_message"] != "注：毕业生信息核对时间未到！" {
+		t.Fatalf("unexpected graduation info check: %#v", result)
+	}
+}
+
 func TestAcademicSelectionEntryFindsCrossMajorWindow(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>名称</th><th>操作</th></tr><tr><td>跨专业选修课补选</td><td><a href="/jsxsd/xsxk/xklc_view?jx0502zbid=abc">进入选课</a></td></tr></table>`)
 	if err != nil {

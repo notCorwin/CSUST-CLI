@@ -19,7 +19,7 @@ import (
 const pageSnapshotSchema = 1
 
 var (
-	pageSensitiveField  = regexp.MustCompile(`(?i)pass|password|token|secret|sign|randomcode|ticket|cookie|session|csrf|nonce|execution|flowexecutionkey|(?:^|[_-])(?:state|lt)(?:$|[_-])`)
+	pageSensitiveField  = regexp.MustCompile(`(?i)pass|password|token|secret|sign|randomcode|ticket|cookie|session|csrf|nonce|execution|flowexecutionkey|ysfzjh|yxm(?:py)?|sfzjh|(?:^|[_-])(?:state|lt)(?:$|[_-])`)
 	pageEventAttrs      = []string{"onclick", "onchange", "onsubmit", "ondblclick"}
 	pageEndpointLiteral = regexp.MustCompile(`["']((?:/api/|/ajax/|/rest/|/service/|/graphql|/oauth/|/auth/|/v1/|/v2/|/jsxsd/|/meol/|/moocresource/)[^"'\s<>]*)["']`)
 	pageFunctionName    = regexp.MustCompile(`(?i)\bfunction\s+([A-Za-z_$][\w$]*)\s*\(`)

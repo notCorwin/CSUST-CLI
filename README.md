@@ -71,6 +71,7 @@ password=密码
 ./csust grades detail --term 2025-2026-1 --course-name 课程名称 --json
 ./csust profile --json
 ./csust graduation-conclusion --json
+./csust graduation-info-check --json
 ./csust exams --json
 ./csust course-selection --scope cross-major --json
 ./csust training-plan --keyword 专业核心 --json
@@ -97,6 +98,7 @@ password=密码
 | `login` / `logout` | 教务统一认证或旧登录会话 |
 | `schedule`, `grades`, `profile`, `exams` | 教务查询；成绩包含学分/绩点汇总和成绩构成详情 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
+| `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |
 | `training-plan` | 培养方案执行计划课程 |
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
