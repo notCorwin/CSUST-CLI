@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -86,7 +86,12 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 	case "messages", "received-messages":
 		return a.academicMessages(ctx, args[1:])
 	case "message", "message-detail":
+		if len(args) > 1 && args[1] == "reply" {
+			return a.academicMessageReply(ctx, args[2:])
+		}
 		return a.academicMessage(ctx, args[1:])
+	case "message-reply":
+		return a.academicMessageReply(ctx, args[1:])
 	case "retake-courses", "retake-registration":
 		return a.academicRetakeCourses(ctx, args[1:])
 	case "classroom-request", "room-request":
@@ -359,6 +364,46 @@ func (a NativeSite) academicMessage(ctx context.Context, args []string) (map[str
 	}
 	return academicWrap(map[string]any{
 		"kind": "message", "message_id": id, "content": pageDisplayText(document), "page": page,
+	}), nil
+}
+
+func (a NativeSite) academicMessageReply(ctx context.Context, args []string) (map[string]any, *siteError) {
+	id := strings.TrimSpace(flagValue(args, "--id"))
+	content := flagValue(args, "--content")
+	if id == "" || strings.ContainsAny(id, "/?#&") {
+		return nil, &siteError{Code: "invalid_argument", Message: "message reply 必须提供不含路径的 --id"}
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "message reply 必须提供 --content"}
+	}
+	if len([]rune(content)) > 2000 {
+		return nil, &siteError{Code: "invalid_argument", Message: "--content 不能超过 2000 个字符"}
+	}
+	if !flagPresent(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "回复留言会修改账号数据，请加 --yes"}
+	}
+	detailPath := "/jsxsd/ggly/ggly_show?dpt=ly&ggid=" + url.QueryEscape(id)
+	_, detailURL, detailErr := a.academicPage(ctx, "GET", detailPath, nil, nil)
+	if detailErr != nil {
+		return nil, detailErr
+	}
+	result, submitErr := a.executeAcademicRequestWithRecovery(ctx, siteRequest{
+		Service:      "academic",
+		Path:         "/jsxsd/ggly/lyhf_save",
+		Method:       "POST",
+		CookieFile:   academicCookiePath(),
+		Data:         []pair{{"ggid", id}, {"xmms", content}},
+		Headers:      []pair{{"Referer", detailURL}},
+		RequireLogin: true,
+		Yes:          true,
+	})
+	if submitErr != nil {
+		return nil, submitErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "message-reply", "message_id": id, "content_length": len([]rune(content)),
+		"request":  map[string]any{"method": "POST", "path": "/jsxsd/ggly/lyhf_save", "fields": []string{"ggid", "xmms"}},
+		"response": result["response"], "submitted": true, "confirmed": true, "evidence": "reply-response-confirmed",
 	}), nil
 }
 

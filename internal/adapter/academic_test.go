@@ -265,6 +265,34 @@ func TestAcademicMessageDetailUsesSemanticID(t *testing.T) {
 	}
 }
 
+func TestAcademicMessageReplyRequiresServerSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/jsxsd/ggly/ggly_show":
+			if request.URL.Query().Get("dpt") != "ly" || request.URL.Query().Get("ggid") != "MSG" {
+				t.Fatalf("unexpected message detail request: %s", request.URL.String())
+			}
+			_, _ = writer.Write([]byte(`<html><body>留言详情</body></html>`))
+		case "/jsxsd/ggly/lyhf_save":
+			if err := request.ParseForm(); err != nil || request.Form.Get("ggid") != "MSG" || request.Form.Get("xmms") != "回复内容" {
+				t.Fatalf("unexpected reply form: %v %#v", err, request.Form)
+			}
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = writer.Write([]byte(`<script>alert('回复成功！')</script>`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicMessageReply(context.Background(), []string{"--id", "MSG", "--content", "回复内容", "--yes"})
+	if err != nil || result["submitted"] != true || result["confirmed"] != true || result["evidence"] != "reply-response-confirmed" || result["content_length"] != 4 {
+		t.Fatalf("unexpected message reply: %#v %v", result, err)
+	}
+}
+
 func TestAcademicRetakeRowsKeepEligibilityAndCourseID(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>序号</th><th>是否报名</th><th>上课院审</th><th>开课院审</th><th>取得资格</th><th>学年学期</th><th>开课学期</th><th>课程名称</th><th>学时</th><th>学分</th><th>最好成绩</th><th>替代课程编号</th><th>替代课程名称</th><th>替代课程学时</th><th>替代课程学分</th><th>是否选课</th><th>是否收费</th><th>是否缴费</th><th>重修报名类别</th><th>操作</th></tr><tr><td>1</td><td>×</td><td>√</td><td>√</td><td>×</td><td>2026-2027-1</td><td>2025-2026-1</td><td>线性代数</td><td>40</td><td>2.5</td><td>46</td><td>×</td><td>×</td><td>×</td><td>×</td><td>√</td><td>×</td><td>×</td><td>必选</td><td>+</td></tr><tr><td colspan="20">课程编号:0701001215; 考试性质:重修一</td></tr><tr><td>2</td><td>×</td><td>√</td><td>√</td><td>×</td><td>2026-2027-1</td><td>2025-2026-1</td><td>大学物理</td><td>32</td><td>2</td><td>60</td><td>×</td><td>×</td><td>×</td><td>×</td><td>√</td><td>×</td><td>×</td><td>必选</td><td>+</td></tr><tr><td colspan="20">课程编号:0702000405; 考试性质:重修一</td></tr></table>`)
 	if err != nil {

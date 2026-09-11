@@ -23,7 +23,7 @@ var (
 	pageEventAttrs      = []string{"onclick", "onchange", "onsubmit", "ondblclick"}
 	pageEndpointLiteral = regexp.MustCompile(`["']((?:/api/|/ajax/|/rest/|/service/|/graphql|/oauth/|/auth/|/v1/|/v2/|/jsxsd/|/meol/|/moocresource/)[^"'\s<>]*)["']`)
 	pageFunctionName    = regexp.MustCompile(`(?i)\bfunction\s+([A-Za-z_$][\w$]*)\s*\(`)
-	pageSuccessMessage  = regexp.MustCompile(`^(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|修改|设置|上传|排序|预约|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
+	pageSuccessMessage  = regexp.MustCompile(`^(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|回复|修改|设置|上传|排序|预约|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
 	pageFailureMessage  = regexp.MustCompile(`(?i)(?:失败|错误|拒绝|无效|异常|未授权|禁止|failed|failure|error|denied|invalid|unauthorized|forbidden)`)
 )
 

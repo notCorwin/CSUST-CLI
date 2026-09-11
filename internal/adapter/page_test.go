@@ -40,6 +40,9 @@ func TestPageFeedbackRequiresDirectEvidence(t *testing.T) {
 	if state, known := pageFeedback(`<script>alert('操作成功')</script>`, "text/html"); !state || !known {
 		t.Fatalf("direct script feedback was not confirmed: %v %v", state, known)
 	}
+	if state, known := pageFeedback(`<script>alert('回复成功！')</script>`, "text/html"); !state || !known {
+		t.Fatalf("reply success was not confirmed: %v %v", state, known)
+	}
 }
 
 func TestPageActionResolvesFunctionBody(t *testing.T) {

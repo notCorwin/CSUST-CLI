@@ -26,6 +26,7 @@ func nativeUsage(args []string) []byte {
   announcement --id ID        查看公告正文
   messages                    已收留言与详情
   message --id ID             查看留言正文
+  message reply --id ID       回复留言（需要 --content 和 --yes）
   retake-courses               重修报名可报课程
   terms/semester-start        学期信息
   textbooks                   教材操作
