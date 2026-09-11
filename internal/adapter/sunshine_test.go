@@ -1,11 +1,14 @@
 package adapter
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestSunshinePublicQueriesAndCodeConfirmation(t *testing.T) {
@@ -74,5 +77,62 @@ func TestSunshinePublicQueriesAndCodeConfirmation(t *testing.T) {
 	}
 	if code := runIssueJSON(t, "sunshine", "send-code", "--phone", "13800138000", "--yes"); code["verified_by"] != "response-success" || phone != "13800138000" {
 		t.Fatalf("unexpected sunshine code result: %#v phone=%s", code, phone)
+	}
+}
+
+func TestSunshineSuggestionSubmitsSemanticPayloadAndReadsBack(t *testing.T) {
+	var submitted map[string]any
+	var detailBody map[string]any
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		requests++
+		switch request.URL.Path {
+		case "/api/departments":
+			if request.Method != http.MethodPut || json.NewDecoder(request.Body).Decode(&detailBody) != nil {
+				t.Fatalf("unexpected department request")
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":[{"_id":"department-1","name":"信息化处","nickname":"信息化处"}]}`))
+		case "/api/issues":
+			if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&submitted) != nil {
+				t.Fatalf("unexpected submit request")
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"_id":"issue-1"}}`))
+		case "/api/issues/issue-1":
+			if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&detailBody) != nil {
+				t.Fatalf("unexpected readback request")
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"_id":"issue-1","name":"操场分区建议","type":"建议咨询","department":"department-1"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	handled, _, _, code, err := (NativeSite{}).Run(context.Background(), []string{"sunshine", "suggestion", "--title", "操场分区建议", "--department", "信息化处", "--content", "请说明校区、具体事由和希望的处理方式，内容足够详细。", "--reporter", "张三", "--phone", "13800138000", "--email", "user@example.com", "--role", "student", "--code", "123456", "--expected-date", "2099-01-02", "--json"}, true)
+	if err != nil || !handled || code != 2 || requests != 0 {
+		t.Fatalf("submit should require confirmation: handled=%v code=%d err=%v requests=%d", handled, code, err, requests)
+	}
+
+	result := runIssueJSON(t, "sunshine", "suggestion", "--title", "操场分区建议", "--department", "信息化处", "--content", "请说明校区、具体事由和希望的处理方式，内容足够详细。", "--reporter", "张三", "--phone", "13800138000", "--email", "user@example.com", "--role", "student", "--code", "123456", "--expected-date", "2099-01-02", "--yes")
+	if result["submitted"] != true || result["confirmed"] != true || result["issue_id"] != "issue-1" || result["evidence"] != "POST /api/issues success and detail readback" {
+		t.Fatalf("unexpected sunshine submit result: %#v", result)
+	}
+	if submitted["name"] != "操场分区建议" || submitted["department"] != "department-1" || submitted["type"] != "建议咨询" || submitted["reporter"] != "张三" || submitted["role"] != "本校学生" || submitted["verifyCode"] != "123456" || submitted["needVerifyCode"] != true || submitted["isPublic"] != true {
+		t.Fatalf("semantic submit payload was not mapped: %#v", submitted)
+	}
+	if date, _ := submitted["dateExpected"].(string); func() bool {
+		parsed, parseErr := time.Parse(time.RFC3339Nano, date)
+		return parseErr != nil || parsed.In(time.Local).Format("2006-01-02") != "2099-01-02"
+	}() {
+		t.Fatalf("unexpected expected date: %#v", submitted["dateExpected"])
+	}
+	if attachments, ok := submitted["attachments"].([]any); !ok || len(attachments) != 0 {
+		t.Fatalf("unexpected attachment payload: %#v", submitted["attachments"])
+	}
+	if string(mustJSON(result)) == "" || strings.Contains(string(mustJSON(result)), "123456") || strings.Contains(string(mustJSON(result)), "13800138000") {
+		t.Fatalf("submission secrets leaked in result: %#v", result)
 	}
 }

@@ -143,7 +143,7 @@ password=密码
 | `retake-courses` | 重修报名可报课程、资格和缴费状态 |
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
-| `sunshine` | 教育阳光服务公开诉求、详情、部门、统计和短信验证 |
+| `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
@@ -236,6 +236,8 @@ password=密码
 ./csust sunshine stats --json
 # 发送诉求短信验证码是远端写操作，需要显式确认
 ./csust sunshine send-code --phone 手机号 --yes --json
+# 匿名提交建议/投诉：先发送验证码，再提交并回读详情确认
+./csust sunshine suggestion --title 操场分区建议 --department 信息化处 --content '请说明校区、具体事由和希望的处理方式，内容至少二十个字符。' --reporter 姓名 --phone 手机号 --email user@example.com --role student --code 验证码 --expected-date 2026-09-20 --yes --json
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json

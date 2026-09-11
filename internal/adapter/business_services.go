@@ -282,6 +282,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--page", "--page-size", "--status", "--include-retracted")
 		case "issue":
 			add("--id")
+		case "submit", "create", "suggestion", "complaint":
+			add("--title", "--name", "--department", "--department-id", "--content", "--type", "--expected-date", "--date-expected", "--reporter", "--phone", "--email", "--role", "--code", "--public", "--private", "--yes")
 		case "send-code":
 			add("--phone", "--yes")
 		}

@@ -64,7 +64,7 @@ func nativeUsage(args []string) []byte {
   archive                     学生/综合档案系统
   student-record              学籍档案预约
   staff-record                教工人事档案预约
-  sunshine                    教育阳光服务诉求查询与短信验证
+  sunshine                    教育阳光服务诉求提交/查询与短信验证
   ehall                       eHall 服务、身份、收藏、消息、邮箱、新闻、评价、服务项收藏、周期与详情
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心
