@@ -68,6 +68,7 @@ password=密码
 ./csust exams --json
 ./csust course-selection --scope cross-major --json
 ./csust training-plan --keyword 专业核心 --json
+./csust training-progress --json
 ```
 
 ## 常用命令
@@ -77,7 +78,8 @@ password=密码
 | `login` / `logout` | 教务统一认证或旧登录会话 |
 | `schedule`, `grades`, `profile`, `exams` | 教务查询 |
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |
-| `training-plan` | 培养方案课程与完成情况 |
+| `training-plan` | 培养方案执行计划课程 |
+| `training-progress` | 培养方案课程完成情况和学分汇总 |
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |

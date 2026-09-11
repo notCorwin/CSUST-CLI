@@ -152,3 +152,26 @@ func TestAcademicTrainingPlanUsesSemanticFields(t *testing.T) {
 		t.Fatalf("unexpected semantic training plan: %#v", result)
 	}
 }
+
+func TestAcademicTrainingProgressKeepsCompletionAndCreditSummary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = writer.Write([]byte(`<table><tr><th>课程体系</th><th>选课组</th><th>课程编号</th><th>课程名称</th><th>完成情况</th><th>课程性质</th><th>课程属性</th><th>学分</th><th>学时分类</th><th>开设学期</th></tr><tr><th>讲课学时</th><th>上机学时</th><th>其它学时</th><th>实验学时</th><th>实践学时</th><th>总学时</th></tr><tr><td colspan="10">必修 (应修 10 / 已修 5)</td></tr><tr><td>公共课</td><td></td><td>CS001</td><td>数据结构</td><td>已修(90)</td><td>公共课</td><td>必修</td><td>3</td><td>32</td><td>0</td><td>0</td><td>0</td><td>0</td><td>32</td><td>第2学期</td></tr></table>`))
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicTrainingProgress(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, ok := result["items"].([]map[string]any)
+	if !ok || len(items) != 1 || items[0]["course_id"] != "CS001" || items[0]["completion"] != "已修(90)" || items[0]["credit"] != "3" || items[0]["lecture_hours"] != "32" || items[0]["total_hours"] != "32" || items[0]["offered_term"] != "第2学期" {
+		t.Fatalf("unexpected training progress: %#v", result)
+	}
+	summary, ok := result["credit_summary"].(map[string]map[string]string)
+	if !ok || summary["必修"]["required"] != "10" || summary["必修"]["earned"] != "5" {
+		t.Fatalf("unexpected credit summary: %#v", result["credit_summary"])
+	}
+}

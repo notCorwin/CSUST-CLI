@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -65,6 +65,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicCourseSelection(ctx, args[1:])
 	case "training-plan", "plan", "cultivation-plan":
 		return a.academicTrainingPlan(ctx, args[1:])
+	case "training-progress", "training-plan-progress":
+		return a.academicTrainingProgress(ctx, args[1:])
 	case "classroom-request", "room-request":
 		return a.academicStructuredPage(ctx, args[1:], "classroom-request", "/jsxsd/kbxx/jsjy_query")
 	case "minor", "minor-registration":
@@ -249,6 +251,164 @@ func (a NativeSite) academicTrainingPlan(ctx context.Context, args []string) (ma
 		"kind": "training-plan", "path": "/jsxsd/pyfa/pyfa_query", "keyword": nullableString(keyword),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+var trainingProgressSummaryPattern = regexp.MustCompile(`(必修|选修|实践环节)\s*[（(]\s*应修\s*([^/）)]+)\s*/\s*已修\s*([^）)]+)`)
+
+func (a NativeSite) academicTrainingProgress(ctx context.Context, args []string) (map[string]any, *siteError) {
+	body, pageURL, err := a.academicPage(ctx, "GET", "/jsxsd/pyfa/topyfamx", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicTrainingProgressRows(document, keyword)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "培养方案完成情况页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "training-progress", "path": "/jsxsd/pyfa/topyfamx", "keyword": nullableString(keyword),
+		"credit_summary": academicTrainingProgressSummary(pageDisplayText(document)),
+		"items":          items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func academicTrainingProgressSummary(text string) map[string]map[string]string {
+	result := map[string]map[string]string{}
+	for _, match := range trainingProgressSummaryPattern.FindAllStringSubmatch(text, -1) {
+		if len(match) < 4 {
+			continue
+		}
+		result[strings.TrimSpace(match[1])] = map[string]string{
+			"required": strings.TrimSpace(match[2]),
+			"earned":   strings.TrimSpace(match[3]),
+		}
+	}
+	return result
+}
+
+var trainingProgressCourseCode = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{4,}$`)
+
+func academicTrainingProgressRows(document *pageNode, keyword string) []map[string]any {
+	var rows []*pageNode
+	for _, table := range document.findAll("table") {
+		candidate := directTableRows(table)
+		for _, row := range candidate {
+			values := rowValues(row)
+			if containsValue(values, "课程体系") && containsValue(values, "完成情况") && len(candidate) > len(rows) {
+				rows = candidate
+				break
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return []map[string]any{}
+	}
+	dataStart := 0
+	for index, row := range rows {
+		values := rowValues(row)
+		if !containsValue(values, "课程体系") || !containsValue(values, "完成情况") {
+			continue
+		}
+		dataStart = index + 1
+		if dataStart < len(rows) && containsValue(rowValues(rows[dataStart]), "讲课学时") {
+			dataStart++
+		}
+		break
+	}
+	items := make([]map[string]any, 0)
+	category := ""
+	for _, row := range rows[dataStart:] {
+		values := rowValues(row)
+		text := strings.TrimSpace(pageDisplayText(row))
+		if len(values) == 0 || allEmpty(values) {
+			continue
+		}
+		codeIndex := -1
+		for index, value := range values {
+			if trainingProgressCourseCode.MatchString(strings.TrimSpace(value)) {
+				codeIndex = index
+				break
+			}
+		}
+		if codeIndex < 0 {
+			if current := trainingProgressCategory(values); current != "" {
+				category = current
+			}
+			continue
+		}
+		if keyword != "" && !strings.Contains(strings.ToLower(text), strings.ToLower(keyword)) {
+			continue
+		}
+		item := map[string]any{
+			"index":      len(items) + 1,
+			"cells":      values,
+			"text":       text,
+			"course_id":  values[codeIndex],
+			"course":     trainingProgressValue(values, codeIndex+1),
+			"completion": trainingProgressValue(values, codeIndex+2),
+		}
+		if current := trainingProgressCategory(values); current != "" {
+			category = current
+		}
+		if category != "" {
+			item["curriculum"] = category
+		}
+		if codeIndex >= 2 {
+			item["selection_group"] = trainingProgressValue(values, 1)
+		} else if codeIndex == 1 && strings.TrimSpace(values[0]) != "" && trainingProgressCategory(values) == "" {
+			item["selection_group"] = values[0]
+		}
+		item["course_nature"] = trainingProgressValue(values, codeIndex+3)
+		item["course_attribute"] = trainingProgressValue(values, codeIndex+4)
+		item["credit"] = trainingProgressValue(values, codeIndex+5)
+		item["lecture_hours"] = trainingProgressValue(values, codeIndex+6)
+		item["computer_hours"] = trainingProgressValue(values, codeIndex+7)
+		item["other_hours"] = trainingProgressValue(values, codeIndex+8)
+		item["experiment_hours"] = trainingProgressValue(values, codeIndex+9)
+		item["practice_hours"] = trainingProgressValue(values, codeIndex+10)
+		item["total_hours"] = trainingProgressValue(values, codeIndex+11)
+		if len(values) > codeIndex+11 {
+			item["offered_term"] = values[len(values)-1]
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func containsValue(values []string, wanted string) bool {
+	for _, value := range values {
+		if strings.Contains(strings.ReplaceAll(value, " ", ""), wanted) {
+			return true
+		}
+	}
+	return false
+}
+
+func trainingProgressValue(values []string, index int) string {
+	if index < 0 || index >= len(values) {
+		return ""
+	}
+	return values[index]
+}
+
+func trainingProgressCategory(values []string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		for _, category := range []string{"必修", "选修", "实践环节"} {
+			if strings.HasPrefix(value, category) && strings.Contains(value, "应修") {
+				return category
+			}
+		}
+	}
+	return ""
 }
 
 func academicStructuredRows(document *pageNode, keyword string, field func(string) string) []map[string]any {
