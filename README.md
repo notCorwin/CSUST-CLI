@@ -76,6 +76,8 @@ password=密码
 ./csust training-plan --keyword 专业核心 --json
 ./csust training-progress --json
 ./csust deferred-exam-applications --term 2025-2026-1 --status approved --json
+./csust drop-course-applications --json
+./csust student-status-changes --json
 ./csust second-class-credits --json
 ./csust second-class-credit-applications --json
 ./csust second-class-credit-application --id APPLICATION_ID --json
@@ -99,6 +101,8 @@ password=密码
 | `training-plan` | 培养方案执行计划课程 |
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
 | `deferred-exam-applications` | 按学期、缓考活动、课程和审核状态查询缓考申请记录 |
+| `drop-course-applications` | 可退课程、课程属性和退课审核状态 |
+| `student-status-changes` | 个人信息修改历史、审核状态和修改说明 |
 | `second-class-credits` | 第二课堂学分认定查询 |
 | `second-class-credit-applications` | 第二课堂学分申报及审核状态，包含 `application_id` 和流程详情路径 |
 | `second-class-credit-application --id` | 查看申报项目获得时间、审核历史和认定历史 |

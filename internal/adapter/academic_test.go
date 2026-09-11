@@ -256,6 +256,28 @@ func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *te
 	}
 }
 
+func TestAcademicDropCourseRowsKeepSemanticFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>课程名称</th><th>课程编号</th><th>授课教师</th><th>总学时</th><th>学分</th><th>课程属性</th><th>课程性质</th><th>审核状态</th><th>操作</th></tr><tr><td>数据结构</td><td>CS001</td><td>张老师</td><td>48</td><td>3</td><td>专业核心</td><td>必修</td><td>待审核</td><td>申请</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicDropCourseField)
+	if len(rows) != 1 || rows[0]["course"] != "数据结构" || rows[0]["course_id"] != "CS001" || rows[0]["teacher"] != "张老师" || rows[0]["hours"] != "48" || rows[0]["credit"] != "3" || rows[0]["course_attribute"] != "专业核心" || rows[0]["course_nature"] != "必修" || rows[0]["status"] != "待审核" || rows[0]["action"] != "申请" {
+		t.Fatalf("unexpected drop course row: %#v", rows)
+	}
+}
+
+func TestAcademicStudentStatusChangeRowsKeepAuditFields(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>学号</th><th>姓名</th><th>修改字段</th><th>修改信息</th><th>审核状态</th><th>修改时间</th><th>操作</th></tr><tr><td>1</td><td>202401150107</td><td>张三</td><td>电话</td><td>电话:无数据-->13800000000</td><td>通过</td><td>2026-01-02</td><td>查看</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicStudentStatusChangeField)
+	if len(rows) != 1 || rows[0]["student_id"] != "202401150107" || rows[0]["name"] != "张三" || rows[0]["changed_field"] != "电话" || rows[0]["change_detail"] != "电话:无数据-->13800000000" || rows[0]["review_status"] != "通过" || rows[0]["modified_at"] != "2026-01-02" || rows[0]["action"] != "查看" {
+		t.Fatalf("unexpected student status change row: %#v", rows)
+	}
+}
+
 func TestAcademicSecondClassCreditRowsKeepApplicationStates(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>序号</th><th>组织方式</th><th>学年学期</th><th>分类名称</th><th>获得项目时间</th><th>认定学分</th><th>审核状态</th><th>认定状态</th><th>备注</th><th>操作</th></tr><tr><td>1</td><td>个人</td><td>2025-2026-1</td><td>学科竞赛</td><td>2026-01-01</td><td>2</td><td>已通过</td><td>已认定</td><td>备注</td><td>流程</td></tr></table>`)
 	if err != nil {
