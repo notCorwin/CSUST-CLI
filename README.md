@@ -142,7 +142,7 @@ password=密码
 | `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
 | `teaching` | 网络教学平台页面和课程 |
 | `quality` | 教学质量保障系统及评价 |
-| `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻和周期提醒 |
+| `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价和周期提醒 |
 | `services` | 已映射业务服务及依据 |
 | `site` | 任意官方子域名的通用适配器 |
 
@@ -206,6 +206,7 @@ password=密码
 ./csust ehall service-cycles --json
 ./csust ehall mail-status --json
 ./csust ehall news --channel 教务 --page 1 --json
+./csust ehall rating --id SERVICE_ID --page 1 --page-size 10 --json
 ./csust ehall favorite add --service-id SERVICE_ID --yes --json
 ./csust ehall favorite remove --service-id SERVICE_ID --yes --json
 

@@ -293,6 +293,9 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		if operation == "news" {
 			add("--channel", "--page")
 		}
+		if operation == "rating" || operation == "service-rating" {
+			add("--id", "--page", "--page-size")
+		}
 		if operation == "service" || operation == "detail" || operation == "health" {
 			add("--id")
 		}

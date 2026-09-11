@@ -40,6 +40,9 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "news" {
 		return a.ehallNews(ctx, args[1:], cookie)
 	}
+	if args[0] == "rating" || args[0] == "service-rating" {
+		return a.ehallServiceRating(ctx, args[1:], cookie)
+	}
 	if args[0] == "favorite" {
 		if len(args) == 1 {
 			return a.ehallFavorites(ctx, cookie)
@@ -65,7 +68,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、mail-status、news、favorite add/remove、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、mail-status、news、rating、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -443,6 +446,77 @@ func (a NativeSite) ehallNews(ctx context.Context, args []string, cookie string)
 		"service": "ehall", "operation": "news", "page": page, "channel": nullableString(channelFilter),
 		"cards": resultCards, "card_count": len(resultCards), "item_count": itemCount,
 		"api": map[string]any{"page_view": "/getPageView", "card_config": "getNewsConfig", "subscriptions": "getConfiguredAndSubscribedChannel", "news": "getChannelNews"},
+	}, nil
+}
+
+func (a NativeSite) ehallServiceRating(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	id, requiredErr := businessRequired(args, "--id", "ehall rating 必须提供 --id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	pageSize, pageSizeErr := businessInt(args, "--page-size", 10)
+	if pageSizeErr != nil {
+		return nil, pageSizeErr
+	}
+	options := ehallRequestOptions(cookie)
+	modeResult, requestErr := a.businessGet(ctx, "ehall", "/appAppraise/getServiceAppraiseMode", nil, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	mode, modeErr := ehallEnvelopeValue(modeResult)
+	if modeErr != nil {
+		return nil, modeErr
+	}
+	modeName := strings.TrimSpace(fmt.Sprint(mode))
+	if modeName == "" || modeName == "<nil>" {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 服务评价响应缺少评价模式"}
+	}
+	summaryResult, requestErr := a.businessGet(ctx, "ehall", "/appAppraise/appraiseSummary", []pair{{name: "appId", value: id}}, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	summary, summaryErr := ehallEnvelopeData(summaryResult)
+	if summaryErr != nil {
+		return nil, summaryErr
+	}
+	phraseResult, requestErr := a.businessGet(ctx, "ehall", "/appAppraise/getUserCommentPhraseList", []pair{{name: "serviceWid", value: id}}, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	phrases, phraseErr := ehallEnvelopeData(phraseResult)
+	if phraseErr != nil {
+		return nil, phraseErr
+	}
+	reviewParams := []pair{
+		{name: "appId", value: id}, {name: "pageSize", value: strconv.Itoa(pageSize)},
+		{name: "pageNum", value: strconv.Itoa(page)}, {name: "scoreLevel", value: "0"},
+	}
+	if modeName == "2" {
+		reviewParams = append(reviewParams, pair{name: "commentPhrase", value: ""})
+	} else {
+		reviewParams = append(reviewParams, pair{name: "appraiseType", value: ""})
+	}
+	reviewResult, requestErr := a.businessGet(ctx, "ehall", "/appAppraise/queryAppraiseByPageNew", reviewParams, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	reviews, reviewsErr := ehallEnvelopeData(reviewResult)
+	if reviewsErr != nil {
+		return nil, reviewsErr
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "service-rating", "service_id": id,
+		"mode": mode, "summary": summary, "comment_phrases": phrases, "reviews": reviews,
+		"page": page, "page_size": pageSize,
+		"api": map[string]any{
+			"mode": "/appAppraise/getServiceAppraiseMode", "summary": "/appAppraise/appraiseSummary",
+			"phrases": "/appAppraise/getUserCommentPhraseList", "reviews": "/appAppraise/queryAppraiseByPageNew",
+		},
 	}, nil
 }
 

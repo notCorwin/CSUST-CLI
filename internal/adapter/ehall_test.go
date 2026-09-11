@@ -54,6 +54,32 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"type": 0, "cycleName": "考试报名", "list": []any{}}},
 			})
+		case "/appAppraise/getServiceAppraiseMode":
+			if request.Method != http.MethodGet {
+				t.Fatalf("rating mode method = %s", request.Method)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": "1"})
+		case "/appAppraise/appraiseSummary":
+			if request.Method != http.MethodGet || request.URL.Query().Get("appId") != "svc-1" {
+				t.Fatalf("rating summary query = %s", request.URL.RawQuery)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
+				"isAppraised": false, "appraiseSummary": map[string]any{"total": 2, "avgScore": 4.5}, "dimensionScores": []any{},
+			}})
+		case "/appAppraise/getUserCommentPhraseList":
+			if request.Method != http.MethodGet || request.URL.Query().Get("serviceWid") != "svc-1" {
+				t.Fatalf("rating phrase query = %s", request.URL.RawQuery)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{"parseList": []any{}}})
+		case "/appAppraise/queryAppraiseByPageNew":
+			query := request.URL.Query()
+			if request.Method != http.MethodGet || query.Get("appId") != "svc-1" || query.Get("pageSize") != "5" || query.Get("pageNum") != "2" || query.Get("scoreLevel") != "0" || query.Get("appraiseType") != "" {
+				t.Fatalf("rating reviews query = %s", request.URL.RawQuery)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
+				"allCount": 2, "goodCount": 2, "middleCount": 0, "badCount": 0, "dimensionCount": 0, "noDimensionCount": 2,
+				"data": map[string]any{"records": []any{map[string]any{"content": "很好"}}, "total": 2},
+			}})
 		case "/execCardMethod/mail-card/CUS_CARD_TENCENTMAIL":
 			var body map[string]any
 			if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&body) != nil {
@@ -184,6 +210,13 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	health := runIssueJSON(t, "ehall", "health", "--id", "svc-1", "--cookie-file", cookie)
 	if health["service_id"] != "svc-1" || health["health"].(map[string]any)["pcHttpCode"] != float64(200) {
 		t.Fatalf("service health was not preserved: %#v", health)
+	}
+	rating := runIssueJSON(t, "ehall", "rating", "--id", "svc-1", "--page", "2", "--page-size", "5", "--cookie-file", cookie)
+	if rating["service_id"] != "svc-1" || rating["mode"] != "1" || rating["summary"].(map[string]any)["isAppraised"] != false {
+		t.Fatalf("service rating summary was not normalized: %#v", rating)
+	}
+	if rating["reviews"].(map[string]any)["allCount"] != float64(2) {
+		t.Fatalf("service rating reviews were not preserved: %#v", rating)
 	}
 
 	me := runIssueJSON(t, "ehall", "me", "--cookie-file", cookie)
