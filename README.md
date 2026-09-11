@@ -130,18 +130,6 @@ CSUST_EXPLORATION=1 ./csust site discover --service official --path / --depth 1 
 CSUST_EXPLORATION=1 ./csust site scripts --service map --path / --json
 ```
 
-## 网站能力探索基础设施
-
-仓库同时提供独立的 Playwright/TypeScript 探索器，用于在实现 Go 业务 adapter 前完成站点勘察、能力清单、语义映射和覆盖审计。它支持任意 HTTP(S) 站点；登录态可通过 Playwright `storageState` 配置复用，默认只读并不会点击或提交业务写操作。
-
-```bash
-npm install
-npx playwright install chromium
-npm run explore -- --config exploration/example.config.json
-```
-
-配置支持多个 target、入口路径、允许访问的 host、探索深度/页数、认证 profile 和语义映射；已有 Playwright `storageState` 可直接复用。使用 `--headed` 进行人工观察；使用 `--probe-actions` 时，工具会在浏览器内模拟非 GET 表单并将页面产生的 `POST`、`PUT`、`PATCH`、`DELETE` 请求拦截为 dry-run 证据，不会送达网站。输出是机器可读的 `exploration.json`，其中每项能力都区分发现、映射、已实现、部分实现、不可访问和未探索状态。
-
 ## 认证与会话
 
 会话文件由 adapter 管理并尽量以 `600` 权限保存。默认位置如下：

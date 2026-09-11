@@ -6,6 +6,3 @@ __pycache__/
 csust
 
 .venv/
-
-node_modules/
-exploration.json
