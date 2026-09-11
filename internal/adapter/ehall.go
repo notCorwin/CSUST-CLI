@@ -21,6 +21,9 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "services" || args[0] == "catalog" || strings.HasPrefix(args[0], "--") {
 		return a.ehallServices(ctx, cookie)
 	}
+	if args[0] == "favorites" || args[0] == "favorite" {
+		return a.ehallFavorites(ctx, cookie)
+	}
 	if args[0] == "service" || args[0] == "detail" {
 		id, requiredErr := businessRequired(args[1:], "--id", "ehall service 必须提供 --id")
 		if requiredErr != nil {
@@ -38,7 +41,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -168,6 +171,26 @@ func (a NativeSite) ehallHealth(ctx context.Context, id, cookie string) (map[str
 	}, nil
 }
 
+func (a NativeSite) ehallFavorites(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessPostJSON(ctx, "ehall", "/queryFolderAndService", map[string]any{}, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	folders, ok := value.([]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 收藏夹响应不是数组"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "favorites", "scope": "current-user",
+		"folders": folders, "folder_count": len(folders),
+	}, nil
+}
+
 func (a NativeSite) ehallMe(ctx context.Context, cookie string) (map[string]any, *siteError) {
 	result, requestErr := a.businessGet(ctx, "ehall", "/getLoginUserAndGuest", nil, ehallRequestOptions(cookie))
 	if requestErr != nil {
@@ -199,6 +222,18 @@ func ehallRequestOptions(cookie string) businessRequestOptions {
 }
 
 func ehallEnvelopeData(result map[string]any) (map[string]any, *siteError) {
+	value, dataErr := ehallEnvelopeValue(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	data, ok := value.(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 响应缺少 data 对象"}
+	}
+	return data, nil
+}
+
+func ehallEnvelopeValue(result map[string]any) (any, *siteError) {
 	value, ok := businessData(result)
 	if !ok {
 		return nil, &siteError{Code: "parse_error", Message: "eHall 响应不是 JSON"}
@@ -214,9 +249,9 @@ func ehallEnvelopeData(result map[string]any) (map[string]any, *siteError) {
 		}
 		return nil, &siteError{Code: "business_rejected", Message: message, Details: map[string]any{"api_code": envelope["errcode"]}}
 	}
-	data, ok := envelope["data"].(map[string]any)
-	if !ok {
-		return nil, &siteError{Code: "parse_error", Message: "eHall 响应缺少 data 对象"}
+	data, exists := envelope["data"]
+	if !exists {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 响应缺少 data"}
 	}
 	return data, nil
 }

@@ -18,6 +18,13 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			t.Fatalf("eHall headers were not sent: %#v", request.Header)
 		}
 		switch request.URL.Path {
+		case "/queryFolderAndService":
+			if request.Method != http.MethodPost {
+				t.Fatalf("favorites method = %s", request.Method)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"wid": "folder-1", "folderName": "默认收藏夹"}},
+			})
 		case "/getLoginUserAndGuest":
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
@@ -112,5 +119,10 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	me := runIssueJSON(t, "ehall", "me", "--cookie-file", cookie)
 	if me["logged_in"] != true || me["user"].(map[string]any)["category"] != "学生/本专科生" {
 		t.Fatalf("eHall identity was not normalized: %#v", me)
+	}
+
+	favorites := runIssueJSON(t, "ehall", "favorites", "--cookie-file", cookie)
+	if favorites["folder_count"] != float64(1) || favorites["folders"].([]any)[0].(map[string]any)["folderName"] != "默认收藏夹" {
+		t.Fatalf("eHall favorites were not preserved: %#v", favorites)
 	}
 }
