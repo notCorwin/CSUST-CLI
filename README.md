@@ -148,6 +148,7 @@ password=密码
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
+| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩和财务查询 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
@@ -259,6 +260,13 @@ password=密码
 ./csust professional-learning notices --json
 ./csust professional-learning notice --id NOTICE_ID --json
 ./csust institutional-learning courses --kind public --year 2026 --json
+# 交通运输工程综合信息：登录后保存令牌并验证身份，再查询待办、字典、答辩和财务项目
+./csust transport-mobile login --username 工号 --password-stdin --json
+./csust transport-mobile profile --json
+./csust transport-mobile pending --json
+./csust transport-mobile dictionaries --code Finance.Type --json
+./csust transport-mobile defenses --keyword 博士 --page-size 20 --json
+./csust transport-mobile finances --keyword 科研 --json
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json
