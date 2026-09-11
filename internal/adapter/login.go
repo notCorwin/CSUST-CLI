@@ -371,6 +371,9 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 	if failure := loginFailure(body); failure != nil {
 		return nil, failure
 	}
+	if loginPageBody(body) {
+		return nil, &siteError{Code: "authentication_failed", Message: "教务登录失败，未建立有效会话"}
+	}
 	probe := root
 	probe.Path = academicProbePath
 	if _, probeErr := a.loginHTTP(ctx, siteRequest{Target: &probe, SessionTarget: &root, CookieFile: cookiePath, Method: "GET", RequireLogin: true, ReadOnly: true, Yes: true}); probeErr != nil {

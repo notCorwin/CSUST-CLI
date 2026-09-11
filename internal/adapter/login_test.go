@@ -35,6 +35,10 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 				_, _ = writer.Write([]byte("密码错误"))
 				return
 			}
+			if captcha == "page" {
+				_, _ = writer.Write([]byte(`<form id="loginForm"><input name="userAccount"><input name="userPassword"></form>`))
+				return
+			}
 			http.SetCookie(writer, &http.Cookie{Name: "AUTH", Value: "1", Path: "/"})
 			_, _ = writer.Write([]byte("登录成功"))
 		case academicProbePath:
@@ -76,6 +80,9 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 	if _, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local", captcha: "bad"}); err == nil || err.Code != "authentication_failed" {
 		t.Fatalf("expected invalid credentials to map to authentication_failed, got %v", err)
+	}
+	if _, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local", captcha: "page"}); err == nil || err.Code != "authentication_failed" {
+		t.Fatalf("expected login page response to map to authentication_failed, got %v", err)
 	}
 	if _, statErr := os.Stat(cookieFile); statErr != nil {
 		t.Fatal(statErr)
