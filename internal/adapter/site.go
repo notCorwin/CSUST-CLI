@@ -112,6 +112,7 @@ var knownSites = map[string]serviceInfo{
 	"alumni":                 {host: "xy.csust.edu.cn", scheme: "https", path: "/"},
 	"app":                    {host: "app.csust.edu.cn:8087", scheme: "http", path: "/magus/appapi/downloadpage"},
 	"library-remote":         {host: "tsgvpn2.csust.edu.cn", scheme: "https", path: "/"},
+	"campus-map":             {host: "gis.csust.edu.cn", scheme: "https", path: "/"},
 	"equipment":              {host: "cslgdygx.csust.edu.cn", scheme: "https", path: "/"},
 	"highway":                {host: "highwayexperiment.csust.edu.cn", scheme: "https", path: "/"},
 	"training":               {host: "gcxljxgl.csust.edu.cn", scheme: "http", path: "/"},

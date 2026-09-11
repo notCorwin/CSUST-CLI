@@ -150,6 +150,7 @@ password=密码
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
 | `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务及学院业务查询 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
+| `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
@@ -274,6 +275,13 @@ password=密码
 ./csust library-remote databases --keyword 知网 --sort visits --json
 ./csust library-remote databases --subject 工学 --json
 ./csust library-remote database --id 1 --json
+# 校园地图：校区、公共点分类/详情、地点搜索和全景资源
+./csust campus-map zones --json
+./csust campus-map types --campus 云塘 --json
+./csust campus-map points --campus 云塘 --type 停车场 --json
+./csust campus-map search --campus 云塘 --keyword 图书馆 --json
+./csust campus-map point --id 1 --json
+./csust campus-map panoramas --campus 云塘 --kind panorama --json
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json
