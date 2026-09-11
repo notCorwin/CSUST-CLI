@@ -326,6 +326,38 @@ func TestAcademicClassChangeRowsKeepBeforeAndAfterSchedule(t *testing.T) {
 	}
 }
 
+func TestAcademicInClassExamsUsesSemanticFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch request.URL.Path {
+		case "/jsxsd/xsks/xsstk_query":
+			_, _ = writer.Write([]byte(`<select id="xnxqid"><option value="2026-2027-1" selected>2026-2027-1</option></select><select id="xqlb"><option value="1">提前期末考试</option><option value="2">平时考察</option></select>`))
+		case "/jsxsd/xsks/xsstk_list":
+			if err := request.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if request.Form.Get("xnxqid") != "2025-2026-1" || request.Form.Get("xqlb") != "2" || request.Form.Get("xqlbmc") != "平时考察" {
+				t.Fatalf("unexpected in-class exam filters: %#v", request.Form)
+			}
+			_, _ = writer.Write([]byte(`<table id="dataList"><tr><th>学年学期</th><th>课程编号</th><th>课程名称</th><th>考试周次</th><th>考试星期</th><th>考试节次</th><th>监考老师</th><th>考试教室</th><th>考试时间</th><th>考试类型</th></tr><tr><td>2025-2026-1</td><td>CS001</td><td>数据结构</td><td>8</td><td>星期一</td><td>1-2</td><td>张老师</td><td>A101</td><td>2026-04-20 08:00-10:00</td><td>平时考察</td></tr></table>`))
+		default:
+			t.Fatalf("unexpected in-class exam path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result, err := (NativeSite{}).academicInClassExams(context.Background(), []string{"--term", "2025-2026-1", "--exam-type", "平时考察"})
+	if err != nil || result["term"] != "2025-2026-1" || result["exam_type"] != "平时考察" || result["item_count"] != 1 {
+		t.Fatalf("unexpected in-class exam result: %#v %v", result, err)
+	}
+	items, ok := result["items"].([]map[string]any)
+	if !ok || items[0]["course_id"] != "CS001" || items[0]["exam_week"] != "8" || items[0]["invigilator"] != "张老师" || items[0]["room"] != "A101" {
+		t.Fatalf("unexpected in-class exam items: %#v", result["items"])
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")

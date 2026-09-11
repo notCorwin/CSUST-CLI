@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -61,6 +61,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicGraduationInfoCheck(ctx)
 	case "exams", "exam":
 		return a.academicExams(ctx, args[1:])
+	case "in-class-exams", "in-class-exam", "class-exams":
+		return a.academicInClassExams(ctx, args[1:])
 	case "classrooms", "rooms":
 		return a.academicClassrooms(ctx, args[1:])
 	case "selections", "selection", "course-results":
@@ -1442,6 +1444,34 @@ func academicDeferredExamField(value string) string {
 	}
 }
 
+func academicInClassExamField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "学年学期"):
+		return "term"
+	case strings.Contains(value, "课程编号") || strings.Contains(value, "课程代码"):
+		return "course_id"
+	case strings.Contains(value, "课程名称") || value == "课程":
+		return "course"
+	case strings.Contains(value, "考试周次"):
+		return "exam_week"
+	case strings.Contains(value, "考试星期"):
+		return "exam_weekday"
+	case strings.Contains(value, "考试节次"):
+		return "exam_section"
+	case strings.Contains(value, "监考老师") || strings.Contains(value, "监考教师"):
+		return "invigilator"
+	case strings.Contains(value, "考试教室") || value == "教室":
+		return "room"
+	case strings.Contains(value, "考试时间"):
+		return "exam_time"
+	case strings.Contains(value, "考试类型"):
+		return "exam_type"
+	default:
+		return academicPageField(value)
+	}
+}
+
 func academicEnrollmentProofField(value string) string {
 	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
 	switch {
@@ -2008,6 +2038,49 @@ func (a NativeSite) academicExams(ctx context.Context, args []string) (map[strin
 		return nil, dataErr
 	}
 	return academicWrap(map[string]any{"term": term, "items": items, "url": safeSiteURL(mustParseURL(pageURL))}), nil
+}
+
+func (a NativeSite) academicInClassExams(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const queryPath = "/jsxsd/xsks/xsstk_query"
+	const listPath = "/jsxsd/xsks/xsstk_list"
+	queryBody, queryURL, err := a.academicPage(ctx, "GET", queryPath, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	queryDocument, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	term := strings.TrimSpace(flagValue(args, "--term"))
+	if term == "" {
+		term = selectedOptionPage(queryDocument, "xnxqid")
+	}
+	examType, examTypeID, optionErr := academicNamedPageOption(queryDocument, "xqlb", flagValue(args, "--exam-type"), "考试类型")
+	if optionErr != nil {
+		return nil, optionErr
+	}
+	body, pageURL, err := a.academicPage(ctx, "POST", listPath, []pair{
+		{"xnxqid", term}, {"xqlb", examTypeID}, {"xqlbmc", examType},
+	}, []pair{{"Referer", queryURL}})
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	items := academicStructuredRows(document, "", academicInClassExamField)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "随堂考查询未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "in-class-exams", "path": listPath, "term": nullableString(term), "exam_type": nullableString(examType),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
 }
 
 func (a NativeSite) academicClassrooms(ctx context.Context, args []string) (map[string]any, *siteError) {

@@ -16,7 +16,8 @@ func nativeUsage(args []string) []byte {
   schedule/grades/profile     教务查询
   graduation-conclusion       毕业结论查询
   graduation-info-check       毕业生信息核对
-  exams/classrooms/selections 教务查询
+  exams/in-class-exams       考试安排与随堂考查询
+  classrooms/selections      教室与选课查询
   course-selection            选课中心/跨专业选修课程
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况

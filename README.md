@@ -73,6 +73,7 @@ password=密码
 ./csust graduation-conclusion --json
 ./csust graduation-info-check --json
 ./csust exams --json
+./csust in-class-exams --term 2026-2027-1 --exam-type 平时考察 --json
 ./csust course-selection --scope cross-major --json
 ./csust training-plan --keyword 专业核心 --json
 ./csust training-progress --json
@@ -105,7 +106,7 @@ password=密码
 | 命令 | 用途 |
 | --- | --- |
 | `login` / `logout` | 教务统一认证或旧登录会话 |
-| `schedule`, `grades`, `profile`, `exams` | 教务查询；成绩包含学分/绩点汇总和成绩构成详情 |
+| `schedule`, `grades`, `profile`, `exams`, `in-class-exams` | 教务查询；成绩包含学分/绩点汇总和成绩构成详情 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
 | `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
 | `classrooms`, `selections`, `course-selection`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major` |
@@ -172,6 +173,8 @@ password=密码
 
 # VPN 和网络教学
 ./csust vpn login --auth cas --password-stdin --json
+./csust vpn login second-auth --method phone --login-number 13800138000 --send-code --yes --json
+./csust vpn login second-auth --method phone --login-number 13800138000 --code CODE --json
 ./csust vpn status --json
 ./csust vpn apps --tab all --json
 ./csust vpn groups --json
