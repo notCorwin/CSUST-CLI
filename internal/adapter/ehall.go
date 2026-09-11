@@ -28,7 +28,14 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 		}
 		return a.ehallService(ctx, id, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、service、detail、catalog"}
+	if args[0] == "health" {
+		id, requiredErr := businessRequired(args[1:], "--id", "ehall health 必须提供 --id")
+		if requiredErr != nil {
+			return nil, requiredErr
+		}
+		return a.ehallHealth(ctx, id, cookie)
+	}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、service、detail、health、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -135,6 +142,26 @@ func (a NativeSite) ehallService(ctx context.Context, id, cookie string) (map[st
 		"service": "ehall", "operation": "service", "service_id": id,
 		"service_info": infoData["serviceInfo"], "access": accessData,
 		"login": infoData["login"], "is_login": infoData["isLogin"], "local_lang": infoData["localLang"],
+	}, nil
+}
+
+func (a NativeSite) ehallHealth(ctx context.Context, id, cookie string) (map[string]any, *siteError) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "ehall health --id 不能为空"}
+	}
+	result, requestErr := a.businessGet(ctx, "ehall", "/service/getHealthInfo", []pair{{name: "serviceWid", value: id}}, ehallRequestOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, dataErr := ehallEnvelopeData(result)
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "health", "service_id": id,
+		"health": data,
 	}, nil
 }
 

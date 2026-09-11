@@ -59,6 +59,15 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 					"serviceName": "教务系统", "serviceUrl": "https://example.test/sso", "grantData": nil,
 				},
 			})
+		case "/service/getHealthInfo":
+			if request.URL.Query().Get("serviceWid") != "svc-1" {
+				t.Fatalf("health query = %s", request.URL.RawQuery)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"errcode": "0", "errmsg": "success", "data": map[string]any{
+					"wid": "svc-1", "pcHttpCode": 200, "mobileHttpCode": 200, "serviceLimitVisit": 0,
+				},
+			})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -85,5 +94,9 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	detail := runIssueJSON(t, "ehall", "service", "--id", "svc-1", "--cookie-file", cookie)
 	if detail["service_id"] != "svc-1" || detail["access"].(map[string]any)["serviceUrl"] != "https://example.test/sso" {
 		t.Fatalf("service detail was not preserved: %#v", detail)
+	}
+	health := runIssueJSON(t, "ehall", "health", "--id", "svc-1", "--cookie-file", cookie)
+	if health["service_id"] != "svc-1" || health["health"].(map[string]any)["pcHttpCode"] != float64(200) {
+		t.Fatalf("service health was not preserved: %#v", health)
 	}
 }
