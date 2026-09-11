@@ -56,6 +56,7 @@ var businessServices = []businessService{
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data and exposes student/company modules"},
 	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "linked external page returned title 统招生学籍查询_长沙理工大学档案馆 查询预约系统"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
+	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
 	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
@@ -73,7 +74,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "continuing-education", "virtual-lab", "library-center", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -120,6 +121,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeStudentRecord(ctx, args[1:])
 	case "staff-record":
 		return a.executeStaffRecord(ctx, args[1:])
+	case "sunshine":
+		return a.executeSunshine(ctx, args[1:])
 	case "continuing-education":
 		return a.executeContinuingEducation(ctx, args[1:])
 	case "virtual-lab":
@@ -269,6 +272,16 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--kind", "--yes", "--file")
 		case "request":
 			add("--kind", "--yes", "--subject-name", "--birth-date", "--employee-id", "--subject-unit", "--applicant-name", "--phone", "--unit", "--introduction-token", "--introduction-file", "--usage", "--reason", "--content", "--appointment-date", "--captcha", "--captcha-image")
+		}
+	case "sunshine":
+		common()
+		switch operation {
+		case "issues":
+			add("--page", "--page-size", "--status", "--include-retracted")
+		case "issue":
+			add("--id")
+		case "send-code":
+			add("--phone", "--yes")
 		}
 	case "continuing-education":
 		common()

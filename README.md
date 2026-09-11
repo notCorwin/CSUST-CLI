@@ -9,10 +9,11 @@
 ## 能做什么
 
 - 教务：课表、成绩、个人信息、考试、空教室、选课结果、培养方案、第二课堂学分、学期信息、教材和教学评价。
+- 学籍：学籍预警、学籍卡片及毕业相关页面的结构化入口。
 - 网页映射：教务菜单、页面快照、表单和动作调用、公开入口及毕业设计跳转。
 - VPN：登录、状态、退出、页面/控件/API 目录、文件资源和已映射 API 调用。
 - 网络教学与教学质量保障：课程、课程详情、页面请求、教学评价和页面目录。
-- 其他业务服务：录取通知书、期刊、云就业、OnlineJudge、党校考试、学生/教工档案、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
+- 其他业务服务：录取通知书、期刊、云就业、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
 - 全站适配：对 `csust.edu.cn` 根域名和子域名提供结构化页面、表单、动作和通用请求能力。
 
 业务命令使用语义参数；需要保留网页特有能力时，再使用 `web`、`teaching`、`quality`、`vpn` 或 `site` 的通用映射命令。服务目录和页面/API 目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
@@ -71,6 +72,7 @@ password=密码
 ./csust training-progress --json
 ./csust second-class-credits --json
 ./csust second-class-credit-applications --json
+./csust status-warnings --json
 ```
 
 ## 常用命令
@@ -84,8 +86,10 @@ password=密码
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
 | `second-class-credits` | 第二课堂学分认定查询 |
 | `second-class-credit-applications` | 第二课堂学分申报及审核状态 |
+| `status-warnings` | 学籍预警及处理结果 |
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
+| `sunshine` | 教育阳光服务公开诉求、详情、部门、统计和短信验证 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
 | `vpn` | VPN 门户、会话、目录和 API |
@@ -139,6 +143,10 @@ password=密码
 ./csust journal search --journal transport --query 软岩 --page-size 20 --json
 ./csust employment list --kind career --json
 ./csust onlinejudge problems --limit 20 --json
+./csust sunshine issues --status 受理中 --json
+./csust sunshine stats --json
+# 发送诉求短信验证码是远端写操作，需要显式确认
+./csust sunshine send-code --phone 手机号 --yes --json
 
 # 全站通用页面与请求；写请求需要 --yes
 ./csust site get --service official --path / --json

@@ -20,6 +20,7 @@ func nativeUsage(args []string) []byte {
   training-progress           培养方案完成情况
   second-class-credits        第二课堂学分查询
   second-class-credit-applications 第二课堂学分申报记录
+  status-warnings             学籍预警查询
   terms/semester-start        学期信息
   textbooks                   教材操作
   evaluation                  学生评价
@@ -36,6 +37,7 @@ func nativeUsage(args []string) []byte {
   archive                     学生/综合档案系统
   student-record              学籍档案预约
   staff-record                教工人事档案预约
+  sunshine                    教育阳光服务诉求查询与短信验证
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心
   library-center              图书馆个人中心
