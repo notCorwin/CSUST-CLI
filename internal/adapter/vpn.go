@@ -33,7 +33,20 @@ func (a NativeSite) runVPNCommand(ctx context.Context, args []string, jsonMode b
 		return false, nil, nil, 0, nil
 	}
 	if args[1] == "login" {
-		result, runErr := a.runVPNLogin(ctx, args[2:])
+		var result map[string]any
+		var runErr *siteError
+		if len(args) > 2 {
+			switch args[2] {
+			case "second-auth", "complete":
+				result, runErr = a.runVPNSecondAuth(ctx, args[3:])
+			case "reset-password", "forgot-password":
+				result, runErr = a.runVPNResetPassword(ctx, args[3:])
+			default:
+				result, runErr = a.runVPNLogin(ctx, args[2:])
+			}
+		} else {
+			result, runErr = a.runVPNLogin(ctx, args[2:])
+		}
 		if runErr != nil {
 			if jsonMode {
 				return true, errorJSON(runErr), nil, 2, nil
@@ -48,7 +61,13 @@ func (a NativeSite) runVPNCommand(ctx context.Context, args []string, jsonMode b
 			return true, encoded, nil, 0, nil
 		}
 		if result["pending"] == true {
+			if result["operation"] == "login-reset-password-send-code" {
+				return true, []byte("VPN 找回密码验证码已发送，请收到验证码后再次执行 reset-password。\n"), nil, 0, nil
+			}
 			return true, []byte(fmt.Sprintf("VPN 登录待完成二次认证：%v（代码 %v）\n", result["username"], result["code"])), nil, 0, nil
+		}
+		if result["operation"] == "login-reset-password" {
+			return true, []byte("VPN 密码重置成功。\n"), nil, 0, nil
 		}
 		return true, []byte(fmt.Sprintf("VPN 登录成功：%v\n会话已保存：%v\n", result["username"], result["session_file"])), nil, 0, nil
 	}
@@ -96,6 +115,36 @@ func (a NativeSite) executeVPNCommand(ctx context.Context, args []string) (map[s
 		return a.runVPNStatus(ctx, args[1:])
 	case "logout":
 		return a.runVPNLogout(ctx, args[1:])
+	case "apps":
+		return a.runVPNApps(ctx, args[1:])
+	case "groups", "app-groups":
+		return a.runVPNGroups(ctx, args[1:])
+	case "messages":
+		return a.runVPNMessages(ctx, args[1:])
+	case "message":
+		return a.runVPNMessage(ctx, args[1:])
+	case "approvals":
+		return a.runVPNApprovals(ctx, args[1:])
+	case "approval":
+		return a.runVPNApproval(ctx, args[1:])
+	case "devices":
+		return a.runVPNDevices(ctx, args[1:])
+	case "device":
+		return a.runVPNDevice(ctx, args[1:])
+	case "apply":
+		return a.runVPNApply(ctx, args[1:])
+	case "shares":
+		return a.runVPNShares(ctx, args[1:])
+	case "links":
+		return a.runVPNLinks(ctx, args[1:])
+	case "profile":
+		return a.runVPNProfile(ctx, args[1:])
+	case "otp":
+		return a.runVPNOTP(ctx, args[1:])
+	case "safe-space", "space":
+		return a.runVPNSafeSpace(ctx, args[1:])
+	case "usb":
+		return a.runVPNUSB(ctx, args[1:])
 	default:
 		return nil, &siteError{Code: "invalid_argument", Message: "未知 vpn 子命令: " + command}
 	}
@@ -182,6 +231,232 @@ func (a NativeSite) runVPNLogin(ctx context.Context, args []string) (map[string]
 	return a.vpnLocalLogin(ctx, base, cookie, session, account, password, options.captchaInfo)
 }
 
+type vpnResetPasswordOptions struct {
+	account, method, loginNumber, code, newPassword  string
+	sendCode, yes, codeProvided, newPasswordProvided bool
+}
+
+func parseVPNResetPasswordOptions(args []string) (vpnResetPasswordOptions, *siteError) {
+	options := vpnResetPasswordOptions{}
+	for index := 0; index < len(args); index++ {
+		arg, value, inline := splitInline(args[index])
+		switch arg {
+		case "--json":
+		case "--account", "--username", "--method", "--type", "--login-number", "--code", "--new-password":
+			var err *siteError
+			value, err = vpnOptionValue(args, &index, arg, value, inline)
+			if err != nil {
+				return vpnResetPasswordOptions{}, err
+			}
+			switch arg {
+			case "--account", "--username":
+				options.account = strings.TrimSpace(value)
+			case "--method", "--type":
+				switch strings.ToLower(strings.TrimSpace(value)) {
+				case "phone", "mobile":
+					options.method = "phone"
+				case "email", "mail":
+					options.method = "email"
+				default:
+					return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "--method 必须是 phone 或 email"}
+				}
+			case "--login-number":
+				options.loginNumber = strings.TrimSpace(value)
+			case "--code":
+				options.code = strings.TrimSpace(value)
+				options.codeProvided = true
+			case "--new-password":
+				options.newPassword = value
+				options.newPasswordProvided = true
+			}
+		case "--new-password-stdin":
+			if inline {
+				return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			options.newPasswordProvided = true
+		case "--send-code":
+			if inline {
+				return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			options.sendCode = true
+		case "--yes":
+			if inline {
+				return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			options.yes = true
+		default:
+			return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "vpn login reset-password 参数无效: " + arg}
+		}
+	}
+	if !options.yes {
+		return vpnResetPasswordOptions{}, &siteError{Code: "confirmation_required", Message: "找回 VPN 密码会改变远端认证状态，请加 --yes"}
+	}
+	if options.sendCode {
+		if options.account == "" || options.method == "" || options.loginNumber == "" {
+			return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "发送找回密码验证码必须提供 --account、--method 和 --login-number"}
+		}
+		if options.codeProvided || options.newPasswordProvided {
+			return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "--send-code 不能同时提供验证码或新密码，请收到验证码后再次执行"}
+		}
+	} else if options.code == "" {
+		return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "完成找回密码必须提供 --code"}
+	}
+	if strings.ContainsAny(options.account, "\r\n") || len([]rune(options.account)) > 256 {
+		return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "--account 不能超过 256 个字符或包含换行"}
+	}
+	if strings.ContainsAny(options.loginNumber, "\r\n") || len([]rune(options.loginNumber)) > 128 {
+		return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "--login-number 不能超过 128 个字符或包含换行"}
+	}
+	if strings.ContainsAny(options.code, "\r\n") || len([]rune(options.code)) > 64 {
+		return vpnResetPasswordOptions{}, &siteError{Code: "invalid_argument", Message: "--code 不能超过 64 个字符或包含换行"}
+	}
+	return options, nil
+}
+
+type vpnResetPasswordState struct {
+	account, method, loginNumber, reToken string
+}
+
+func vpnResetPasswordStateFromSession(session map[string]any) (vpnResetPasswordState, *siteError) {
+	value, ok := session["resetPassword"].(map[string]any)
+	if !ok {
+		return vpnResetPasswordState{}, &siteError{Code: "password_reset_pending", Message: "没有待完成的 VPN 找回密码流程，请先使用 --send-code"}
+	}
+	state := vpnResetPasswordState{}
+	state.account, _ = value["account"].(string)
+	state.method, _ = value["method"].(string)
+	state.loginNumber, _ = value["loginNumber"].(string)
+	state.reToken, _ = value["reToken"].(string)
+	if state.account == "" || state.method == "" || state.loginNumber == "" || state.reToken == "" {
+		return vpnResetPasswordState{}, &siteError{Code: "password_reset_pending", Message: "VPN 找回密码流程状态不完整，请重新使用 --send-code"}
+	}
+	return state, nil
+}
+
+func vpnResetPasswordDynamicForm(payload map[string]any) (map[string]any, *siteError) {
+	forms, err := vpnDynamicFlowForms(payload)
+	if err != nil {
+		return nil, err
+	}
+	form := map[string]any{"password": "", "newPassword": "", "userType": "1"}
+	for _, stepForm := range forms {
+		for key, value := range stepForm {
+			form[key] = value
+		}
+	}
+	for _, key := range []string{"account", "loginNum", "code", "password"} {
+		if _, ok := form[key]; !ok {
+			return nil, &siteError{Code: "response_error", Message: "VPN 找回密码动态表单缺少字段: " + key}
+		}
+	}
+	return form, nil
+}
+
+func (a NativeSite) runVPNResetPassword(ctx context.Context, args []string) (map[string]any, *siteError) {
+	options, parseErr := parseVPNResetPasswordOptions(args)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if !options.sendCode {
+		var secretErr *siteError
+		options.newPassword, secretErr = businessSecret(args, "--new-password", "CSUST_VPN_NEW_PASSWORD")
+		if secretErr != nil {
+			return nil, secretErr
+		}
+		if options.newPassword == "" {
+			return nil, &siteError{Code: "credentials_required", Message: "请使用 --new-password-stdin 或环境变量 CSUST_VPN_NEW_PASSWORD 提供新密码"}
+		}
+		if strings.ContainsAny(options.newPassword, "\r\n") || len([]rune(options.newPassword)) > 30 {
+			return nil, &siteError{Code: "invalid_argument", Message: "新密码不能超过 30 个字符或包含换行"}
+		}
+	}
+
+	base, cookie, session, connErr := vpnConnection(false)
+	if connErr != nil {
+		return nil, connErr
+	}
+	requestSession := map[string]any{}
+	if options.sendCode {
+		flowResult, flowErr := a.vpnJSONRequest(ctx, base, cookie, requestSession, "/api/users/flow/path", "POST", map[string]any{"scenes": "forgetPassword", "type": "forgetPassword"}, true)
+		if flowErr != nil {
+			return nil, flowErr
+		}
+		if vpnResponseCode(flowResult) != "200" {
+			return nil, &siteError{Code: "business_rejected", Message: "VPN 找回密码流程获取失败", Details: map[string]any{"remote_code": vpnResponseCode(flowResult)}}
+		}
+		form, formErr := vpnResetPasswordDynamicForm(resultJSON(flowResult))
+		if formErr != nil {
+			return nil, formErr
+		}
+		form["account"] = options.account
+		findPayload, findErr := a.vpnResetPasswordAPI(ctx, base, cookie, requestSession, "/api/users/reset/password/find/verify/type", form, true)
+		if findErr != nil {
+			return nil, findErr
+		}
+		findData, ok := findPayload["data"].(map[string]any)
+		if !ok {
+			return nil, &siteError{Code: "response_error", Message: "VPN 找回密码账号校验响应缺少 reToken"}
+		}
+		reToken, _ := findData["reToken"].(string)
+		if reToken == "" {
+			return nil, &siteError{Code: "response_error", Message: "VPN 找回密码账号校验响应缺少 reToken"}
+		}
+		form["type"], form["loginNum"], form["reToken"] = options.method, options.loginNumber, reToken
+		if _, sendErr := a.vpnResetPasswordAPI(ctx, base, cookie, requestSession, "/api/users/reset/password/send/code", form, false); sendErr != nil {
+			return nil, sendErr
+		}
+		if saveErr := saveVPNSession(sessionPath(false), map[string]any{"resetPassword": map[string]any{"account": options.account, "method": options.method, "loginNumber": options.loginNumber, "reToken": reToken}}); saveErr != nil {
+			return nil, saveErr
+		}
+		return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "VPN reset/password/send/code code 200", "vpn": true, "operation": "login-reset-password-send-code", "api": "/api/users/reset/password/send/code", "method": options.method, "pending": true, "next": "reset-password"}, nil
+	}
+
+	state, stateErr := vpnResetPasswordStateFromSession(session)
+	if stateErr != nil {
+		return nil, stateErr
+	}
+	for name, values := range map[string][2]string{
+		"account":      {options.account, state.account},
+		"method":       {options.method, state.method},
+		"login-number": {options.loginNumber, state.loginNumber},
+	} {
+		if values[0] != "" && values[0] != values[1] {
+			return nil, &siteError{Code: "invalid_argument", Message: "本次参数的 " + name + " 与待完成的找回密码流程不一致"}
+		}
+	}
+	flowResult, flowErr := a.vpnJSONRequest(ctx, base, cookie, requestSession, "/api/users/flow/path", "POST", map[string]any{"scenes": "forgetPassword", "type": "forgetPassword"}, true)
+	if flowErr != nil {
+		return nil, flowErr
+	}
+	if vpnResponseCode(flowResult) != "200" {
+		return nil, &siteError{Code: "business_rejected", Message: "VPN 找回密码流程获取失败", Details: map[string]any{"remote_code": vpnResponseCode(flowResult)}}
+	}
+	form, formErr := vpnResetPasswordDynamicForm(resultJSON(flowResult))
+	if formErr != nil {
+		return nil, formErr
+	}
+	form["account"], form["type"], form["loginNum"], form["code"], form["reToken"] = state.account, state.method, state.loginNumber, options.code, state.reToken
+	if _, verifyErr := a.vpnResetPasswordAPI(ctx, base, cookie, requestSession, "/api/users/reset/password/terminal/verify/code", form, false); verifyErr != nil {
+		return nil, verifyErr
+	}
+	parts := strings.Split(state.reToken, "-")
+	if len(parts) < 3 || len([]byte(parts[2])) != aes.BlockSize {
+		return nil, &siteError{Code: "vpn_protocol_error", Message: "VPN 找回密码 reToken 缺少可用于加密密码的 16 字节密钥"}
+	}
+	encrypted, encryptErr := encryptVPNPassword(options.newPassword, parts[2])
+	if encryptErr != nil {
+		return nil, encryptErr
+	}
+	form["password"], form["newPassword"] = encrypted, options.newPassword
+	if _, verifyErr := a.vpnResetPasswordAPI(ctx, base, cookie, requestSession, "/api/users/reset/password/verify/code", form, false); verifyErr != nil {
+		return nil, verifyErr
+	}
+	if saveErr := saveVPNSession(sessionPath(false), map[string]any{"resetPassword": nil}); saveErr != nil {
+		return nil, saveErr
+	}
+	return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "VPN reset/password/verify/code code 200", "vpn": true, "operation": "login-reset-password", "api": "/api/users/reset/password/verify/code", "session_file": sessionPath(false)}, nil
+}
+
 func vpnConfigUsesCAS(config map[string]any) bool {
 	data, _ := config["data"].(map[string]any)
 	if strings.EqualFold(fmt.Sprint(data["defaultAuthType"]), "CAS") || strings.EqualFold(fmt.Sprint(data["defaultAuthType"]), "SSO_CAS") {
@@ -238,7 +513,14 @@ func (a NativeSite) vpnLocalLogin(ctx context.Context, base *url.URL, cookie str
 	if vpnResponseCode(loginResult) != "200" {
 		pending := map[string]bool{"2050": true, "2051": true, "2060": true, "2080": true, "4010": true, "4020": true, "4030": true, "4040": true}[vpnResponseCode(loginResult)]
 		if pending {
-			session["pendingToken"] = seed
+			pendingToken := seed
+			if loginData, ok := resultJSON(loginResult)["data"].(map[string]any); ok {
+				if value, valueOK := loginData["entoken"].(string); valueOK && value != "" {
+					pendingToken = value
+				}
+			}
+			session["pendingToken"] = pendingToken
+			session["token"] = pendingToken
 			session["account"], session["auth"] = account, "local"
 			if saveErr := saveVPNSession(sessionPath(false), session); saveErr != nil {
 				return nil, saveErr
@@ -265,6 +547,284 @@ func (a NativeSite) vpnLocalLogin(ctx context.Context, base *url.URL, cookie str
 		return nil, &siteError{Code: "authentication_failed", Message: "VPN 登录后未建立有效会话"}
 	}
 	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "username": account, "auth": "local", "session_file": sessionPath(false), "user": resultJSON(infoResult)["data"]}, nil
+}
+
+type vpnSecondAuthOptions struct {
+	method, loginNumber, code string
+	sendCode                  bool
+	yes                       bool
+}
+
+func parseVPNSecondAuthOptions(args []string) (vpnSecondAuthOptions, *siteError) {
+	options := vpnSecondAuthOptions{}
+	for index := 0; index < len(args); index++ {
+		arg, value, inline := splitInline(args[index])
+		switch arg {
+		case "--json":
+		case "--method", "--type":
+			var err *siteError
+			value, err = vpnOptionValue(args, &index, arg, value, inline)
+			if err != nil {
+				return vpnSecondAuthOptions{}, err
+			}
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "phone", "mobile":
+				options.method = "phone"
+			case "email", "mail":
+				options.method = "email"
+			case "radius", "radiustop", "radius-top":
+				options.method = "radiusTop"
+			default:
+				return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "--method 必须是 phone、email 或 radius"}
+			}
+		case "--login-number":
+			var err *siteError
+			options.loginNumber, err = vpnOptionValue(args, &index, arg, value, inline)
+			if err != nil {
+				return vpnSecondAuthOptions{}, err
+			}
+		case "--code":
+			var err *siteError
+			options.code, err = vpnOptionValue(args, &index, arg, value, inline)
+			if err != nil {
+				return vpnSecondAuthOptions{}, err
+			}
+		case "--send-code":
+			if inline {
+				return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			options.sendCode = true
+		case "--yes":
+			if inline {
+				return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
+			}
+			options.yes = true
+		default:
+			return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "vpn login second-auth 参数无效: " + arg}
+		}
+	}
+	if options.method == "" {
+		return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "必须提供 --method phone、email 或 radius"}
+	}
+	if options.sendCode {
+		if !options.yes {
+			return vpnSecondAuthOptions{}, &siteError{Code: "confirmation_required", Message: "发送 VPN 二次认证验证码会触发短信或邮件，请加 --yes"}
+		}
+		if options.method == "radiusTop" {
+			return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "radius 认证不发送验证码"}
+		}
+		if strings.TrimSpace(options.loginNumber) == "" {
+			return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "发送验证码必须提供 --login-number"}
+		}
+		if options.code != "" {
+			return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "--send-code 不能同时提供 --code，请收到验证码后再次执行"}
+		}
+	} else if strings.TrimSpace(options.code) == "" {
+		return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "完成二次认证必须提供 --code"}
+	}
+	if strings.ContainsAny(options.loginNumber, "\r\n") || len([]rune(options.loginNumber)) > 128 {
+		return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "--login-number 不能超过 128 个字符或包含换行"}
+	}
+	if strings.ContainsAny(options.code, "\r\n") || len([]rune(options.code)) > 64 {
+		return vpnSecondAuthOptions{}, &siteError{Code: "invalid_argument", Message: "--code 不能超过 64 个字符或包含换行"}
+	}
+	return options, nil
+}
+
+func (a NativeSite) runVPNSecondAuth(ctx context.Context, args []string) (map[string]any, *siteError) {
+	options, parseErr := parseVPNSecondAuthOptions(args)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	base, cookie, session, connErr := vpnConnection(false)
+	if connErr != nil {
+		return nil, connErr
+	}
+	pendingToken, _ := session["pendingToken"].(string)
+	if pendingToken == "" {
+		return nil, &siteError{Code: "authentication_pending", Message: "没有待完成的 VPN 二次认证，请先执行 vpn login"}
+	}
+	session["token"] = pendingToken
+	if saveErr := saveVPNSession(sessionPath(false), session); saveErr != nil {
+		return nil, saveErr
+	}
+
+	flowPath := "/api/users/flow/path"
+	flowResult, flowErr := a.vpnJSONRequest(ctx, base, cookie, session, flowPath, "POST", map[string]any{"scenes": "secondAuth", "type": options.method}, true)
+	if flowErr != nil {
+		if flowErr.Code != "http_error" {
+			return nil, flowErr
+		}
+		return a.finishVPNSecondAuth(ctx, options, nil, true)
+	}
+	if vpnResponseCode(flowResult) == "200" {
+		form, formErr := vpnSecondAuthDynamicForm(resultJSON(flowResult), options)
+		if formErr != nil {
+			return nil, formErr
+		}
+		return a.finishVPNSecondAuth(ctx, options, form, false)
+	}
+	return a.finishVPNSecondAuth(ctx, options, nil, true)
+}
+
+func vpnDynamicFlowForms(payload map[string]any) ([]map[string]any, *siteError) {
+	data, ok := payload["data"].([]any)
+	if !ok || len(data) == 0 {
+		return nil, &siteError{Code: "response_error", Message: "VPN 动态流程缺少表单数据"}
+	}
+	first, ok := data[0].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "response_error", Message: "VPN 动态流程格式无效"}
+	}
+	steps, ok := first["steps"].([]any)
+	if !ok || len(steps) == 0 {
+		return nil, &siteError{Code: "response_error", Message: "VPN 动态流程缺少步骤"}
+	}
+	forms := make([]map[string]any, 0, len(steps))
+	for _, stepItem := range steps {
+		step, ok := stepItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		formConfig, ok := step["formConfig"].(map[string]any)
+		if !ok {
+			continue
+		}
+		formPage, ok := formConfig["formPage"].([]any)
+		if !ok {
+			continue
+		}
+		form := map[string]any{}
+		for _, pageItem := range formPage {
+			page, ok := pageItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			components, _ := page["components"].([]any)
+			for _, componentItem := range components {
+				component, ok := componentItem.(map[string]any)
+				if !ok {
+					continue
+				}
+				refKey, _ := component["refKey"].(string)
+				if refKey == "" {
+					continue
+				}
+				value := any("")
+				if hidden, _ := component["hidden"].(bool); hidden {
+					if attributes, attributesOK := component["attributes"].(map[string]any); attributesOK {
+						if placeholder, exists := attributes["placeholder"]; exists {
+							value = placeholder
+						}
+					}
+				}
+				form[refKey] = value
+			}
+		}
+		if len(form) > 0 {
+			forms = append(forms, form)
+		}
+	}
+	if len(forms) == 0 {
+		return nil, &siteError{Code: "response_error", Message: "VPN 动态流程没有可提交字段"}
+	}
+	return forms, nil
+}
+
+func vpnSecondAuthDynamicForm(payload map[string]any, options vpnSecondAuthOptions) (map[string]any, *siteError) {
+	forms, err := vpnDynamicFlowForms(payload)
+	if err != nil {
+		return nil, err
+	}
+	form := forms[0]
+	if options.method != "radiusTop" {
+		if _, exists := form["loginNum"]; !exists {
+			return nil, &siteError{Code: "response_error", Message: "VPN 二次认证表单缺少登录号码字段"}
+		}
+		if strings.TrimSpace(options.loginNumber) == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "完成该二次认证必须提供 --login-number"}
+		}
+		form["loginNum"] = options.loginNumber
+	}
+	if options.sendCode {
+		return form, nil
+	}
+	if _, exists := form["code"]; exists {
+		form["code"] = options.code
+	} else if options.method == "radiusTop" {
+		if _, exists := form["radius"]; !exists {
+			return nil, &siteError{Code: "response_error", Message: "VPN RADIUS 二次认证表单缺少令牌字段"}
+		}
+		form["radius"] = options.code
+	} else {
+		return nil, &siteError{Code: "response_error", Message: "VPN 二次认证表单缺少验证码字段"}
+	}
+	return form, nil
+}
+
+func (a NativeSite) finishVPNSecondAuth(ctx context.Context, options vpnSecondAuthOptions, form map[string]any, legacy bool) (map[string]any, *siteError) {
+	if options.sendCode {
+		path := "/api/users/second/send/code"
+		body := form
+		if legacy {
+			body = map[string]any{"loginNum": options.loginNumber, "type": options.method}
+		}
+		payload, runErr := a.vpnBusinessJSON(ctx, path, "POST", body, false)
+		if runErr != nil {
+			return nil, runErr
+		}
+		return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "VPN second/send/code code 200", "vpn": true, "operation": "login-second-auth-send-code", "api": path, "method": vpnSecondAuthMethodName(options.method), "pending": true, "next": "second-auth", "data": payload["data"]}, nil
+	}
+
+	path := "/api/users/auth/secondAuth"
+	if legacy {
+		form = map[string]any{"code": options.code}
+		if options.method == "radiusTop" {
+			form["secondMethod"] = "radiusTop"
+		}
+	}
+	payload, runErr := a.vpnBusinessJSON(ctx, path, "POST", form, false)
+	if runErr != nil {
+		return nil, runErr
+	}
+	_, _, session, connErr := vpnConnection(false)
+	if connErr != nil {
+		return nil, connErr
+	}
+	loginData, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "authentication_failed", Message: "VPN 二次认证成功响应缺少会话数据"}
+	}
+	token, _ := loginData["token"].(string)
+	if token == "" {
+		token, _ = loginData["entoken"].(string)
+	}
+	if token == "" {
+		return nil, &siteError{Code: "authentication_failed", Message: "VPN 二次认证成功响应缺少会话令牌"}
+	}
+	for _, name := range []string{"token", "refreshToken", "account", "username", "name", "userId", "id"} {
+		if value, exists := loginData[name]; exists {
+			session[name] = value
+		}
+	}
+	session["token"] = token
+	session["pendingToken"] = nil
+	session["auth"] = "local"
+	if saveErr := saveVPNSession(sessionPath(false), session); saveErr != nil {
+		return nil, saveErr
+	}
+	infoPayload, infoErr := a.vpnBusinessJSON(ctx, "/api/users/info", "GET", nil, true)
+	if infoErr != nil {
+		return nil, &siteError{Code: "authentication_failed", Message: "VPN 二次认证后未建立有效会话", Details: map[string]any{"cause": infoErr.Code}}
+	}
+	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "username": session["account"], "auth": "local", "session_file": sessionPath(false), "user": redactSiteJSON(infoPayload["data"])}, nil
+}
+
+func vpnSecondAuthMethodName(method string) string {
+	if method == "radiusTop" {
+		return "radius"
+	}
+	return method
 }
 
 func encryptVPNPassword(password, key string) (string, *siteError) {
@@ -301,6 +861,10 @@ func saveVPNSession(path string, session map[string]any) *siteError {
 			return readErr
 		}
 		for key, value := range session {
+			if value == nil {
+				delete(merged, key)
+				continue
+			}
 			merged[key] = value
 		}
 		content, marshalErr := json.MarshalIndent(merged, "", "  ")
@@ -320,7 +884,7 @@ func (a NativeSite) vpnJSONRequest(ctx context.Context, base *url.URL, cookie st
 	if pathErr != nil {
 		return nil, pathErr
 	}
-	request := siteRequest{Target: target, CookieFile: cookie, Method: method, Headers: vpnHeaders(base, target, session, false), RequireLogin: false, ReadOnly: readOnly, Yes: true, RawJSON: true}
+	request := siteRequest{Target: target, CookieFile: cookie, Method: method, Headers: vpnHeaders(base, target, session, false), RequireLogin: false, AllowBusinessFailure: true, ReadOnly: readOnly, Yes: true, RawJSON: true}
 	if method != "GET" && method != "HEAD" && method != "OPTIONS" {
 		request.JSON, request.HasJSON = body, true
 	}
@@ -329,6 +893,29 @@ func (a NativeSite) vpnJSONRequest(ctx context.Context, base *url.URL, cookie st
 		return nil, runErr
 	}
 	return result, nil
+}
+
+func (a NativeSite) vpnResetPasswordAPI(ctx context.Context, base *url.URL, cookie string, session map[string]any, path string, body any, readOnly bool) (map[string]any, *siteError) {
+	result, runErr := a.vpnJSONRequest(ctx, base, cookie, session, path, "POST", body, readOnly)
+	if runErr != nil {
+		return nil, runErr
+	}
+	payload := resultJSON(result)
+	code := vpnResponseCode(result)
+	if !readOnly && code == "" {
+		return nil, &siteError{Code: "mutation_unverified", Message: "VPN 找回密码写操作未返回 code=200，无法确认成功", Details: map[string]any{"api": path}}
+	}
+	if code != "" && code != "200" {
+		details := map[string]any{"api": path, "remote_code": code}
+		if payload != nil && payload["data"] != nil {
+			details["data"] = redactSiteJSON(payload["data"])
+		}
+		return nil, &siteError{Code: "business_rejected", Message: "VPN 找回密码请求失败", Details: details}
+	}
+	if payload == nil {
+		return nil, &siteError{Code: "response_error", Message: "VPN 找回密码响应不是 JSON 对象", Details: map[string]any{"api": path}}
+	}
+	return payload, nil
 }
 
 func (a NativeSite) vpnCASLogin(ctx context.Context, base *url.URL, cookie string, session map[string]any, account, password string, config map[string]any, captchaInfo string) (map[string]any, *siteError) {

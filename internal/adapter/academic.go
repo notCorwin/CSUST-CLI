@@ -33,7 +33,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "personal-info", "account-settings", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "special-course-query", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "personal-info", "account-settings", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "special-course-query", "social-exam-registration", "social-exam", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -80,6 +80,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicCourseSelection(ctx, args[1:])
 	case "special-course-query":
 		return a.academicSpecialCourseQuery(ctx, args[1:])
+	case "social-exam-registration", "social-exam":
+		return a.academicSocialExamRegistration(ctx, args[1:])
 	case "training-plan", "plan", "cultivation-plan":
 		return a.academicTrainingPlan(ctx, args[1:])
 	case "training-progress", "training-plan-progress":
@@ -560,6 +562,89 @@ func academicSpecialCourseRows(rows []any, keyword string) []map[string]any {
 			}
 		}
 		item["index"] = len(items) + 1
+		items = append(items, item)
+	}
+	return items
+}
+
+const academicSocialExamRegistrationPath = "/jsxsd/xsdjks/xsdjks_list"
+
+func (a NativeSite) academicSocialExamRegistration(ctx context.Context, args []string) (map[string]any, *siteError) {
+	body, pageURL, err := a.academicPage(ctx, "GET", academicSocialExamRegistrationPath, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	available, enrolled := []map[string]any{}, []map[string]any{}
+	for _, table := range document.findAll("table") {
+		rows := directTableRows(table)
+		if len(rows) == 0 {
+			continue
+		}
+		header := rowValues(rows[0])
+		switch {
+		case containsValue(header, "报名验证码"):
+			enrolled = academicSocialExamRows(rows, academicSocialExamEnrolledField, pageURL, keyword)
+		case containsValue(header, "考级课程名称"):
+			available = academicSocialExamRows(rows, academicSocialExamAvailableField, pageURL, keyword)
+		}
+	}
+	if len(available) == 0 && len(enrolled) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "社会考试报名页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "social-exam-registration", "path": academicSocialExamRegistrationPath, "keyword": nullableString(keyword),
+		"available": available, "available_count": len(available), "enrolled": enrolled, "enrolled_count": len(enrolled), "page": page,
+	}), nil
+}
+
+var academicSocialExamAvailableField = map[string]string{
+	"考级课程名称": "course", "考级等级名称": "level", "考试时间": "exam_time", "报名时间": "registration_period",
+	"缴费时间": "payment_period", "报名金额": "fee", "操作": "action",
+}
+
+var academicSocialExamEnrolledField = map[string]string{
+	"考级等级名称": "level", "考级课程名称": "course", "考级时间": "exam_time", "报名金额": "fee",
+	"考级准考证号": "admission_ticket", "原准考证号": "original_admission_ticket", "报名验证码": "registration_code",
+	"报名确认时间": "confirmed_at", "是否缴费": "paid", "缴费状态原因": "payment_status_reason", "审核状态": "review_status",
+	"审核意见": "review_comment", "操作": "action",
+}
+
+func academicSocialExamRows(rows []*pageNode, fields map[string]string, pageURL, keyword string) []map[string]any {
+	header := rowValues(rows[0])
+	if len(directCells(rows[0])) > 0 && directCells(rows[0])[0].tag == "th" {
+		rows = rows[1:]
+	}
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		values := rowValues(row)
+		text := strings.TrimSpace(pageDisplayText(row))
+		if len(values) == 0 || allEmpty(values) || academicNoDataRow(text) || keyword != "" && !strings.Contains(strings.ToLower(text), keyword) {
+			continue
+		}
+		item := map[string]any{"index": len(items) + 1, "cells": values, "text": text}
+		for index, title := range header {
+			if field := fields[regexp.MustCompile(`\s+`).ReplaceAllString(title, "")]; field != "" && index < len(values) {
+				item[field] = values[index]
+			}
+		}
+		for _, link := range row.findAll("a") {
+			if target := resolvePageURL(pageURL, link.attr("href")); target != "" {
+				if path, pathErr := academicPath(target); pathErr == nil {
+					item["action_path"] = path
+					break
+				}
+			}
+		}
 		items = append(items, item)
 	}
 	return items

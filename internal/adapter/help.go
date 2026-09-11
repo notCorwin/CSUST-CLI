@@ -21,6 +21,7 @@ func nativeUsage(args []string) []byte {
   classrooms/selections      教室与选课查询
   course-selection            选课中心/跨专业选修课程
   special-course-query        特殊选课申请查询
+  social-exam-registration    社会考试报名状态与可报名项目
   training-plan               培养方案执行计划
   training-progress           培养方案完成情况
   teaching-calendar           学期教学周历
@@ -49,7 +50,7 @@ func nativeUsage(args []string) []byte {
   textbooks                   教材操作
   evaluation                  学生评价
   web/routes                  教务网页入口
-  vpn                         VPN 门户、工作台/分组、申请、设备、资料、分享与 API
+  vpn                         VPN 门户、工作台/分组、申请、设备、资料、分享、认证与 API
   teaching                    网络教学平台
   quality                     教学质量保障系统
   services                    已映射业务服务目录

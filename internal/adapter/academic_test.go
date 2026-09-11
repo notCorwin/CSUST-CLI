@@ -117,6 +117,25 @@ func TestAcademicSpecialCourseQueryUsesJSONEndpointAndSemanticRows(t *testing.T)
 	}
 }
 
+func TestAcademicSocialExamRegistrationSeparatesAvailableAndEnrolled(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>考级课程名称</th><th>考级等级名称</th><th>考试时间</th><th>报名时间</th><th>缴费时间</th><th>报名金额</th><th>操作</th></tr><tr><td>1</td><td>英语四级</td><td>CET-4</td><td>2026-12-12</td><td>2026-09-01</td><td>2026-09-02</td><td>30</td><td><a href="/jsxsd/xsdjks/apply?id=1">报名</a></td></tr></table><table><tr><th>考级等级名称</th><th>考级课程名称</th><th>考级时间</th><th>报名金额</th><th>考级准考证号</th><th>原准考证号</th><th>报名验证码</th><th>报名确认时间</th><th>是否缴费</th><th>缴费状态原因</th><th>审核状态</th><th>审核意见</th><th>操作</th></tr><tr><td>CET-4</td><td>英语四级</td><td>2026-12-12</td><td>30</td><td>ADMISSION-1</td><td></td><td>CODE-1</td><td>2026-09-01</td><td>否</td><td></td><td>通过</td><td></td><td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []*pageNode
+	for _, table := range document.findAll("table") {
+		tables = append(tables, table)
+	}
+	available := academicSocialExamRows(directTableRows(tables[0]), academicSocialExamAvailableField, "http://xk.csust.edu.cn/jsxsd/xsdjks/xsdjks_list", "英语")
+	enrolled := academicSocialExamRows(directTableRows(tables[1]), academicSocialExamEnrolledField, "http://xk.csust.edu.cn/jsxsd/xsdjks/xsdjks_list", "英语")
+	if len(available) != 1 || available[0]["course"] != "英语四级" || available[0]["registration_period"] != "2026-09-01" || available[0]["action_path"] != "/jsxsd/xsdjks/apply?id=1" {
+		t.Fatalf("unexpected available social exams: %#v", available)
+	}
+	if len(enrolled) != 1 || enrolled[0]["admission_ticket"] != "ADMISSION-1" || enrolled[0]["registration_code"] != "CODE-1" || enrolled[0]["review_status"] != "通过" {
+		t.Fatalf("unexpected enrolled social exams: %#v", enrolled)
+	}
+}
+
 func TestAcademicStructuredRowsNormalizeRequestFields(t *testing.T) {
 	document, err := parsePage(`<table><tr><th>申请编号</th><th>教室</th><th>借用日期</th><th>状态</th></tr><tr><td>R001</td><td>A101</td><td>2026-09-10</td><td>待审核</td></tr></table>`)
 	if err != nil {

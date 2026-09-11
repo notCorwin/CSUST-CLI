@@ -78,6 +78,7 @@ password=密码
 ./csust in-class-exams --term 2026-2027-1 --exam-type 平时考察 --json
 ./csust course-selection --scope cross-major --json
 ./csust special-course-query --term 2026-2027-1 --json
+./csust social-exam-registration --json
 ./csust training-plan --keyword 专业核心 --json
 ./csust training-progress --json
 ./csust deferred-exam-applications --term 2025-2026-1 --status approved --json
@@ -113,7 +114,7 @@ password=密码
 | `personal-info` | 查询或更新个人资料设置；更新返回服务端反馈或回读确认 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
 | `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
-| `classrooms`, `selections`, `course-selection`, `special-course-query`, `terms`, `semester-start` | 教室、选课和学期信息；跨专业选修使用 `--scope cross-major`，特殊选课查询使用 `--term` 和可选 `--special-name` |
+| `classrooms`, `selections`, `course-selection`, `special-course-query`, `social-exam-registration`, `terms`, `semester-start` | 教室、选课和考试报名信息；跨专业选修使用 `--scope cross-major`，特殊选课查询使用 `--term` 和可选 `--special-name` |
 | `training-plan` | 培养方案执行计划课程 |
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
 | `deferred-exam-applications` | 按学期、缓考活动、课程和审核状态查询缓考申请记录 |
@@ -179,6 +180,9 @@ password=密码
 ./csust vpn login --auth cas --password-stdin --json
 ./csust vpn login second-auth --method phone --login-number 13800138000 --send-code --yes --json
 ./csust vpn login second-auth --method phone --login-number 13800138000 --code CODE --json
+# VPN 忘记密码：先发送验证码，再完成重置
+./csust vpn login reset-password --account 学号 --method phone --login-number 手机号 --send-code --yes --json
+./csust vpn login reset-password --code CODE --new-password-stdin --yes --json <<< '新密码'
 ./csust vpn status --json
 ./csust vpn apps --tab all --json
 ./csust vpn groups --json
