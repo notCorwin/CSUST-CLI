@@ -345,11 +345,11 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 	if encodedErr != nil {
 		return nil, encodedErr
 	}
-	path, fetchErr := a.fetchLoginCaptcha(ctx, root, cookiePath, false, options.captchaImage)
-	if fetchErr != nil {
-		return nil, fetchErr
-	}
 	if options.captcha == "" {
+		path, fetchErr := a.fetchLoginCaptcha(ctx, root, cookiePath, false, options.captchaImage)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
 		return nil, &siteError{Code: "captcha_required", Message: "教务登录需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": path}}
 	}
 	loginTarget := root

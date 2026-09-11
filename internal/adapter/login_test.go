@@ -13,12 +13,15 @@ import (
 func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	temp := t.TempDir()
 	var encoded, account, password, captcha string
+	captchaRequests := 0
 	seed := "abcdefghijklmnopqrst#11111111111111111111"
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/":
+			http.SetCookie(writer, &http.Cookie{Name: "SESSION", Value: "1", Path: "/"})
 			_, _ = writer.Write([]byte(`<form id="loginForm" action="/Logon.do?method=logon" method="post"><input name="userAccount"><input name="userPassword" type="password"><input name="RANDOMCODE"><input name="encoded"></form>`))
 		case "/verifycode.servlet":
+			captchaRequests++
 			writer.Header().Set("Content-Type", "image/png")
 			_, _ = writer.Write([]byte("captcha"))
 		case "/Logon.do":
@@ -47,6 +50,9 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	t.Setenv("CSUST_COOKIE_FILE", cookieFile)
 	t.Setenv("CSUST_USERNAME", "student")
 	t.Setenv("CSUST_PASSWORD", "password")
+	if _, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local"}); err == nil || err.Code != "captcha_required" {
+		t.Fatalf("expected first login to request captcha, got %v", err)
+	}
 	result, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local", captcha: "good"})
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +66,9 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 	if account != "" || password != "" || captcha != "good" || encoded != wantEncoded {
 		t.Fatalf("unexpected legacy login payload: account=%q password=%q captcha=%q encoded=%q want=%q", account, password, captcha, encoded, wantEncoded)
+	}
+	if captchaRequests != 1 {
+		t.Fatalf("captcha was refreshed during retry: requests=%d", captchaRequests)
 	}
 	if _, statErr := os.Stat(cookieFile); statErr != nil {
 		t.Fatal(statErr)
