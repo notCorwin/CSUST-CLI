@@ -287,6 +287,9 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		}
 	case "ehall":
 		common()
+		if operation == "mail-status" || operation == "mail" {
+			return allowed
+		}
 		if operation == "news" {
 			add("--channel", "--page")
 		}

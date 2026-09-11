@@ -54,6 +54,19 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": []any{map[string]any{"type": 0, "cycleName": "考试报名", "list": []any{}}},
 			})
+		case "/execCardMethod/mail-card/CUS_CARD_TENCENTMAIL":
+			var body map[string]any
+			if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&body) != nil {
+				t.Fatalf("mail card request was not JSON POST")
+			}
+			switch body["method"] {
+			case "ifRegister":
+				_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{"errcode": "0", "errmsg": "请求成功"}})
+			case "unReadMail":
+				_ = json.NewEncoder(writer).Encode(map[string]any{"errcode": "0", "errmsg": "请求成功", "data": map[string]any{"errcode": "0", "errmsg": "请求成功", "count": "4"}})
+			default:
+				t.Fatalf("unexpected mail card method: %v", body["method"])
+			}
 		case "/execCardMethod/news-card/SYS_CARD_NEWSANNOUNCEMENT":
 			var body map[string]any
 			if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&body) != nil {
@@ -93,6 +106,8 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 				"cardId": "SYS_CARD_SERVICEBUS", "cardWid": "card-1",
 			}}, map[string]any{"card": map[string]any{
 				"cardId": "SYS_CARD_NEWSANNOUNCEMENT", "cardWid": "news-card", "cardName": "通知公告",
+			}}, map[string]any{"card": map[string]any{
+				"cardId": "CUS_CARD_TENCENTMAIL", "cardWid": "mail-card", "cardName": "企业邮箱",
 			}}}}})
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"errcode": "0", "errmsg": "请求成功", "data": map[string]any{
@@ -191,6 +206,13 @@ func TestEhallServicesAndDetailUseSemanticProtocol(t *testing.T) {
 	cycles := runIssueJSON(t, "ehall", "service-cycles", "--cookie-file", cookie)
 	if cycles["cycle_count"] != float64(1) || cycles["cycles"].([]any)[0].(map[string]any)["cycleName"] != "考试报名" {
 		t.Fatalf("eHall service cycles were not preserved: %#v", cycles)
+	}
+	mail := runIssueJSON(t, "ehall", "mail-status", "--cookie-file", cookie)
+	if mail["registered"] != true || mail["unread_count"] != float64(4) {
+		t.Fatalf("eHall mail status was not normalized: %#v", mail)
+	}
+	if mail["entrypoints"].(map[string]any)["password_reset"] != "http://txyj.csust.edu.cn/Mail/ChangePass" {
+		t.Fatalf("eHall mail entrypoints were not preserved: %#v", mail)
 	}
 	news := runIssueJSON(t, "ehall", "news", "--channel", "教务", "--page", "2", "--cookie-file", cookie)
 	if news["item_count"] != float64(1) || news["card_count"] != float64(1) {

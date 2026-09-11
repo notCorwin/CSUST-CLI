@@ -34,6 +34,9 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "service-cycles" {
 		return a.ehallServiceCycles(ctx, cookie)
 	}
+	if args[0] == "mail-status" || args[0] == "mail" {
+		return a.ehallMailStatus(ctx, cookie)
+	}
 	if args[0] == "news" {
 		return a.ehallNews(ctx, args[1:], cookie)
 	}
@@ -62,7 +65,7 @@ func (a NativeSite) executeEhall(ctx context.Context, args []string) (map[string
 	if args[0] == "me" || args[0] == "identity" {
 		return a.ehallMe(ctx, cookie)
 	}
-	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、news、favorite add/remove、service、detail、health、me、catalog"}
+	return nil, &siteError{Code: "invalid_argument", Message: "ehall 只支持 services、favorites、message-count、notifications、service-cycles、mail-status、news、favorite add/remove、service、detail、health、me、catalog"}
 }
 
 func (a NativeSite) ehallServices(ctx context.Context, cookie string) (map[string]any, *siteError) {
@@ -281,6 +284,59 @@ func (a NativeSite) ehallServiceCycles(ctx context.Context, cookie string) (map[
 		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
 		"service": "ehall", "operation": "service-cycles", "cycles": cycles,
 		"cycle_count": len(cycles), "data": value,
+	}, nil
+}
+
+func (a NativeSite) ehallMailStatus(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	_, _, layout, pageViewErr := a.ehallPageView(ctx, cookie)
+	if pageViewErr != nil {
+		return nil, pageViewErr
+	}
+	card := findEhallCard(layout, "CUS_CARD_TENCENTMAIL")
+	if card == nil {
+		return nil, &siteError{Code: "not_found", Message: "eHall 页面未找到企业邮箱卡片"}
+	}
+	cardID, _ := card["cardId"].(string)
+	cardWid, _ := card["cardWid"].(string)
+	if cardID == "" || cardWid == "" {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 企业邮箱卡片缺少标识"}
+	}
+	registration, registrationErr := a.ehallCardMethod(ctx, cardID, cardWid, "ifRegister", map[string]any{}, cookie)
+	if registrationErr != nil {
+		return nil, registrationErr
+	}
+	registrationCode, ok := registration["errcode"]
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "eHall 企业邮箱注册响应缺少状态码"}
+	}
+	registered := fmt.Sprint(registrationCode) == "0"
+	var unread any
+	var unreadData map[string]any
+	if registered {
+		unreadData, registrationErr = a.ehallCardMethod(ctx, cardID, cardWid, "unReadMail", map[string]any{}, cookie)
+		if registrationErr != nil {
+			return nil, registrationErr
+		}
+		if code, exists := unreadData["errcode"]; !exists || fmt.Sprint(code) != "0" {
+			return nil, &siteError{Code: "business_rejected", Message: "eHall 企业邮箱未读数量查询失败", Details: map[string]any{"api_code": unreadData["errcode"]}}
+		}
+		count, parseErr := strconv.Atoi(strings.TrimSpace(fmt.Sprint(unreadData["count"])))
+		if parseErr != nil || count < 0 {
+			return nil, &siteError{Code: "parse_error", Message: "eHall 企业邮箱未读数量不是非负整数"}
+		}
+		unread = count
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": "ehall", "operation": "mail-status", "registered": registered,
+		"unread_count": unread, "card": map[string]any{"card_id": cardID, "card_wid": cardWid},
+		"entrypoints": map[string]string{
+			"mail":           "http://txyj.csust.edu.cn/Mail/LoginUrl",
+			"password_reset": "http://txyj.csust.edu.cn/Mail/ChangePass",
+			"register":       "http://txyj.csust.edu.cn/Mail/Enroll",
+		},
+		"registration": registration, "unread": unreadData,
+		"api": map[string]any{"page_view": "/getPageView", "card": ehallCardMethodPath(cardID, cardWid), "registration": "ifRegister", "unread": "unReadMail"},
 	}, nil
 }
 
