@@ -79,6 +79,7 @@ password=密码
 ./csust deferred-exam-applications --term 2025-2026-1 --status approved --json
 ./csust enrollment-proof-applications --json
 ./csust teaching-calendar --term 2026-2027-1 --json
+./csust exempt-exam-applications --term 2026-2027-1 --assessment-method exam --json
 ./csust drop-course-applications --json
 ./csust student-status-changes --json
 ./csust second-class-credits --json
@@ -107,6 +108,7 @@ password=密码
 | `deferred-exam-applications` | 按学期、缓考活动、课程和审核状态查询缓考申请记录 |
 | `enrollment-proof-applications` | 查询学生在读证明申请记录 |
 | `teaching-calendar` | 查询指定学期的教学周历 |
+| `exempt-exam-applications` | 按学期、课程和考试方式查询免考申请记录 |
 | `drop-course-applications` | 可退课程、课程属性和退课审核状态 |
 | `student-status-changes` | 个人信息修改历史、审核状态和修改说明 |
 | `second-class-credits` | 第二课堂学分认定查询 |

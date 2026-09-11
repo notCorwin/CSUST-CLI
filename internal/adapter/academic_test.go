@@ -251,6 +251,17 @@ func TestAcademicDeferredExamRowsKeepSemanticFields(t *testing.T) {
 	}
 }
 
+func TestAcademicExemptExamRowsKeepDistinctStatuses(t *testing.T) {
+	document, err := parsePage(`<table><tr><th>序号</th><th>学年学期</th><th>上课院系</th><th>姓名</th><th>课程名称</th><th>考试性质</th><th>考试状态</th><th>考试方式</th><th>班级名称</th><th>学时</th><th>学分</th><th>课程属性</th><th>免考原因</th><th>审核状态</th><th>操作</th></tr><tr><td>1</td><td>2025-2026-1</td><td>计算机学院</td><td>张三</td><td>数据结构</td><td>正常考试</td><td>已通过</td><td>考试</td><td>计科24-1</td><td>48</td><td>3</td><td>专业课</td><td>竞赛获奖</td><td>通过</td><td>查看</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := academicStructuredRows(document, "", academicExemptExamField)
+	if len(rows) != 1 || rows[0]["department"] != "计算机学院" || rows[0]["course"] != "数据结构" || rows[0]["exam_status"] != "已通过" || rows[0]["review_status"] != "通过" || rows[0]["reason"] != "竞赛获奖" || rows[0]["course_attribute"] != "专业课" {
+		t.Fatalf("unexpected exempt exam row: %#v", rows)
+	}
+}
+
 func TestAcademicDeferredExamApplicationsUsesActivityAPIAndSemanticFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")

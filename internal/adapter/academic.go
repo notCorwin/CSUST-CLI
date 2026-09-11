@@ -32,7 +32,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "enrollment-proof-applications", "enrollment-proof-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "course-selection", "course-select", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "exempt-exam-applications", "exempt-exam-application", "enrollment-proof-applications", "enrollment-proof-application", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -79,6 +79,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicTrainingProgress(ctx, args[1:])
 	case "deferred-exam-applications", "deferred-exam-application":
 		return a.academicDeferredExamApplications(ctx, args[1:])
+	case "exempt-exam-applications", "exempt-exam-application":
+		return a.academicExemptExamApplications(ctx, args[1:])
 	case "enrollment-proof-applications", "enrollment-proof-application":
 		return a.academicStructuredPageWithField(ctx, args[1:], "enrollment-proof-applications", "/jsxsd/kscj/xjzdzmsq_query", academicEnrollmentProofField)
 	case "drop-course-applications", "drop-course-application":
@@ -345,6 +347,68 @@ func (a NativeSite) academicDeferredExamApplications(ctx context.Context, args [
 		"term": nullableString(term), "activity": nullableString(activity), "course": nullableString(course), "status": nullableString(status),
 		"items": items, "item_count": len(items), "page": page,
 	}), nil
+}
+
+func (a NativeSite) academicExemptExamApplications(ctx context.Context, args []string) (map[string]any, *siteError) {
+	const queryPath = "/jsxsd/kscj/mksq_query"
+	const listPath = "/jsxsd/kscj/mksq_list"
+	queryBody, queryURL, err := a.academicPage(ctx, "GET", queryPath, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	queryDocument, parseErr := parsePage(queryBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	term := strings.TrimSpace(flagValue(args, "--term"))
+	if term == "" {
+		term = selectedOptionPage(queryDocument, "xnxqid")
+	}
+	course := strings.TrimSpace(flagValue(args, "--course"))
+	assessmentMethod, assessmentMethodID, methodErr := exemptExamAssessmentMethod(flagValue(args, "--assessment-method"))
+	if methodErr != nil {
+		return nil, methodErr
+	}
+	body, pageURL, err := a.academicPage(ctx, "POST", listPath, []pair{{"xnxqid", term}, {"kcmc", course}, {"ksfs", assessmentMethodID}}, []pair{{"Referer", queryURL}})
+	if err != nil {
+		return nil, err
+	}
+	document, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+	}
+	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
+	items := academicStructuredRowsWithLinks(document, keyword, academicExemptExamField, pageURL)
+	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "免考申请页面未包含可解析表格；请使用 web get 查看页面结构"}
+	}
+	page, pageErr := pageInspect(body, pageURL)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	return academicWrap(map[string]any{
+		"kind": "exempt-exam-applications", "path": listPath, "term": nullableString(term),
+		"course": nullableString(course), "assessment_method": nullableString(assessmentMethod), "keyword": nullableString(keyword),
+		"items": items, "item_count": len(items), "page": page,
+	}), nil
+}
+
+func exemptExamAssessmentMethod(value string) (string, string, *siteError) {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "", "all", "全部":
+		return "", "", nil
+	case "exam", "考试":
+		return "考试", "1", nil
+	case "other", "其它", "其他":
+		return "其它", "2", nil
+	case "assessment", "考查":
+		return "考查", "3", nil
+	case "no-exam", "不考试":
+		return "不考试", "8", nil
+	default:
+		return "", "", &siteError{Code: "invalid_argument", Message: "--assessment-method 只能是 exam、other、assessment、no-exam 或 all"}
+	}
 }
 
 func (a NativeSite) academicDeferredExamActivity(ctx context.Context, term, wanted, referer string) (string, string, *siteError) {
@@ -1164,6 +1228,30 @@ func academicEnrollmentProofField(value string) string {
 		return "applied_at"
 	default:
 		return academicPageField(value)
+	}
+}
+
+func academicExemptExamField(value string) string {
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, "")
+	switch {
+	case strings.Contains(value, "考试性质"):
+		return "exam_nature"
+	case strings.Contains(value, "考试状态"):
+		return "exam_status"
+	case strings.Contains(value, "审核状态"):
+		return "review_status"
+	case strings.Contains(value, "免考原因") || value == "原因":
+		return "reason"
+	case strings.Contains(value, "上课院系"):
+		return "department"
+	case strings.Contains(value, "班级名称"):
+		return "class"
+	case strings.Contains(value, "课程属性"):
+		return "course_attribute"
+	case value == "姓名":
+		return "name"
+	default:
+		return academicDeferredExamField(value)
 	}
 }
 
