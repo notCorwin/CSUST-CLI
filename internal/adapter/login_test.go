@@ -31,6 +31,10 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 				return
 			}
 			account, password, captcha, encoded = request.Form.Get("userAccount"), request.Form.Get("userPassword"), request.Form.Get("RANDOMCODE"), request.Form.Get("encoded")
+			if captcha == "bad" {
+				_, _ = writer.Write([]byte("密码错误"))
+				return
+			}
 			http.SetCookie(writer, &http.Cookie{Name: "AUTH", Value: "1", Path: "/"})
 			_, _ = writer.Write([]byte("登录成功"))
 		case academicProbePath:
@@ -69,6 +73,9 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 	if captchaRequests != 1 {
 		t.Fatalf("captcha was refreshed during retry: requests=%d", captchaRequests)
+	}
+	if _, err := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "local", captcha: "bad"}); err == nil || err.Code != "authentication_failed" {
+		t.Fatalf("expected invalid credentials to map to authentication_failed, got %v", err)
 	}
 	if _, statErr := os.Stat(cookieFile); statErr != nil {
 		t.Fatal(statErr)

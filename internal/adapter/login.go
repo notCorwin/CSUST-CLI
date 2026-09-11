@@ -297,7 +297,7 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 		actionQuery.Set("service", serviceURL)
 		actionURL.RawQuery = actionQuery.Encode()
 	}
-	loginResult, err = a.loginHTTP(ctx, siteRequest{Target: actionURL, SessionTarget: &session, CookieFile: cookiePath, Method: "POST", Data: fields, Headers: []pair{{"Referer", responseURL}}, ReadOnly: true, AllowSSO: true, Yes: true})
+	loginResult, err = a.loginHTTP(ctx, siteRequest{Target: actionURL, SessionTarget: &session, CookieFile: cookiePath, Method: "POST", Data: fields, Headers: []pair{{"Referer", responseURL}}, ReadOnly: true, AllowBusinessFailure: true, AllowSSO: true, Yes: true})
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +355,7 @@ func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, pass
 	loginTarget := root
 	loginTarget.Path = "/Logon.do"
 	loginTarget.RawQuery = "method=logon"
-	response, requestErr := a.loginHTTP(ctx, siteRequest{Target: &loginTarget, SessionTarget: &root, CookieFile: cookiePath, Method: "POST", Data: []pair{{"userAccount", ""}, {"userPassword", ""}, {"RANDOMCODE", options.captcha}, {"encoded", encoded}}, Headers: []pair{{"Referer", root.String()}}, ReadOnly: true, Yes: true})
+	response, requestErr := a.loginHTTP(ctx, siteRequest{Target: &loginTarget, SessionTarget: &root, CookieFile: cookiePath, Method: "POST", Data: []pair{{"userAccount", ""}, {"userPassword", ""}, {"RANDOMCODE", options.captcha}, {"encoded", encoded}}, Headers: []pair{{"Referer", root.String()}}, ReadOnly: true, AllowBusinessFailure: true, Yes: true})
 	if requestErr != nil {
 		if requestErr.Code == "business_rejected" {
 			if failure := loginFailure(requestErr.Message); failure != nil {
