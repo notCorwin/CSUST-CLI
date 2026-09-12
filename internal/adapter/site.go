@@ -856,6 +856,22 @@ func jsonBusinessState(value any) (bool, bool) {
 					}
 				}
 			}
+			if result, ok := typed["result"]; ok {
+				switch numeric := result.(type) {
+				case float64:
+					if numeric == 1 {
+						states = append(states, true)
+					} else if numeric == 0 {
+						states = append(states, false)
+					}
+				case string:
+					if numeric == "1" {
+						states = append(states, true)
+					} else if numeric == "0" {
+						states = append(states, false)
+					}
+				}
+			}
 			if message, ok := typed["outmessage"]; ok {
 				switch value := message.(type) {
 				case bool:

@@ -15,7 +15,7 @@
 - VPN：登录、状态、退出、工作台应用/分组、消息、审批、设备和文件业务。
 - 网络教学与教学质量保障：课程、课程详情、课程顺序、教学评价和毕业设计入口。
 - eHall：当前账号可用服务目录、服务详情、权限、消息、企业邮箱状态、新闻和服务周期提醒。
-- 融合服务大厅：当前账号可用的办事服务目录、分类/部门字典、分页和筛选；服务跳转继续由对应业务 Adapter 负责。
+- 融合服务大厅：当前账号可用的办事服务目录、分类/部门字典、分页/筛选、服务指南、收藏和评价；服务跳转继续由对应业务 Adapter 负责。
 - 其他业务服务：录取通知书、期刊、云就业、企业邮箱登录、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、实验室仪器、人才招聘、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
 
 业务命令使用语义参数；传统页面解析和底层协议请求只在 adapter 内部使用。服务目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
@@ -196,7 +196,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `teaching` | 网络教学平台课程、公开通知、课程详情和课程顺序 |
 | `quality` | 教学质量保障系统登录、状态、评价和毕业设计入口 |
 | `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价、服务项收藏和周期提醒 |
-| `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选和网络报修表单结构 |
+| `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选、服务指南、收藏、评价和网络报修表单结构 |
 | `services` | 已映射业务服务及依据 |
 | `official` | 官网公开全文检索、分页结果和文章详情 |
 | `training-platform` | 干部培训与社会培训公开资讯列表、分页和详情 |
@@ -256,6 +256,10 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust service-hall categories --json
 ./csust service-hall departments --category-id 117 --json
 ./csust service-hall services --page 1 --page-size 12 --keyword 教务 --category 教务教学 --department 教务处 --json
+./csust service-hall guide --id GUIDE_ID --json
+./csust service-hall favorite --service-id APP_ID --yes --json
+./csust service-hall rating --service-id APP_ID --page 1 --page-size 5 --json
+./csust service-hall rate --service-id APP_ID --rating 5 --comment 满意 --yes --json
 ./csust service-hall network-repair schema --json
 ./csust service-hall login --auth sso --password-stdin --json
 

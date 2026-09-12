@@ -3,7 +3,9 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +26,16 @@ func (a NativeSite) executeServiceHall(ctx context.Context, args []string) (map[
 		return a.serviceHallServices(ctx, args[1:])
 	case "categories", "labels", "departments":
 		return a.serviceHallDictionary(ctx, args[0], args[1:])
+	case "guide", "service", "detail":
+		return a.serviceHallGuide(ctx, args[1:])
+	case "favorite", "unfavorite":
+		return a.serviceHallFavoriteMutation(ctx, args[0], args[1:])
+	case "rating", "service-rating":
+		return a.serviceHallRating(ctx, args[1:])
+	case "my-rating":
+		return a.serviceHallMyRating(ctx, args[1:])
+	case "rate":
+		return a.serviceHallRate(ctx, args[1:])
 	case "catalog":
 		return businessCatalogFilter(serviceHallService), nil
 	case "network-repair", "repair":
@@ -34,8 +46,265 @@ func (a NativeSite) executeServiceHall(ctx context.Context, args []string) (map[
 	case "status", "login", "logout":
 		return a.executeSSOServiceCommand(ctx, args, serviceHallService, "融合服务大厅")
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "service-hall 只支持 services、list、categories、labels、departments、catalog、network-repair、status、login、logout"}
+		return nil, &siteError{Code: "invalid_argument", Message: "service-hall 只支持 services、list、categories、labels、departments、guide、favorite、unfavorite、rating、my-rating、rate、catalog、network-repair、status、login、logout"}
 	}
+}
+
+func (a NativeSite) serviceHallGuide(ctx context.Context, args []string) (map[string]any, *siteError) {
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	id, requiredErr := businessRequired(args, "--id", "service-hall guide 必须提供 --id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	categoryID, _, categoryErr := businessValue(args, "--category-id")
+	if categoryErr != nil {
+		return nil, categoryErr
+	}
+	departmentID, _, departmentErr := businessValue(args, "--department-id")
+	if departmentErr != nil {
+		return nil, departmentErr
+	}
+	result, requestErr := a.execute(ctx, siteRequest{
+		Service: serviceHallService, Method: "GET", Path: "/handleHall/guide",
+		Params:     []pair{{"appId", id}, {"classifyId", categoryID}, {"departId", departmentID}},
+		CookieFile: cookie, AllowSSO: true, ReadOnly: true, Yes: true,
+	})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result = sitePageResult(result)
+	result["service"], result["operation"], result["service_id"] = serviceHallService, "guide", id
+	return result, nil
+}
+
+func (a NativeSite) serviceHallJSONRequest(ctx context.Context, path string, body any, cookie string, mutating bool) (map[string]any, *siteError) {
+	return a.execute(ctx, siteRequest{
+		Service: serviceHallService, Method: "POST", Path: path, JSON: body, HasJSON: true,
+		Headers: []pair{{name: "X-Requested-With", value: "XMLHttpRequest"}}, CookieFile: cookie,
+		AllowSSO: true, RequireLogin: true, AllowBusinessFailure: true,
+		ReadOnly: !mutating, Yes: true, RawJSON: true,
+	})
+}
+
+func serviceHallJSONPayload(result map[string]any, message string) (map[string]any, *siteError) {
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if fmt.Sprint(payload["result"]) != "1" {
+		return nil, &siteError{Code: "business_rejected", Message: message, Details: map[string]any{
+			"remote_result": payload["result"], "remote_message": payload["msg"],
+		}}
+	}
+	return payload, nil
+}
+
+func (a NativeSite) serviceHallFavoriteMutation(ctx context.Context, operation string, args []string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "修改融合服务大厅收藏状态必须加 --yes"}
+	}
+	id, requiredErr := businessRequired(args, "--service-id", "service-hall "+operation+" 必须提供 --service-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	wantFavorite := operation == "favorite"
+	path := "/handleHall/cancleCollect"
+	if wantFavorite {
+		path = "/handleHall/collect"
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	result, requestErr := a.serviceHallJSONRequest(ctx, path, map[string]any{"appId": id}, cookie, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := serviceHallJSONPayload(result, "融合服务大厅收藏操作被拒绝")
+	if payloadErr != nil {
+		payloadErr.Code = "mutation_rejected"
+		payloadErr.Details = map[string]any{"submitted": true, "confirmed": false, "evidence": "response", "service_id": id, "remote_result": payloadErr.Details["remote_result"]}
+		return nil, payloadErr
+	}
+	readbackArgs := []string{"--favorites", "--page-size", "100"}
+	if cookie != "" {
+		readbackArgs = append(readbackArgs, "--cookie-file", cookie)
+	}
+	readback, readbackErr := a.serviceHallServices(ctx, readbackArgs)
+	if readbackErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "收藏请求已发送但服务目录回读失败", Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "readback-error", "service_id": id, "cause": readbackErr.Error(),
+		}}
+	}
+	actual := serviceHallFavoritePresent(readback, id)
+	if actual != wantFavorite {
+		return nil, &siteError{Code: "mutation_unverified", Message: "收藏请求已发送但未从服务目录确认最终状态", Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "readback", "service_id": id, "expected": wantFavorite, "actual": actual,
+		}}
+	}
+	return map[string]any{
+		"ok": true, "submitted": true, "confirmed": true, "evidence": "readback",
+		"service": serviceHallService, "operation": operation, "service_id": id,
+		"favorite": actual, "api_data": payload["data"],
+	}, nil
+}
+
+func serviceHallFavoritePresent(result map[string]any, id string) bool {
+	services, ok := result["services"].([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range services {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"appId", "app_id", "serviceId"} {
+			if value, exists := row[key]; exists && serviceHallIDEqual(value, id) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func serviceHallIDEqual(value any, wanted string) bool {
+	if strings.TrimSpace(fmt.Sprint(value)) == strings.TrimSpace(wanted) {
+		return true
+	}
+	wantNumber, wantErr := strconv.ParseFloat(strings.TrimSpace(wanted), 64)
+	valueNumber, valueErr := strconv.ParseFloat(strings.TrimSpace(fmt.Sprint(value)), 64)
+	return wantErr == nil && valueErr == nil && wantNumber == valueNumber
+}
+
+func (a NativeSite) serviceHallRating(ctx context.Context, args []string) (map[string]any, *siteError) {
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	id, requiredErr := businessRequired(args, "--service-id", "service-hall rating 必须提供 --service-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	pageSize, pageSizeErr := businessInt(args, "--page-size", 5)
+	if pageSizeErr != nil {
+		return nil, pageSizeErr
+	}
+	result, requestErr := a.serviceHallJSONRequest(ctx, "/evaluate/list", map[string]any{"appId": id, "size": pageSize, "current": page}, cookie, false)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if _, payloadErr := serviceHallJSONPayload(result, "融合服务大厅评价查询被拒绝"); payloadErr != nil {
+		return nil, payloadErr
+	}
+	result = businessResult(result, serviceHallService, "rating")
+	result["service_id"], result["page"], result["page_size"] = id, page, pageSize
+	return result, nil
+}
+
+func (a NativeSite) serviceHallMyRating(ctx context.Context, args []string) (map[string]any, *siteError) {
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	id, requiredErr := businessRequired(args, "--service-id", "service-hall my-rating 必须提供 --service-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	result, requestErr := a.serviceHallJSONRequest(ctx, "/evaluate/my", map[string]any{"appId": id}, cookie, false)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if _, payloadErr := serviceHallJSONPayload(result, "融合服务大厅个人评价查询被拒绝"); payloadErr != nil {
+		return nil, payloadErr
+	}
+	result = businessResult(result, serviceHallService, "my-rating")
+	result["service_id"] = id
+	return result, nil
+}
+
+func (a NativeSite) serviceHallRate(ctx context.Context, args []string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "提交融合服务大厅评价必须加 --yes"}
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	id, requiredErr := businessRequired(args, "--service-id", "service-hall rate 必须提供 --service-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	ratingText, requiredErr := businessRequired(args, "--rating", "service-hall rate 必须提供 --rating")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	rating, parseErr := strconv.ParseFloat(strings.TrimSpace(ratingText), 64)
+	if parseErr != nil || rating < 1 || rating > 5 {
+		return nil, &siteError{Code: "invalid_argument", Message: "--rating 必须是 1 到 5 之间的数字"}
+	}
+	comment, _, commentErr := businessValue(args, "--comment")
+	if commentErr != nil {
+		return nil, commentErr
+	}
+	result, requestErr := a.serviceHallJSONRequest(ctx, "/evaluate/commit", map[string]any{
+		"appId": id, "rating": rating, "evaluate": comment,
+	}, cookie, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if _, payloadErr := serviceHallJSONPayload(result, "融合服务大厅评价提交被拒绝"); payloadErr != nil {
+		payloadErr.Code = "mutation_rejected"
+		return nil, payloadErr
+	}
+	readback, readbackErr := a.serviceHallJSONRequest(ctx, "/evaluate/my", map[string]any{"appId": id}, cookie, false)
+	if readbackErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "评价已提交但个人评价回读失败", Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "readback-error", "service_id": id, "cause": readbackErr.Error(),
+		}}
+	}
+	readbackPayload, payloadErr := serviceHallJSONPayload(readback, "融合服务大厅个人评价回读被拒绝")
+	if payloadErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "评价已提交但个人评价回读被拒绝", Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "readback-rejected", "service_id": id, "cause": payloadErr.Error(),
+		}}
+	}
+	verifiedRating, ok := serviceHallRatingValue(readbackPayload["data"])
+	if !ok || math.Abs(verifiedRating-rating) > 0.01 {
+		return nil, &siteError{Code: "mutation_unverified", Message: "评价已提交但回读评分与提交值不一致", Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "readback", "service_id": id, "expected_rating": rating, "actual_rating": verifiedRating,
+		}}
+	}
+	result = businessResult(result, serviceHallService, "rate")
+	result["service_id"], result["rating"], result["verified_rating"] = id, rating, verifiedRating
+	result["submitted"], result["confirmed"], result["evidence"] = true, true, "readback"
+	return result, nil
+}
+
+func serviceHallRatingValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"rating", "score"} {
+			if number, ok := serviceHallRatingValue(typed[key]); ok {
+				return number, true
+			}
+		}
+	case float64:
+		return typed, true
+	case int:
+		return float64(typed), true
+	case string:
+		number, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return number, err == nil
+	}
+	return 0, false
 }
 
 func (a NativeSite) serviceHallNetworkRepairSchema(ctx context.Context, args []string) (map[string]any, *siteError) {
