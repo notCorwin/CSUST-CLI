@@ -258,6 +258,8 @@ password=密码
 ./csust union catalog --json
 ./csust research status --json
 ./csust transport-info status --json
+./csust mail status --json
+./csust mail login --username 邮箱账号 --password-stdin --json
 ./csust transport-lab catalog --json
 ./csust transport-lab login --role user --phone 手机号 --password-stdin --captcha 验证码 --json
 ./csust continuing-platform catalog --json

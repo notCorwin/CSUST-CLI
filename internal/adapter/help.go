@@ -71,6 +71,7 @@ func nativeUsage(args []string) []byte {
   sunshine                    教育阳光服务诉求提交/查询与短信验证
   equipment                   实验室仪器列表、筛选和详情
   recruitment                 人才招聘频道、公告、岗位筛选和详情
+  mail                        企业邮箱登录、验证码和会话
   professional-learning       专业技术人员继续教育课程、分类、通知和详情
   institutional-learning      事业单位工作人员继续教育课程、分类、通知和详情
   transport-mobile            交通运输工程综合信息登录、身份、待办、字典、答辩、财务、改密及学院业务查询
