@@ -137,6 +137,8 @@ func parseLoginOptions(args []string) (loginOptions, *siteError) {
 		switch arg {
 		case "--username":
 			options.username = value
+		case "--password":
+			options.password = value
 		case "--auth":
 			options.auth = value
 		case "--captcha":
@@ -145,13 +147,23 @@ func parseLoginOptions(args []string) (loginOptions, *siteError) {
 			options.captchaImage = value
 		case "--password-stdin":
 			options.passwordStdin = true
+		case "--mobile":
+			options.mobile = value
+		case "--dynamic-code":
+			options.dynamicCode = value
+		case "--qr-image":
+			options.qrImage = value
+		case "--send-code":
+			options.sendCode = true
+		case "--yes":
+			options.yes = true
 		case "--json":
 		default:
 			return loginOptions{}, &siteError{Code: "invalid_argument", Message: "login 参数无效: " + arg}
 		}
 	}
-	if options.auth != "auto" && options.auth != "sso" && options.auth != "local" {
-		return loginOptions{}, &siteError{Code: "invalid_argument", Message: "--auth 必须是 auto、sso 或 local"}
+	if options.auth != "auto" && options.auth != "sso" && options.auth != "local" && options.auth != "dynamic" && options.auth != "qr" {
+		return loginOptions{}, &siteError{Code: "invalid_argument", Message: "--auth 必须是 auto、sso、local、dynamic 或 qr"}
 	}
 	if options.passwordStdin {
 		password, err := readBoundedSiteInput(os.Stdin)
@@ -167,6 +179,9 @@ func parseLoginOptions(args []string) (loginOptions, *siteError) {
 }
 
 func (a NativeSite) loginAcademic(ctx context.Context, options loginOptions) (map[string]any, *siteError) {
+	if options.auth == "dynamic" || options.auth == "qr" {
+		return nil, &siteError{Code: "invalid_argument", Message: "教务 login 只支持 --auth auto、sso 或 local；动态码/扫码请使用对应业务命令"}
+	}
 	account, password, err := credentialsGo(options.username, options.password)
 	if err != nil {
 		return nil, err

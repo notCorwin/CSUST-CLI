@@ -281,6 +281,9 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		}
 	}
 	common := func() { add("--cookie-file") }
+	ssoLogin := func() {
+		add("--auth", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image", "--mobile", "--dynamic-code", "--send-code", "--qr-image", "--yes")
+	}
 	switch service {
 	case "services":
 	case "official":
@@ -471,7 +474,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		switch operation {
 		case "login":
-			add("--auth", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+			ssoLogin()
 		case "logout":
 			add("--yes")
 		case "list", "instruments":
@@ -603,7 +606,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		switch operation {
 		case "login":
-			add("--auth", "--username", "--password-stdin", "--captcha", "--captcha-image")
+			ssoLogin()
 		case "logout", "status", "profile", "online", "devices", "package-options":
 		case "bills", "billing":
 			add("--year")
@@ -653,7 +656,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		switch operation {
 		case "login":
-			add("--auth", "--username", "--password-stdin", "--captcha", "--captcha-image")
+			ssoLogin()
 		case "logout":
 			add("--yes")
 		case "fees", "fee-status":
@@ -717,7 +720,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		switch operation {
 		case "login":
-			add("--auth", "--username", "--password-stdin", "--captcha", "--captcha-image")
+			ssoLogin()
 		case "logout", "status", "profile", "reader-profile":
 		case "loans", "current-loans", "special-loans", "reservations", "current-reservations", "reservation-history":
 			add("--query", "--keyword", "--field", "--page", "--page-size")
@@ -783,7 +786,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "services", "list":
 			add("--page", "--page-size", "--keyword", "--category", "--category-id", "--label-id", "--department", "--department-id", "--serve-type", "--sort", "--favorites")
 		case "login":
-			add("--auth", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+			ssoLogin()
 		case "logout":
 			add("--yes")
 		case "status":
@@ -830,7 +833,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			}
 		}
 		if operation == "login" {
-			add("--username", "--password-stdin", "--auth", "--captcha", "--captcha-image")
+			ssoLogin()
 		}
 	case "mail":
 		common()

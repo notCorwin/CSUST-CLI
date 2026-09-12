@@ -782,8 +782,8 @@ func (a NativeSite) studentDigitalArchiveLogin(ctx context.Context, args []strin
 	if parseErr != nil {
 		return nil, parseErr
 	}
-	if options.auth == "local" {
-		return nil, &siteError{Code: "invalid_argument", Message: "student-digital-archive 只支持 --auth sso"}
+	if options.auth != "auto" && options.auth != "sso" {
+		return nil, &siteError{Code: "invalid_argument", Message: "student-digital-archive 只支持 --auth auto 或 sso"}
 	}
 	account, password, credentialErr := credentialsGo(options.username, options.password)
 	if credentialErr != nil {

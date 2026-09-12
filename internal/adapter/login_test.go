@@ -99,6 +99,41 @@ func TestNativeLocalLoginPersistsOnlyConfirmedSession(t *testing.T) {
 	}
 }
 
+func TestParseLoginOptionsSupportsSSOAlternatives(t *testing.T) {
+	options, err := parseLoginOptions([]string{
+		"--auth", "dynamic", "--mobile", "13800138000", "--dynamic-code", "123456",
+		"--captcha", "captcha", "--password", "password",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.auth != "dynamic" || options.mobile != "13800138000" || options.dynamicCode != "123456" ||
+		options.captcha != "captcha" || options.password != "password" || options.sendCode || options.yes {
+		t.Fatal("unexpected dynamic login options")
+	}
+	send, sendErr := parseLoginOptions([]string{"--auth", "dynamic", "--mobile", "13800138000", "--captcha", "captcha", "--send-code", "--yes"})
+	if sendErr != nil || send.auth != "dynamic" || send.mobile != "13800138000" || !send.sendCode || !send.yes {
+		t.Fatalf("unexpected dynamic-code request options: err=%v", sendErr)
+	}
+	qr, qrErr := parseLoginOptions([]string{"--auth", "qr", "--qr-image", "/tmp/csust-qr.png"})
+	if qrErr != nil || qr.auth != "qr" || qr.qrImage != "/tmp/csust-qr.png" {
+		t.Fatalf("unexpected QR login options: %#v, %v", qr, qrErr)
+	}
+	if _, academicErr := (NativeSite{}).loginAcademic(context.Background(), loginOptions{auth: "dynamic"}); academicErr == nil || academicErr.Code != "invalid_argument" {
+		t.Fatalf("academic dynamic login was not rejected before credentials: %v", academicErr)
+	}
+	for _, service := range []string{"equipment", "campus-network", "finance", "finance-query", "service-hall", "library", "library-catalog", "library-center", "legacy-mail"} {
+		for _, mode := range [][]string{
+			{"--auth", "dynamic", "--mobile", "13800138000", "--dynamic-code", "123456", "--captcha", "captcha"},
+			{"--auth", "qr", "--qr-image", "/tmp/csust-qr.png"},
+		} {
+			if flagErr := validateBusinessArgs(append([]string{service, "login"}, mode...)); flagErr != nil {
+				t.Fatalf("%s rejected supported SSO mode: %v", service, flagErr)
+			}
+		}
+	}
+}
+
 func TestCASLoginFieldsExcludeBrowserPasswordInput(t *testing.T) {
 	document, err := parsePage(`<form id="pwdFromId"><input name="username"><input name="passwordText" type="password"><input id="saltPassword" name="password" type="hidden"><input name="execution" value="e1s1"></form>`)
 	if err != nil {
