@@ -13,6 +13,7 @@ func nativeUsage(args []string) []byte {
 
 命令：
   login/logout                 教务会话
+  login reset-password         统一认证找回密码（支持手机/邮箱/密保问题）
   schedule/grades/profile     教务查询
   personal-info               个人资料设置（更新需要 --yes）
   change-password             修改教务密码（需要 --yes）

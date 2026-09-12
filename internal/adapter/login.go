@@ -52,6 +52,10 @@ func (a NativeSite) runLoginCommand(ctx context.Context, args []string, jsonMode
 		result, logoutErr := a.logoutAcademic(ctx)
 		return loginOutput(jsonMode, result, logoutErr)
 	}
+	if len(args) > 1 && args[1] == "reset-password" {
+		result, resetErr := a.executeAuthPasswordReset(ctx, args[2:])
+		return authPasswordResetOutput(jsonMode, result, resetErr)
+	}
 	options, parseErr := parseLoginOptions(args[1:])
 	if parseErr != nil {
 		return loginOutput(jsonMode, nil, parseErr)

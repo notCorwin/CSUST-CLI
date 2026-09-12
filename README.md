@@ -53,6 +53,14 @@ export CSUST_USERNAME='学号'
 printf '%s\n' '密码' | ./csust login --auth sso --password-stdin --json
 ```
 
+统一认证找回密码按服务端验证步骤执行；首次缺验证码时会保存图片，短信/密保流程会返回可续办的状态文件：
+
+```bash
+./csust login reset-password --username 学号 --json
+./csust login reset-password --username 学号 --captcha-id 验证码编号 --captcha 图形码 --method phone --phone 手机号 --send-code --yes --json
+./csust login reset-password --state-file ~/.config/csust-cli/password-reset.state.json --code 短信码 --new-password-stdin --password-confirm-stdin --yes --json <<< $'新密码\n新密码'
+```
+
 也可以在当前目录使用未提交的 `.env`：
 
 ```dotenv
