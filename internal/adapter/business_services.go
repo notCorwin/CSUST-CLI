@@ -1334,9 +1334,9 @@ func (a NativeSite) journalSearch(ctx context.Context, args []string, prefix, se
 	if requestErr != nil {
 		return nil, requestErr
 	}
-	payload, jsonErr := businessJSONMap(result)
-	if jsonErr != nil {
-		return nil, jsonErr
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
 	}
 	rows, _ := payload["rows"].([]any)
 	articles := make([]map[string]any, 0, len(rows))
@@ -1616,9 +1616,9 @@ func (a NativeSite) studentRecordTrace(ctx context.Context, args []string) (map[
 	if requestErr != nil {
 		return nil, requestErr
 	}
-	payload, parseErr := businessJSONMap(result)
-	if parseErr != nil {
-		return nil, parseErr
+	payload, jsonErr := businessJSONMap(result)
+	if jsonErr != nil {
+		return nil, jsonErr
 	}
 	success, _ := payload["success"].(bool)
 	expressCode := findString(payload, "expressCode")
