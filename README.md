@@ -180,6 +180,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
 | `library` | 图书馆馆藏检索、书目详情、馆藏状态、读者资料、借阅/预约/权限及规则查询 |
 | `library-center` | 图书馆个人资料、信用记录、联系方式/密码、空间/座位资源、可用状态、个人预约查询以及预约/取消 |
+| `library-services` | 图书馆服务大厅公开服务目录、关键词筛选和服务详情 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `vpn` | VPN 登录、状态、退出、工作台/分组、申请、设备、会话、消息和文件 |
@@ -376,6 +377,9 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust library-remote databases --keyword 知网 --sort visits --json
 ./csust library-remote databases --subject 工学 --json
 ./csust library-remote database --id 1 --json
+# 图书馆服务大厅：公开服务目录、关键词筛选和服务详情
+./csust library-services list --keyword 查新 --json
+./csust library-services service --id SERVICE_ID --json
 # 图书馆馆藏：检索、书目详情和馆藏/可借状态
 ./csust library search --query 人工智能 --field title --in-library --json
 ./csust library book --id 91103 --json

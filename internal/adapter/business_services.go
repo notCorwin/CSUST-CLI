@@ -68,6 +68,7 @@ var businessServices = []businessService{
 	{"quality-system", "教学质量保障系统", "quality-system", "教学质量", "high", "live zbxt config/login plus bearer-protected home, dictionaries and teaching-quality APIs"},
 	{"library-personal", "图书馆个人中心、空间和座位预约查询", "library-personal", "图书馆", "high", "CAS login reaches ClientWeb IC center; init_acc, center.aspx, account.aspx, device.aspx and reserve.aspx expose profile, credit, contact/password, resource, availability and personal-reservation APIs"},
 	{"library-catalog", "图书馆馆藏与读者服务", "library-catalog", "图书馆", "high", "live OPAC exposes catalogue APIs plus CAS-backed reader profile, loans, reservations, privileges, finance, shelf, pre-loan and loan-rule JSON endpoints"},
+	{"library-services", "图书馆公开服务目录", "library", "图书馆", "high", "live lib service hall uses the structured more-datas endpoint and exposes 15 public service entries"},
 	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
 	{"campus-map", "校园地图与公共点", "campus-map", "校园服务", "high", "live GIS APIs expose zones, public point types, points, point details, search and aerial/panorama resources"},
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data; student login uses vi_code, encode token and behavioral captcha"},
@@ -108,7 +109,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "official", "training-platform", "peixun", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "visit-reservation", "sqyrjd", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "official", "training-platform", "peixun", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "visit-reservation", "sqyrjd", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-services", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -209,6 +210,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeContinuingPlatform(ctx, args[1:])
 	case "library-remote":
 		return a.executeLibraryRemote(ctx, args[1:])
+	case "library-services":
+		return a.executeLibraryServices(ctx, args[1:])
 	case "library", "library-catalog":
 		return a.executeLibraryCatalog(ctx, args[1:])
 	case "campus-map":
@@ -718,6 +721,14 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "databases", "list":
 			add("--keyword", "--letter", "--subject", "--sort")
 		case "database", "detail":
+			add("--id")
+		}
+	case "library-services":
+		common()
+		switch operation {
+		case "list", "services":
+			add("--keyword", "--page", "--page-size")
+		case "service", "detail":
 			add("--id")
 		}
 	case "library", "library-catalog":
