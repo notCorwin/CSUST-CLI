@@ -52,7 +52,7 @@ var transportMobileTables = map[string]transportMobileTable{
 	},
 	"achievements": {
 		table: "achievement", sortColumn: "code", fuzzy: []string{"name", "code", "remark"},
-		populator: []map[string]any{{"path": "creater teacher.department student.department", "select": "name"}},
+		populator: []map[string]any{{"path": "creater teacher.department student.department history.user", "select": "name"}},
 		model:     transportMobileAchievement,
 	},
 	"kpis": {
@@ -80,7 +80,7 @@ var transportMobileTables = map[string]transportMobileTable{
 func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		result := businessCatalogNames(transportMobileService)
-		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update"}
+		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "achievement", "achievement-create", "achievement-update", "achievement-status", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update"}
 		return result, nil
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
@@ -118,6 +118,14 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["access-records"], "access-records")
 	case "achievements":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["achievements"], "achievements")
+	case "achievement":
+		return a.transportMobileAchievementDetail(ctx, args[1:], cookie)
+	case "achievement-create":
+		return a.transportMobileAchievementSave(ctx, args[1:], cookie, "create")
+	case "achievement-update":
+		return a.transportMobileAchievementSave(ctx, args[1:], cookie, "update")
+	case "achievement-status":
+		return a.transportMobileAchievementStatus(ctx, args[1:], cookie)
 	case "kpis":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["kpis"], "kpis")
 	case "kpi-create":
@@ -157,7 +165,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance-item-delete":
 		return a.transportMobileFinanceItemDelete(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、achievement、achievement-create、achievement-update、achievement-status、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
 	}
 }
 
@@ -2265,17 +2273,26 @@ func transportMobileAccessRecord(row map[string]any) map[string]any {
 func transportMobileAchievement(row map[string]any) map[string]any {
 	result := transportMobileRecord(row)
 	result["achievement_type"] = transportMobileValue(row, "type")
-	result["event"] = transportMobileValue(row, "event")
-	result["level"] = transportMobileValue(row, "level")
-	result["student_code"] = transportMobileText(row, "studentCode", "student.code")
+	result["student_number"] = transportMobileText(row, "studentNo", "student.code")
+	result["student_code"] = result["student_number"]
 	result["student_name"] = transportMobileText(row, "studentName", "student.name")
-	result["authorization_number"] = transportMobileText(row, "authorizationNo")
-	result["first_inventor"] = transportMobileText(row, "firstInventor")
+	result["authorization_number"] = transportMobileText(row, "no", "authorizationNo")
+	result["first_author"] = transportMobileValue(row, "isFirstAuthor")
 	result["journal"] = transportMobileText(row, "journal")
-	result["indexing"] = transportMobileValue(row, "indexing")
+	result["indexed"] = transportMobileValue(row, "indexed", "indexing")
+	result["event"] = transportMobileValue(row, "event")
+	result["award_level"] = transportMobileValue(row, "award", "awardLevel")
+	result["group_type"] = transportMobileValue(row, "groupType")
+	result["student_type"] = transportMobileValue(row, "studentType")
+	result["special_award"] = transportMobileValue(row, "hasSpecialAward")
+	result["students"] = row["student"]
+	result["teachers"] = row["teacher"]
+	result["completed_at"] = transportMobileValue(row, "dateDone")
+	result["files"] = row["file"]
+	result["level"] = transportMobileValue(row, "level")
+	result["indexing"] = transportMobileValue(row, "indexing", "indexed")
 	result["competition"] = transportMobileValue(row, "competition")
-	result["award_level"] = transportMobileValue(row, "awardLevel")
-	result["completed_at"] = transportMobileValue(row, "dateComplete", "completed_at")
+	result["first_inventor"] = transportMobileText(row, "firstInventor")
 	result["applicant"] = transportMobileValue(row, "applicant")
 	result["applied_at"] = transportMobileValue(row, "dateApply", "applied_at")
 	return result

@@ -89,7 +89,7 @@ func nativeUsage(args []string) []byte {
   mail                        企业邮箱登录、验证码和会话
   professional-learning       专业技术人员继续教育课程、分类、通知和详情
   institutional-learning      事业单位工作人员继续教育课程、分类、通知和详情
-  transport-mobile            交通运输工程综合信息登录、身份、待办、字典、答辩、财务、业绩、通知、留言、请假单与审批、改密及学院业务查询
+  transport-mobile            交通运输工程综合信息登录、身份、待办、字典、答辩、财务、成果、业绩、通知、留言、请假单与审批、改密及学院业务查询
   electronic-documents         电子成绩单与在校证明登录、文件类型、申请记录和申请/下载
   campus-network              校园网自助服务资料、账单、详单、缴费、套餐和设备
   student-digital-archive     学生数字档案个人资料、学业、借阅、消费、上网和随手记
