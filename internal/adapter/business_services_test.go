@@ -91,6 +91,42 @@ func TestBusinessAdaptersKeepSemanticAndRawData(t *testing.T) {
 	}
 }
 
+func TestTargetEntriesKeepUnreachableSitesExplicit(t *testing.T) {
+	catalog := businessCatalog()["catalog"].([]map[string]any)
+	wanted := map[string]string{
+		"legacy-portal":       "my.csust.edu.cn",
+		"academic-affairs":    "jwc.csust.edu.cn",
+		"graduate-management": "yjsgl.csust.edu.cn",
+		"admissions-system":   "zs.csust.edu.cn",
+		"alumni":              "xy.csust.edu.cn",
+		"app":                 "app.csust.edu.cn:8087",
+		"training":            "gcxljxgl.csust.edu.cn",
+		"srv":                 "srv.csust.edu.cn",
+		"icsai2003":           "icsai2003.csust.edu.cn",
+		"trx":                 "trx.csust.edu.cn",
+		"v":                   "v.csust.edu.cn",
+		"live":                "live.csust.edu.cn",
+	}
+	for name, host := range wanted {
+		var found map[string]any
+		for _, item := range catalog {
+			if item["name"] == name {
+				found = item
+				break
+			}
+		}
+		if found == nil || found["host"] != host || found["confidence_evidence"] == "" {
+			t.Fatalf("target site is missing explicit probe evidence: %s %#v", name, found)
+		}
+	}
+	for _, name := range []string{"legacy-portal", "academic-affairs", "graduate-management", "admissions-system", "alumni", "app", "training", "srv", "icsai2003", "trx", "v", "live"} {
+		result := runIssueJSON(t, name, "catalog")
+		if result["catalog"] == nil || result["confirmed"] != true {
+			t.Fatalf("target site catalog command is not exposed: %s %#v", name, result)
+		}
+	}
+}
+
 func TestOnlineJudgeLoginAndLogoutUseCSRFAndProbeSession(t *testing.T) {
 	const username, password, tfaCode, csrf = "alice", "judge-password-secret", "tfa-code-secret", "test-csrf"
 	loggedIn := false

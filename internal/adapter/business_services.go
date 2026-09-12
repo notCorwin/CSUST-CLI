@@ -103,6 +103,18 @@ var businessServices = []businessService{
 	{"security-admin", "安全运维管理平台", "security-admin", "运维", "medium", "baolei host returned NSFOCUS OSMS page; administrative scope"},
 	{"cms-admin", "内容后台", "cms-admin", "后台", "medium", "official pages expose 10.255.196.62:8080/system/login.jsp"},
 	{"cms-admin-legacy", "旧内容后台", "cms-admin-legacy", "后台", "medium", "official pages expose 10.255.196.2:8080/system/login.jsp"},
+	{"legacy-portal", "旧统一门户（当前不可达）", "legacy-portal", "入口", "low", "2026-09-13 Playwright probe returned HTTP 502/connection closed; no page or business protocol was available"},
+	{"academic-affairs", "教务处独立入口（当前不可达）", "academic-affairs", "入口", "low", "2026-09-13 Playwright probe returned HTTP 502; core academic transactions remain under the xk adapter"},
+	{"graduate-management", "研究生管理入口（当前为默认页）", "graduate-management", "入口", "low", "2026-09-13 Playwright probe returned an empty IIS default page; no application route was exposed"},
+	{"admissions-system", "招生系统入口（当前拒绝访问）", "admissions-system", "入口", "low", "2026-09-13 Playwright probe returned HTTP 403 at the root; no business protocol was exposed"},
+	{"alumni", "校友入口（当前为 404）", "alumni", "入口", "low", "2026-09-13 Playwright probe returned the site's 404 page; no business protocol was exposed"},
+	{"app", "移动应用下载入口（当前不可达）", "app", "入口", "low", "2026-09-13 Playwright probe failed on port 8087 for both HTTP and HTTPS; no page or API was available"},
+	{"training", "工程继续培训入口（当前网关超时）", "training", "继续教育", "low", "2026-09-13 Playwright probe returned HTTP 504 Gateway Time-out; no business protocol was available"},
+	{"srv", "srv 站点（当前不可达）", "srv", "未知", "low", "2026-09-13 Playwright probes failed for both HTTP and HTTPS; no page or business protocol was available"},
+	{"icsai2003", "icsai2003 站点（当前不可达）", "icsai2003", "未知", "low", "2026-09-13 Playwright probes failed for both HTTP and HTTPS; no page or business protocol was available"},
+	{"trx", "trx 站点（当前不可达）", "trx", "未知", "low", "2026-09-13 Playwright probes failed for both HTTP and HTTPS; no page or business protocol was available"},
+	{"v", "v 站点（当前不可达）", "v", "未知", "low", "2026-09-13 Playwright probes failed for both HTTP and HTTPS; no page or business protocol was available"},
+	{"live", "live 站点（当前不可达）", "live", "未知", "low", "2026-09-13 Playwright probes failed for both HTTP and HTTPS; no page or business protocol was available"},
 }
 
 var journalCSRF = regexp.MustCompile(`CsrfCheckCode=([A-Za-z0-9]+)`)
@@ -110,7 +122,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "official", "training-platform", "peixun", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "visit-reservation", "sqyrjd", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-services", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "official", "training-platform", "peixun", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "visit-reservation", "sqyrjd", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-services", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy", "legacy-portal", "academic-affairs", "graduate-management", "admissions-system", "alumni", "app", "training", "srv", "icsai2003", "trx", "v", "live":
 		return true
 	default:
 		return false
@@ -233,6 +245,30 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeCMSAdmin(ctx, args[1:], "cms-admin", "内容后台")
 	case "cms-admin-legacy":
 		return a.executeCMSAdmin(ctx, args[1:], "cms-admin-legacy", "旧内容后台")
+	case "legacy-portal":
+		return a.executeServiceStatusCommand(ctx, args[1:], "legacy-portal", "旧统一门户")
+	case "academic-affairs":
+		return a.executeServiceStatusCommand(ctx, args[1:], "academic-affairs", "教务处独立入口")
+	case "graduate-management":
+		return a.executeServiceStatusCommand(ctx, args[1:], "graduate-management", "研究生管理入口")
+	case "admissions-system":
+		return a.executeServiceStatusCommand(ctx, args[1:], "admissions-system", "招生系统入口")
+	case "alumni":
+		return a.executeServiceStatusCommand(ctx, args[1:], "alumni", "校友入口")
+	case "app":
+		return a.executeServiceStatusCommand(ctx, args[1:], "app", "移动应用下载入口")
+	case "training":
+		return a.executeServiceStatusCommand(ctx, args[1:], "training", "工程继续培训入口")
+	case "srv":
+		return a.executeServiceStatusCommand(ctx, args[1:], "srv", "srv 站点")
+	case "icsai2003":
+		return a.executeServiceStatusCommand(ctx, args[1:], "icsai2003", "icsai2003 站点")
+	case "trx":
+		return a.executeServiceStatusCommand(ctx, args[1:], "trx", "trx 站点")
+	case "v":
+		return a.executeServiceStatusCommand(ctx, args[1:], "v", "v 站点")
+	case "live":
+		return a.executeServiceStatusCommand(ctx, args[1:], "live", "live 站点")
 	default:
 		return nil, &siteError{Code: "invalid_argument", Message: "未知业务命令: " + args[0]}
 	}
@@ -957,6 +993,9 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		if operation == "login" {
 			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image", "--scope")
 		}
+	case "legacy-portal", "academic-affairs", "graduate-management", "admissions-system", "alumni", "app", "training", "srv", "icsai2003", "trx", "v", "live":
+		common()
+		add("--insecure")
 	}
 	return allowed
 }

@@ -118,6 +118,11 @@ func nativeUsage(args []string) []byte {
   security-admin              安全运维管理平台
   cms-admin                   内容后台
   cms-admin-legacy            旧内容后台
+  legacy-portal/academic-affairs/graduate-management
+                              目标站点状态入口（当前不可达或无应用页）
+  admissions-system/alumni/app/training
+                              目标站点状态入口（当前无可验证业务协议）
+  srv/icsai2003/trx/v/live    目标站点状态入口（当前不可达）
 
 传统 HTML 只在内部适配器中解析；写操作需要 --yes，并返回 confirmed/evidence。
 `)
