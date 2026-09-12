@@ -15,7 +15,7 @@ func TestEquipmentProtocolAndSemanticModels(t *testing.T) {
 		t.Fatalf("unexpected equipment DES payload: %q %v", encrypted, err)
 	}
 
-	var listPlain, detailPlain, favoritePlain string
+	var listPlain, detailPlain, calendarPlain, favoritePlain string
 	calls := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != equipmentEndpoint || request.Method != http.MethodPost {
@@ -80,6 +80,12 @@ func TestEquipmentProtocolAndSemanticModels(t *testing.T) {
 				"SCCJ": "厂商", "GBMC": "中国", "SSBMMC": "交通学院", "SSSYSMC": "测量实验室",
 				"XNZB": "性能", "ZYYY": "应用", "YPYQ": "样品要求", "YQSM": "说明",
 			}})
+		case "GetDeviceCalendar":
+			calendarPlain = plain
+			writeEquipmentResponse(t, writer, map[string]any{
+				"message": []any{map[string]any{"ReturnFlag": "1", "ReturnMsg": "返回成功！"}},
+				"data":    []any{map[string]any{"ZZCalendar": []any{map[string]any{"Date": "2026-09-14", "State": "1"}}, "SyCalendar": []any{}}},
+			})
 		case "AddDevsCollect":
 			favoritePlain = plain
 			writeEquipmentResponse(t, writer, map[string]any{"flag": "0", "msg": "收藏成功！"})
@@ -117,11 +123,15 @@ func TestEquipmentProtocolAndSemanticModels(t *testing.T) {
 	if detail["instrument"].(map[string]any)["name"] != "压力老化仪" || !strings.Contains(detailPlain, "ZCBH:'EQ-1'") || !strings.Contains(detailPlain, `"lang":"zh-CN"`) {
 		t.Fatalf("equipment detail was not mapped: %#v plain=%s", detail, detailPlain)
 	}
+	calendar := runIssueJSON(t, "equipment", "availability", "--id", "EQ-1", "--date", "2026-09-14")
+	if calendar["id"] != "EQ-1" || calendar["date"] != "2026-09-14" || !strings.Contains(calendarPlain, "Date:'2026-09-14'") {
+		t.Fatalf("equipment availability was not mapped: %#v plain=%s", calendar, calendarPlain)
+	}
 	favorite := runIssueJSON(t, "equipment", "favorite", "--id", "EQ-1", "--yes")
 	if favorite["submitted"] != true || favorite["confirmed"] != true || favorite["favorite"] != true || !strings.Contains(favoritePlain, "YQBH:'EQ-1'") {
 		t.Fatalf("equipment favorite was not confirmed: %#v plain=%s", favorite, favoritePlain)
 	}
-	for _, action := range []string{"GetUIToken", "GetApparatusList_Nei", "GetIndexDevBm", "GetDevListCols", "GetApparatusOne", "AddDevsCollect"} {
+	for _, action := range []string{"GetUIToken", "GetApparatusList_Nei", "GetIndexDevBm", "GetDevListCols", "GetApparatusOne", "GetDeviceCalendar", "AddDevsCollect"} {
 		if !containsString(calls, action) {
 			t.Fatalf("equipment action was not called: %s calls=%v", action, calls)
 		}

@@ -440,6 +440,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--keyword", "--department-id", "--lab-id", "--category-id", "--discipline", "--year", "--year-to", "--page", "--page-size", "--all")
 		case "detail":
 			add("--id")
+		case "availability", "calendar":
+			add("--id", "--date")
 		case "favorite":
 			add("--id", "--yes")
 		}

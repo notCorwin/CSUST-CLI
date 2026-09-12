@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -109,6 +110,38 @@ func (a NativeSite) executeEquipment(ctx context.Context, args []string) (map[st
 		result := equipmentResult("detail", "GetApparatusOne returned the instrument record")
 		result["data"], result["instrument"], result["raw"] = value, equipmentInstrument(rows[0]), value
 		return result, nil
+	case "availability", "calendar":
+		id, requiredErr := businessRequired(args[1:], "--id", "equipment availability 必须提供 --id")
+		if requiredErr != nil {
+			return nil, requiredErr
+		}
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "equipment availability 的 --id 不能为空"}
+		}
+		date, dateErr := equipmentDate(args[1:])
+		if dateErr != nil {
+			return nil, dateErr
+		}
+		token, tokenErr := a.equipmentToken(ctx, cookie)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		plaintext := fmt.Sprintf("{YQBH:'%s',URL:'',Date:'%s', kzJson : '{ \"lang\":\"zh-CN\",\"cma\":\"0\"}'}", equipmentJSString(id), equipmentJSString(date))
+		value, requestErr := a.equipmentCall(ctx, cookie, "GetDeviceCalendar", "YQKF", plaintext, token)
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		payload, payloadErr := equipmentMap(value, "预约日历")
+		if payloadErr != nil {
+			return nil, payloadErr
+		}
+		if !equipmentCalendarSucceeded(payload["message"]) {
+			return nil, equipmentRejected("GetDeviceCalendar", equipmentText(payload["message"]), "预约日历读取失败")
+		}
+		result := equipmentResult("availability", "GetDeviceCalendar returned the instrument availability calendar")
+		result["id"], result["date"], result["data"], result["raw"] = id, date, payload["data"], payload
+		return result, nil
 	case "favorite":
 		if !businessBool(args[1:], "--yes") {
 			return nil, &siteError{Code: "confirmation_required", Message: "修改仪器收藏状态必须加 --yes"}
@@ -155,8 +188,35 @@ func (a NativeSite) executeEquipment(ctx context.Context, args []string) (map[st
 			}}
 		}
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "equipment 只支持 status、login、logout、list、filters、detail、favorite、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "equipment 只支持 status、login、logout、list、filters、detail、availability、calendar、favorite、catalog"}
 	}
+}
+
+func equipmentDate(args []string) (string, *siteError) {
+	value, found, valueErr := businessValue(args, "--date")
+	if valueErr != nil {
+		return "", valueErr
+	}
+	if !found || strings.EqualFold(strings.TrimSpace(value), "today") {
+		return time.Now().Format("2006-01-02"), nil
+	}
+	value = strings.TrimSpace(value)
+	if _, parseErr := time.Parse("2006-01-02", value); parseErr != nil {
+		return "", &siteError{Code: "invalid_argument", Message: "--date 必须是 YYYY-MM-DD 或 today"}
+	}
+	return value, nil
+}
+
+func equipmentCalendarSucceeded(value any) bool {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return false
+	}
+	message, ok := items[0].(map[string]any)
+	if !ok {
+		return false
+	}
+	return equipmentText(message["ReturnFlag"]) == "1"
 }
 
 func equipmentListPayload(args []string, page, pageSize int) (string, map[string]any, *siteError) {
