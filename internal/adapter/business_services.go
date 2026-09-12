@@ -442,6 +442,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--username", "--password", "--password-stdin", "--phone", "--sms-code", "--remember")
 		case "send-code":
 			add("--phone", "--yes")
+		case "change-password":
+			add("--login-type", "--current-password", "--current-password-stdin", "--new-password", "--new-password-stdin", "--password-confirm", "--yes")
 		case "profile", "pending":
 		case "dictionaries", "dict":
 			add("--code")

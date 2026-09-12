@@ -288,6 +288,7 @@ password=密码
 ./csust institutional-learning courses --kind public --year 2026 --json
 # 交通运输工程综合信息：登录后保存令牌并验证身份，再查询待办、字典、答辩和财务项目
 ./csust transport-mobile login --username 工号 --password-stdin --json
+./csust transport-mobile change-password --current-password-stdin --new-password-stdin --password-confirm 新密码 --yes --json
 ./csust transport-mobile profile --json
 ./csust transport-mobile pending --json
 ./csust transport-mobile dictionaries --code Finance.Type --json

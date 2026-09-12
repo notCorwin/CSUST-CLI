@@ -81,6 +81,8 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileLogin(ctx, args[1:], cookie)
 	case "send-code":
 		return a.transportMobileSendCode(ctx, args[1:], cookie)
+	case "change-password":
+		return a.transportMobileChangePassword(ctx, args[1:], cookie)
 	case "logout":
 		return a.transportMobileLogout(ctx, args[1:], cookie)
 	case "profile":
@@ -112,7 +114,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance":
 		return a.transportMobileFinanceDetail(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、catalog"}
 	}
 }
 
@@ -318,6 +320,51 @@ func (a NativeSite) transportMobileSendCode(ctx context.Context, args []string, 
 	result := transportMobileResult("send-code", "验证码接口返回 success=true")
 	result["phone"] = phone
 	result["api_code"] = payload["code"]
+	return result, nil
+}
+
+func (a NativeSite) transportMobileChangePassword(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "修改交通移动端密码会改变远端认证状态，请加 --yes"}
+	}
+	loginType := strings.ToLower(strings.TrimSpace(flagValue(args, "--login-type")))
+	if loginType == "" {
+		loginType = "account"
+	}
+	if loginType != "account" && loginType != "sms" {
+		return nil, &siteError{Code: "invalid_argument", Message: "--login-type 必须是 account 或 sms"}
+	}
+	oldPassword, oldErr := businessSecret(args, "--current-password", "CSUST_TRANSPORT_MOBILE_CURRENT_PASSWORD")
+	if oldErr != nil && loginType == "account" {
+		return nil, oldErr
+	}
+	newPassword, newErr := businessSecret(args, "--new-password", "CSUST_TRANSPORT_MOBILE_NEW_PASSWORD")
+	if newErr != nil {
+		return nil, newErr
+	}
+	if strings.TrimSpace(newPassword) == "" || strings.ContainsAny(newPassword, "\r\n") {
+		return nil, &siteError{Code: "invalid_argument", Message: "新密码不能为空且不能包含换行"}
+	}
+	confirmation, confirmationErr := businessRequired(args, "--password-confirm", "change-password 必须提供 --password-confirm")
+	if confirmationErr != nil {
+		return nil, confirmationErr
+	}
+	if newPassword != confirmation {
+		return nil, &siteError{Code: "invalid_argument", Message: "新密码两次输入不一致"}
+	}
+	token, _, sessionErr := a.transportMobileSession(args, cookie)
+	if sessionErr != nil {
+		return nil, sessionErr
+	}
+	if token == "" {
+		return nil, &siteError{Code: "login_required", Message: "请先运行 transport-mobile login 或提供 --access-token"}
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "POST", "/api/user/changepwd", map[string]any{"loginType": loginType, "old": oldPassword, "new": newPassword}, true, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result := transportMobileResult("change-password", "修改密码接口返回 success=true")
+	result["login_type"], result["api_code"] = loginType, payload["code"]
 	return result, nil
 }
 

@@ -30,6 +30,18 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"_id":"u-1","code":"T001","name":"交通老师","jobNumber":"T001","title":["讲师"],"phone":"13800138000","numPending":3,"roles":["teacher"],"permissions":["defense:view"]},"success":true}`)
 		case "/api/user/getPendingCount":
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"numPending":3},"success":true}`)
+		case "/api/user/changepwd":
+			if request.Method != http.MethodPost || request.Header.Get("token") != token {
+				t.Errorf("change-password request was not authenticated POST: method=%s token=%q", request.Method, request.Header.Get("token"))
+			}
+			var body map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Errorf("change-password body is not JSON: %v", err)
+			}
+			if body["loginType"] != "account" || body["old"] != "old-secret" || body["new"] != "new-secret" {
+				t.Errorf("change-password body was not mapped: %#v", body)
+			}
+			_, _ = fmt.Fprint(writer, `{"code":200,"message":"修改成功","success":true}`)
 		case "/api/system/dict":
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":[{"code":"Finance.Type","desc":"财务项目类别","value":[{"key":"research","title":"科学研究"}]},{"code":"Other","desc":"其他","value":[]}],"success":true}`)
 		case "/api/table/defense", "/api/table/finance":
@@ -108,6 +120,10 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 	if financeDetail["finance"].(map[string]any)["owner"] != "交通老师" {
 		t.Fatalf("finance detail model failed: %#v", financeDetail)
 	}
+	changedPassword := runIssueJSON(t, "transport-mobile", "change-password", "--current-password", "old-secret", "--new-password", "new-secret", "--password-confirm", "new-secret", "--yes")
+	if changedPassword["operation"] != "change-password" || changedPassword["confirmed"] != true || strings.Contains(string(mustMarshalIssue(changedPassword)), "secret") {
+		t.Fatalf("change-password result or redaction failed: %#v", changedPassword)
+	}
 
 	code := runIssueJSON(t, "transport-mobile", "send-code", "--phone", "13800138000", "--yes")
 	if code["phone"] != "13800138000" || code["confirmed"] != true {
@@ -134,6 +150,13 @@ func TestTransportMobileSendCodeRequiresConfirmation(t *testing.T) {
 	handled, _, _, code, err := (NativeSite{}).Run(t.Context(), []string{"transport-mobile", "send-code", "--phone", "13800138000"}, false)
 	if err != nil || !handled || code != 2 {
 		t.Fatalf("send-code without confirmation was not rejected: handled=%v code=%d err=%v", handled, code, err)
+	}
+}
+
+func TestTransportMobileChangePasswordRequiresConfirmation(t *testing.T) {
+	handled, _, _, code, err := (NativeSite{}).Run(t.Context(), []string{"transport-mobile", "change-password", "--new-password", "new", "--password-confirm", "new"}, false)
+	if err != nil || !handled || code != 2 {
+		t.Fatalf("change-password without confirmation was not rejected: handled=%v code=%d err=%v", handled, code, err)
 	}
 }
 
