@@ -140,7 +140,7 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 		t.Fatalf("finance-item detail model failed: %#v", financeItemDetail)
 	}
 	changedPassword := runIssueJSON(t, "transport-mobile", "change-password", "--current-password", "old-secret", "--new-password", "new-secret", "--password-confirm", "new-secret", "--yes")
-	if changedPassword["operation"] != "change-password" || changedPassword["confirmed"] != true || strings.Contains(string(mustMarshalIssue(changedPassword)), "secret") {
+	if changedPassword["operation"] != "change-password" || changedPassword["submitted"] != true || changedPassword["confirmed"] != true || strings.Contains(string(mustMarshalIssue(changedPassword)), "secret") {
 		t.Fatalf("change-password result or redaction failed: %#v", changedPassword)
 	}
 

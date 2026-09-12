@@ -3,9 +3,11 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -122,8 +124,14 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["finance-items"], "finance-items")
 	case "finance-item":
 		return a.transportMobileFinanceItemDetail(ctx, args[1:], cookie)
+	case "finance-item-create":
+		return a.transportMobileFinanceItemSave(ctx, args[1:], cookie, "create")
+	case "finance-item-update":
+		return a.transportMobileFinanceItemSave(ctx, args[1:], cookie, "update")
+	case "finance-item-delete":
+		return a.transportMobileFinanceItemDelete(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、finance-items、finance-item、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
 	}
 }
 
@@ -373,6 +381,7 @@ func (a NativeSite) transportMobileChangePassword(ctx context.Context, args []st
 		return nil, requestErr
 	}
 	result := transportMobileResult("change-password", "修改密码接口返回 success=true")
+	result["submitted"] = true
 	result["login_type"], result["api_code"] = loginType, payload["code"]
 	return result, nil
 }
@@ -597,14 +606,6 @@ func (a NativeSite) transportMobileFinanceItemDetail(ctx context.Context, args [
 	if requiredErr != nil {
 		return nil, requiredErr
 	}
-	spec := transportMobileTables["finance-items"]
-	body := map[string]any{
-		"paginator": map[string]any{"page": 1, "pageSize": 1, "needAll": false, "pages": 0},
-		"sorter":    map[string]any{spec.sortColumn: -1},
-		"filter":    map[string]any{"_id": strings.TrimSpace(id)},
-		"selector":  []string{},
-		"populator": spec.populator,
-	}
 	token, _, sessionErr := a.transportMobileSession(args, cookie)
 	if sessionErr != nil {
 		return nil, sessionErr
@@ -612,21 +613,403 @@ func (a NativeSite) transportMobileFinanceItemDetail(ctx context.Context, args [
 	if token == "" {
 		return nil, &siteError{Code: "login_required", Message: "请先运行 transport-mobile login 或提供 --access-token"}
 	}
-	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/"+spec.table, body, true, token, cookie, true, true)
+	row, payload, rowErr := a.transportMobileFinanceItemRow(ctx, strings.TrimSpace(id), token, cookie)
+	if rowErr != nil {
+		return nil, rowErr
+	}
+	item := transportMobileFinanceItem(row)
+	result := transportMobileResult("finance-item", "财务明细通过列表接口精确回读")
+	result["id"], result["data"], result["finance_item"], result["raw"] = strings.TrimSpace(id), item, item, redactSiteJSON(payload)
+	return result, nil
+}
+
+func transportMobileFinanceItemBody(id string) map[string]any {
+	spec := transportMobileTables["finance-items"]
+	body := map[string]any{
+		"paginator": map[string]any{"page": 1, "pageSize": 1, "needAll": false, "pages": 0},
+		"sorter":    map[string]any{spec.sortColumn: -1},
+		"filter":    map[string]any{},
+		"selector":  []string{},
+		"populator": spec.populator,
+	}
+	if strings.TrimSpace(id) != "" {
+		body["filter"] = map[string]any{"_id": strings.TrimSpace(id)}
+	}
+	return body
+}
+
+func (a NativeSite) transportMobileFinanceItemRow(ctx context.Context, id, token, cookie string) (map[string]any, map[string]any, *siteError) {
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/fitem", transportMobileFinanceItemBody(id), true, token, cookie, true, true)
 	if requestErr != nil {
-		return nil, requestErr
+		return nil, nil, requestErr
 	}
 	data, ok := payload["data"].(map[string]any)
 	if !ok {
-		return nil, &siteError{Code: "parse_error", Message: "财务明细详情响应缺少 data 对象"}
+		return nil, nil, &siteError{Code: "parse_error", Message: "财务明细响应缺少 data 对象"}
 	}
 	rows := transportMobileMaps(data["records"])
 	if len(rows) == 0 {
-		return nil, &siteError{Code: "not_found", Message: "未找到该财务明细", Details: map[string]any{"id": strings.TrimSpace(id)}}
+		return nil, nil, &siteError{Code: "not_found", Message: "未找到该财务明细", Details: map[string]any{"id": strings.TrimSpace(id)}}
 	}
-	item := spec.model(rows[0])
-	result := transportMobileResult("finance-item", "财务明细通过列表接口精确回读")
-	result["id"], result["data"], result["finance_item"], result["raw"] = strings.TrimSpace(id), item, item, redactSiteJSON(payload)
+	return rows[0], payload, nil
+}
+
+func (a NativeSite) transportMobileRequiredToken(args []string, cookie string) (string, *siteError) {
+	token, _, sessionErr := a.transportMobileSession(args, cookie)
+	if sessionErr != nil {
+		return "", sessionErr
+	}
+	if token == "" {
+		return "", &siteError{Code: "login_required", Message: "请先运行 transport-mobile login 或提供 --access-token"}
+	}
+	return token, nil
+}
+
+func transportMobileFinanceItemMoney(value string) (float64, *siteError) {
+	money, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || math.IsNaN(money) || math.IsInf(money, 0) || money < -999999 || money > 999999 {
+		return 0, &siteError{Code: "invalid_argument", Message: "--money 必须是 -999999 到 999999 之间的数字"}
+	}
+	return money, nil
+}
+
+func transportMobileFinanceItemMoneyArg(args []string, current any, required bool) (float64, *siteError) {
+	value, found, valueErr := businessValue(args, "--money")
+	if valueErr != nil {
+		return 0, valueErr
+	}
+	if !found {
+		if required {
+			return 0, &siteError{Code: "invalid_argument", Message: "finance-item-create 必须提供 --money"}
+		}
+		value = strings.TrimSpace(fmt.Sprint(current))
+	}
+	if strings.TrimSpace(value) == "" {
+		return 0, &siteError{Code: "invalid_argument", Message: "--money 不能为空"}
+	}
+	return transportMobileFinanceItemMoney(value)
+}
+
+func transportMobileFinanceItemDirection(value string) (int, *siteError) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "in", "income", "收入":
+		return 1, nil
+	case "-1", "out", "expense", "支出":
+		return -1, nil
+	default:
+		return 0, &siteError{Code: "invalid_argument", Message: "--direction 必须是 income/收入 或 expense/支出"}
+	}
+}
+
+func transportMobileFinanceItemDirectionValue(value any) (int, *siteError) {
+	if direction, ok := value.(bool); ok {
+		if direction {
+			return 1, nil
+		}
+		return -1, nil
+	}
+	return transportMobileFinanceItemDirection(fmt.Sprint(value))
+}
+
+func transportMobileFinanceItemDirectionArg(args []string, current any, required bool) (int, *siteError) {
+	value, found, valueErr := businessValue(args, "--direction")
+	if valueErr != nil {
+		return 0, valueErr
+	}
+	if found {
+		return transportMobileFinanceItemDirection(value)
+	}
+	if current == nil {
+		if required {
+			return 0, &siteError{Code: "invalid_argument", Message: "finance-item-create 必须提供 --direction"}
+		}
+		return 0, &siteError{Code: "protocol_unconfirmed", Message: "财务明细缺少收支方向"}
+	}
+	return transportMobileFinanceItemDirectionValue(current)
+}
+
+func transportMobileFinanceItemTypeArg(args []string, current any) (any, *siteError) {
+	value, found, valueErr := businessValue(args, "--type")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	if !found {
+		return current, nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	return strings.TrimSpace(value), nil
+}
+
+func transportMobileFinanceItemRemarkArg(args []string, current string) (string, *siteError) {
+	value, found, valueErr := businessValue(args, "--remark")
+	if valueErr != nil {
+		return "", valueErr
+	}
+	if !found {
+		return current, nil
+	}
+	return value, nil
+}
+
+func transportMobileFinanceItemFileIDs(value any) []string {
+	ids := []string{}
+	add := func(item any) {
+		switch typed := item.(type) {
+		case map[string]any:
+			if id := transportMobileText(typed, "_id", "id"); id != "" {
+				ids = append(ids, id)
+			}
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				ids = append(ids, strings.TrimSpace(typed))
+			}
+		}
+	}
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			add(item)
+		}
+	case []map[string]any:
+		for _, item := range typed {
+			add(item)
+		}
+	case []string:
+		for _, item := range typed {
+			add(item)
+		}
+	}
+	return ids
+}
+
+func (a NativeSite) transportMobileUploadFinanceFiles(ctx context.Context, args []string, token, cookie string) ([]string, *siteError) {
+	paths, valueErr := businessValues(args, "--file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	ids := make([]string, 0, len(paths))
+	for _, path := range paths {
+		file, fileErr := siteFilePart("file", path, "交通移动端附件")
+		if fileErr != nil {
+			return nil, fileErr
+		}
+		if file.size == 0 {
+			return nil, &siteError{Code: "invalid_argument", Message: "交通移动端附件不能为空"}
+		}
+		result, requestErr := a.execute(ctx, siteRequest{
+			Service: transportMobileService, Method: "POST", Path: "/api/file/upload", CookieFile: cookie,
+			Headers: []pair{{"token", token}, {"X-Encoded-Filename", "1"}}, Files: []filePart{file},
+			ReadOnly: false, Yes: true, RawJSON: true, AllowBusinessFailure: true,
+		})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		payload, parseErr := transportMobileEnvelope(result)
+		if parseErr != nil {
+			return nil, &siteError{Code: "mutation_unverified", Message: "附件上传已发送但响应无法解析", Details: map[string]any{"submitted": true, "confirmed": false, "cause": parseErr.Code}}
+		}
+		if !transportMobileSuccess(payload) {
+			return nil, transportMobileRejected(payload)
+		}
+		data, ok := payload["data"].(map[string]any)
+		if !ok {
+			return nil, &siteError{Code: "mutation_unverified", Message: "附件上传成功但响应缺少文件数据", Details: map[string]any{"submitted": true, "confirmed": false}}
+		}
+		id := transportMobileText(data, "_id", "id")
+		if id == "" {
+			return nil, &siteError{Code: "mutation_unverified", Message: "附件上传成功但响应缺少文件编号", Details: map[string]any{"submitted": true, "confirmed": false}}
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (a NativeSite) transportMobileFinanceItemSave(ctx context.Context, args []string, cookie, mode string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "保存交通移动端财务明细会改变远端数据，请加 --yes"}
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	entity := map[string]any{}
+	projectID := ""
+	id := ""
+	var existing map[string]any
+	if mode == "create" {
+		var projectErr *siteError
+		projectID, projectErr = businessRequired(args, "--project-id", "finance-item-create 必须提供 --project-id")
+		if projectErr != nil {
+			return nil, projectErr
+		}
+		money, moneyErr := transportMobileFinanceItemMoneyArg(args, nil, true)
+		if moneyErr != nil {
+			return nil, moneyErr
+		}
+		direction, directionErr := transportMobileFinanceItemDirectionArg(args, nil, true)
+		if directionErr != nil {
+			return nil, directionErr
+		}
+		typeValue, typeErr := transportMobileFinanceItemTypeArg(args, nil)
+		if typeErr != nil {
+			return nil, typeErr
+		}
+		remark, remarkErr := transportMobileFinanceItemRemarkArg(args, "")
+		if remarkErr != nil {
+			return nil, remarkErr
+		}
+		entity["project"], entity["money"], entity["dir"] = strings.TrimSpace(projectID), money, direction
+		entity["type"], entity["remark"], entity["file"] = typeValue, remark, []string{}
+	} else {
+		var idErr *siteError
+		id, idErr = businessRequired(args, "--id", "finance-item-update 必须提供 --id")
+		if idErr != nil {
+			return nil, idErr
+		}
+		var rowErr *siteError
+		existing, _, rowErr = a.transportMobileFinanceItemRow(ctx, strings.TrimSpace(id), token, cookie)
+		if rowErr != nil {
+			return nil, rowErr
+		}
+		projectID = transportMobileText(existing, "project._id", "project.id", "projectId", "project_id")
+		if projectID == "" {
+			return nil, &siteError{Code: "protocol_unconfirmed", Message: "财务明细缺少所属财务项目编号"}
+		}
+		money, moneyErr := transportMobileFinanceItemMoneyArg(args, existing["money"], false)
+		if moneyErr != nil {
+			return nil, moneyErr
+		}
+		direction, directionErr := transportMobileFinanceItemDirectionArg(args, existing["dir"], false)
+		if directionErr != nil {
+			return nil, directionErr
+		}
+		typeValue, typeErr := transportMobileFinanceItemTypeArg(args, existing["type"])
+		if typeErr != nil {
+			return nil, typeErr
+		}
+		remark, remarkErr := transportMobileFinanceItemRemarkArg(args, transportMobileText(existing, "remark"))
+		if remarkErr != nil {
+			return nil, remarkErr
+		}
+		version := existing["version"]
+		if version == nil || strings.TrimSpace(fmt.Sprint(version)) == "" {
+			return nil, &siteError{Code: "protocol_unconfirmed", Message: "财务明细缺少并发版本号，无法安全修改"}
+		}
+		entity["_id"], entity["version"] = strings.TrimSpace(id), version
+		entity["project"], entity["money"], entity["dir"] = projectID, money, direction
+		entity["type"], entity["remark"] = typeValue, remark
+		fileIDs := transportMobileFinanceItemFileIDs(existing["file"])
+		explicitFileIDs, fileIDErr := businessValues(args, "--file-id")
+		if fileIDErr != nil {
+			return nil, fileIDErr
+		}
+		if businessBool(args, "--clear-files") && len(explicitFileIDs) > 0 {
+			return nil, &siteError{Code: "invalid_argument", Message: "--clear-files 不能与 --file-id 一起使用"}
+		}
+		if businessBool(args, "--clear-files") {
+			fileIDs = []string{}
+		} else if len(explicitFileIDs) > 0 {
+			fileIDs = explicitFileIDs
+		}
+		entity["file"] = fileIDs
+	}
+	uploaded, uploadErr := a.transportMobileUploadFinanceFiles(ctx, args, token, cookie)
+	if uploadErr != nil {
+		return nil, uploadErr
+	}
+	entityFiles := transportMobileFinanceItemFileIDs(entity["file"])
+	entityFiles = append(entityFiles, uploaded...)
+	entity["file"] = entityFiles
+	payload, requestErr := a.transportMobileCall(ctx, "POST", "/api/financesop/"+url.PathEscape(strings.TrimSpace(projectID)), map[string]any{"type": mode, "entity": entity}, true, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	operation := "finance-item-" + mode
+	result := transportMobileResult(operation, "财务明细保存接口返回 success=true")
+	result["submitted"], result["project_id"], result["api_code"] = true, strings.TrimSpace(projectID), payload["code"]
+	if id != "" {
+		result["id"] = strings.TrimSpace(id)
+	}
+	result["files_uploaded"] = len(uploaded)
+	if data, ok := payload["data"]; ok {
+		result["data"] = redactSiteJSON(data)
+	}
+	if mode == "update" {
+		row, _, readbackErr := a.transportMobileFinanceItemRow(ctx, strings.TrimSpace(id), token, cookie)
+		if readbackErr != nil {
+			return nil, &siteError{Code: "mutation_unverified", Message: "财务明细保存成功反馈已返回，但回读失败", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(id), "cause": readbackErr.Code}}
+		}
+		if !transportMobileFinanceItemMatches(row, entity) {
+			return nil, &siteError{Code: "mutation_unverified", Message: "财务明细保存成功反馈已返回，但回读内容不一致", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(id)}}
+		}
+		result["evidence"] = "server-success-and-item-readback"
+	}
+	return result, nil
+}
+
+func transportMobileFinanceItemMatches(row, entity map[string]any) bool {
+	if transportMobileText(row, "project._id", "project.id", "projectId", "project_id") != strings.TrimSpace(fmt.Sprint(entity["project"])) {
+		return false
+	}
+	money, moneyErr := transportMobileFinanceItemMoney(fmt.Sprint(entity["money"]))
+	actualMoney, actualErr := transportMobileFinanceItemMoney(fmt.Sprint(row["money"]))
+	if moneyErr != nil || actualErr != nil || math.Abs(money-actualMoney) > 1e-9 {
+		return false
+	}
+	direction, directionErr := transportMobileFinanceItemDirectionValue(row["dir"])
+	if directionErr != nil || direction != int(entity["dir"].(int)) {
+		return false
+	}
+	if fmt.Sprint(row["type"]) != fmt.Sprint(entity["type"]) || transportMobileText(row, "remark") != fmt.Sprint(entity["remark"]) {
+		return false
+	}
+	actualFiles := transportMobileFinanceItemFileIDs(row["file"])
+	expectedFiles := transportMobileFinanceItemFileIDs(entity["file"])
+	if len(actualFiles) != len(expectedFiles) {
+		return false
+	}
+	for index := range actualFiles {
+		if actualFiles[index] != expectedFiles[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func (a NativeSite) transportMobileFinanceItemDelete(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "删除交通移动端财务明细会删除远端数据，请加 --yes"}
+	}
+	id, idErr := businessRequired(args, "--id", "finance-item-delete 必须提供 --id")
+	if idErr != nil {
+		return nil, idErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	row, _, rowErr := a.transportMobileFinanceItemRow(ctx, strings.TrimSpace(id), token, cookie)
+	if rowErr != nil {
+		return nil, rowErr
+	}
+	projectID := transportMobileText(row, "project._id", "project.id", "projectId", "project_id")
+	if projectID == "" {
+		return nil, &siteError{Code: "protocol_unconfirmed", Message: "财务明细缺少所属财务项目编号，无法刷新项目汇总"}
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "DELETE", "/api/table/fitem/"+url.PathEscape(strings.TrimSpace(id)), nil, false, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if _, patchErr := a.transportMobileCall(ctx, "PATCH", "/api/financesop/"+url.PathEscape(projectID), map[string]any{}, true, token, cookie, false, true); patchErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "财务明细删除成功反馈已返回，但项目汇总刷新失败", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(id), "cause": patchErr.Code}}
+	}
+	if _, _, readbackErr := a.transportMobileFinanceItemRow(ctx, strings.TrimSpace(id), token, cookie); readbackErr == nil || readbackErr.Code != "not_found" {
+		return nil, &siteError{Code: "mutation_unverified", Message: "财务明细删除成功反馈已返回，但删除结果无法确认", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(id)}}
+	}
+	result := transportMobileResult("finance-item-delete", "删除接口成功、项目汇总刷新成功且详情回读为不存在")
+	result["submitted"], result["id"], result["project_id"], result["api_code"] = true, strings.TrimSpace(id), projectID, payload["code"]
 	return result, nil
 }
 
