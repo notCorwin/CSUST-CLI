@@ -49,6 +49,7 @@ type businessService struct {
 }
 
 var businessServices = []businessService{
+	{"official", "学校官网公开资讯", "official", "内容", "medium", "live www homepage exposes full-text search at sch.jsp and article pages under info/{channel}/{article}.htm"},
 	{"graduate-notice", "研究生录取通知书", "graduate-notice", "招生", "high", "Nuxt bundle exports /api/print/admissionnotice/query/idcard and /generate/pdf; live endpoint returned JSON"},
 	{"undergraduate-admissions", "本科招生计划、分数和录取进程", "undergraduate-admissions", "招生", "high", "live zslq APIs expose plan, historical score, admission progress and candidate lookup endpoints"},
 	{"union", "智慧工会", "union", "工会", "high", "live homepage exposes proposal, membership, activity, survey, quiz and benefits modules; role login API is observable"},
@@ -105,7 +106,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "official", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -136,6 +137,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 	switch args[0] {
 	case "services", "service":
 		return businessCatalog(), nil
+	case "official":
+		return a.executeOfficial(ctx, args[1:])
 	case "ehall":
 		return a.executeEhall(ctx, args[1:])
 	case "service-hall", "mservice":
@@ -274,6 +277,15 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 	common := func() { add("--cookie-file") }
 	switch service {
 	case "services":
+	case "official":
+		common()
+		switch operation {
+		case "home":
+		case "search":
+			add("--keyword", "--page")
+		case "article":
+			add("--id")
+		}
 	case "admission-notice":
 		switch operation {
 		case "query":

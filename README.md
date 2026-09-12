@@ -187,11 +187,14 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价、服务项收藏和周期提醒 |
 | `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选和网络报修表单结构 |
 | `services` | 已映射业务服务及依据 |
+| `official` | 官网公开全文检索、分页结果和文章详情 |
 
 更多业务命令可先查看目录：
 
 ```bash
 ./csust services catalog --json
+./csust official search --keyword 人工智能 --page 1 --json
+./csust official article --id 1299/22951 --json
 ./csust teaching catalog --json
 ./csust quality catalog --json
 ```
