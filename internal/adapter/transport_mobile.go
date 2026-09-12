@@ -79,7 +79,7 @@ var transportMobileTables = map[string]transportMobileTable{
 func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		result := businessCatalogNames(transportMobileService)
-		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "kpis", "notices", "workflows", "vacations"}
+		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "kpis", "notices", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update"}
 		return result, nil
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
@@ -125,6 +125,12 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["workflows"], "workflows")
 	case "vacations":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["vacations"], "vacations")
+	case "vacation-create":
+		return a.transportMobileVacationSave(ctx, args[1:], cookie, "create")
+	case "vacation-update":
+		return a.transportMobileVacationSave(ctx, args[1:], cookie, "update")
+	case "workflow-action":
+		return a.transportMobileWorkflowAction(ctx, args[1:], cookie)
 	case "defense":
 		return a.transportMobileDefenseDetail(ctx, args[1:], cookie)
 	case "finances":
@@ -142,7 +148,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance-item-delete":
 		return a.transportMobileFinanceItemDelete(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、kpis、notices、workflows、workflow-action、vacations、vacation-create、vacation-update、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
 	}
 }
 
@@ -578,13 +584,9 @@ func (a NativeSite) transportMobileNoteRow(ctx context.Context, id, token, cooki
 }
 
 func (a NativeSite) transportMobileCurrentUserID(ctx context.Context, token, cookie string) (string, *siteError) {
-	payload, requestErr := a.transportMobileCall(ctx, "GET", "/api/user/getUserInfo", nil, false, token, cookie, true, true)
-	if requestErr != nil {
-		return "", requestErr
-	}
-	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		return "", &siteError{Code: "parse_error", Message: "用户信息响应缺少 data 对象"}
+	data, userErr := a.transportMobileCurrentUser(ctx, token, cookie)
+	if userErr != nil {
+		return "", userErr
 	}
 	userID := transportMobileText(data, "_id", "id", "ID")
 	if userID == "" {
@@ -813,6 +815,401 @@ func (a NativeSite) transportMobileNoteDelete(ctx context.Context, args []string
 	}
 	result := transportMobileResult("note-delete", "留言删除接口成功且消息回读为不存在")
 	result["submitted"], result["id"], result["message_id"], result["api_code"] = true, strings.TrimSpace(id), strings.TrimSpace(messageID), payload["code"]
+	return result, nil
+}
+
+func transportMobileVacationBody(id string) map[string]any {
+	spec := transportMobileTables["vacations"]
+	return map[string]any{
+		"paginator": map[string]any{"page": 1, "pageSize": 1, "needAll": false, "pages": 0},
+		"sorter":    map[string]any{spec.sortColumn: -1},
+		"filter":    map[string]any{"_id": strings.TrimSpace(id)},
+		"selector":  []string{},
+		"populator": spec.populator,
+	}
+}
+
+func (a NativeSite) transportMobileVacationRow(ctx context.Context, id, token, cookie string) (map[string]any, map[string]any, *siteError) {
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/vacation", transportMobileVacationBody(id), true, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, nil, &siteError{Code: "parse_error", Message: "请假单详情响应缺少 data 对象"}
+	}
+	rows := transportMobileMaps(data["records"])
+	if len(rows) == 0 {
+		return nil, nil, &siteError{Code: "not_found", Message: "未找到该请假单", Details: map[string]any{"id": strings.TrimSpace(id)}}
+	}
+	return rows[0], payload, nil
+}
+
+func transportMobileVacationDate(args []string, flag, current string, required bool) (string, *siteError) {
+	value, found, valueErr := businessValue(args, flag)
+	if valueErr != nil {
+		return "", valueErr
+	}
+	if !found {
+		value = current
+	}
+	if strings.TrimSpace(value) == "" && required {
+		return "", &siteError{Code: "invalid_argument", Message: flag + " 必须提供 YYYY-MM-DD 日期"}
+	}
+	parsed, parseErr := time.Parse("2006-01-02", strings.TrimSpace(value))
+	if parseErr != nil {
+		return "", &siteError{Code: "invalid_argument", Message: flag + " 必须是 YYYY-MM-DD 日期"}
+	}
+	return parsed.Format("2006-01-02"), nil
+}
+
+func transportMobileVacationDaysValue(value any) (float64, *siteError) {
+	days, parseErr := strconv.ParseFloat(strings.TrimSpace(fmt.Sprint(value)), 64)
+	if parseErr != nil || math.IsNaN(days) || math.IsInf(days, 0) || days <= 0 || math.Abs(days*2-math.Round(days*2)) > 1e-9 {
+		return 0, &siteError{Code: "invalid_argument", Message: "--days 必须是正整数或半天数（如 0.5）"}
+	}
+	return days, nil
+}
+
+func transportMobileVacationDays(args []string, from, to string, current any, recalculate bool) (float64, *siteError) {
+	value, found, valueErr := businessValue(args, "--days")
+	if valueErr != nil {
+		return 0, valueErr
+	}
+	if found {
+		return transportMobileVacationDaysValue(value)
+	}
+	if !recalculate && current != nil {
+		return transportMobileVacationDaysValue(current)
+	}
+	start, startErr := time.Parse("2006-01-02", from)
+	if startErr != nil {
+		return 0, &siteError{Code: "invalid_argument", Message: "开始日期无效"}
+	}
+	end, endErr := time.Parse("2006-01-02", to)
+	if endErr != nil || end.Before(start) {
+		return 0, &siteError{Code: "invalid_argument", Message: "结束日期不能早于开始日期"}
+	}
+	return float64(int(end.Sub(start).Hours()/24) + 1), nil
+}
+
+func transportMobileVacationString(args []string, flag, current, fallback string) (string, *siteError) {
+	value, found, valueErr := businessValue(args, flag)
+	if valueErr != nil {
+		return "", valueErr
+	}
+	if !found {
+		value = current
+	}
+	if !found && value == "" {
+		value = fallback
+	}
+	return strings.TrimSpace(value), nil
+}
+
+func transportMobileGroupID(value any) string {
+	if value == nil {
+		return ""
+	}
+	if groups := transportMobileMaps(value); len(groups) > 0 {
+		return transportMobileText(groups[0], "_id", "id")
+	}
+	if group, ok := value.(map[string]any); ok {
+		return transportMobileText(group, "_id", "id")
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func transportMobileVacationMatches(row, entity map[string]any) bool {
+	if transportMobileText(row, "dateBegin") != fmt.Sprint(entity["dateBegin"]) || transportMobileText(row, "dateEnd") != fmt.Sprint(entity["dateEnd"]) || transportMobileText(row, "type") != fmt.Sprint(entity["type"]) || transportMobileText(row, "reason") != fmt.Sprint(entity["reason"]) || transportMobileText(row, "address") != fmt.Sprint(entity["address"]) {
+		return false
+	}
+	expected, expectedErr := transportMobileVacationDaysValue(entity["numDay"])
+	actual, actualErr := transportMobileVacationDaysValue(transportMobileValue(row, "numDay", "days"))
+	return expectedErr == nil && actualErr == nil && math.Abs(expected-actual) < 1e-9
+}
+
+func (a NativeSite) transportMobileCurrentUser(ctx context.Context, token, cookie string) (map[string]any, *siteError) {
+	payload, requestErr := a.transportMobileCall(ctx, "GET", "/api/user/getUserInfo", nil, false, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "用户信息响应缺少 data 对象"}
+	}
+	return data, nil
+}
+
+func (a NativeSite) transportMobileVacationSave(ctx context.Context, args []string, cookie, mode string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "保存交通移动端请假单会改变远端数据，请加 --yes"}
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	entity := map[string]any{}
+	id := ""
+	var existing map[string]any
+	if mode == "create" {
+		from, fromErr := transportMobileVacationDate(args, "--from", "", true)
+		if fromErr != nil {
+			return nil, fromErr
+		}
+		to, toErr := transportMobileVacationDate(args, "--to", "", true)
+		if toErr != nil {
+			return nil, toErr
+		}
+		days, daysErr := transportMobileVacationDays(args, from, to, nil, true)
+		if daysErr != nil {
+			return nil, daysErr
+		}
+		kind, kindErr := transportMobileVacationString(args, "--type", "", "出差")
+		if kindErr != nil {
+			return nil, kindErr
+		}
+		reason, reasonErr := transportMobileVacationString(args, "--reason", "", "")
+		if reasonErr != nil {
+			return nil, reasonErr
+		}
+		address, addressErr := transportMobileVacationString(args, "--address", "", "")
+		if addressErr != nil {
+			return nil, addressErr
+		}
+		user, userErr := a.transportMobileCurrentUser(ctx, token, cookie)
+		if userErr != nil {
+			return nil, userErr
+		}
+		userID := transportMobileText(user, "_id", "id", "ID")
+		if userID == "" {
+			return nil, &siteError{Code: "protocol_unconfirmed", Message: "用户信息缺少用户编号"}
+		}
+		now := time.Now().UTC()
+		entity = map[string]any{"dateBegin": from, "dateEnd": to, "numDay": days, "type": kind, "reason": reason, "address": address, "creater": userID, "dateCreate": now, "department": nil, "code": "__auto__vacation", "status": "暂存"}
+		entity["department"] = transportMobileGroupID(user["group"])
+	} else {
+		idValue, idErr := businessRequired(args, "--id", "vacation-update 必须提供 --id")
+		if idErr != nil {
+			return nil, idErr
+		}
+		id = strings.TrimSpace(idValue)
+		var rowErr *siteError
+		existing, _, rowErr = a.transportMobileVacationRow(ctx, id, token, cookie)
+		if rowErr != nil {
+			return nil, rowErr
+		}
+		version := existing["version"]
+		if version == nil || strings.TrimSpace(fmt.Sprint(version)) == "" {
+			return nil, &siteError{Code: "protocol_unconfirmed", Message: "请假单缺少并发版本号，无法安全修改"}
+		}
+		from, fromErr := transportMobileVacationDate(args, "--from", transportMobileText(existing, "dateBegin"), true)
+		if fromErr != nil {
+			return nil, fromErr
+		}
+		to, toErr := transportMobileVacationDate(args, "--to", transportMobileText(existing, "dateEnd"), true)
+		if toErr != nil {
+			return nil, toErr
+		}
+		_, fromFound, _ := businessValue(args, "--from")
+		_, toFound, _ := businessValue(args, "--to")
+		days, daysErr := transportMobileVacationDays(args, from, to, transportMobileValue(existing, "numDay", "days"), fromFound || toFound)
+		if daysErr != nil {
+			return nil, daysErr
+		}
+		kind, kindErr := transportMobileVacationString(args, "--type", transportMobileText(existing, "type"), "出差")
+		if kindErr != nil {
+			return nil, kindErr
+		}
+		reason, reasonErr := transportMobileVacationString(args, "--reason", transportMobileText(existing, "reason"), "")
+		if reasonErr != nil {
+			return nil, reasonErr
+		}
+		address, addressErr := transportMobileVacationString(args, "--address", transportMobileText(existing, "address"), "")
+		if addressErr != nil {
+			return nil, addressErr
+		}
+		entity = map[string]any{"dateBegin": from, "dateEnd": to, "numDay": days, "type": kind, "reason": reason, "address": address, "version": version}
+	}
+	path := "/api/table/vacation"
+	method := "POST"
+	if mode == "update" {
+		path += "/" + url.PathEscape(id)
+		method = "PUT"
+	}
+	payload, requestErr := a.transportMobileCall(ctx, method, path, entity, true, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if mode == "create" {
+		data, ok := payload["data"].(map[string]any)
+		if !ok {
+			return nil, &siteError{Code: "mutation_unverified", Message: "请假单创建成功反馈已返回，但缺少请假单编号", Details: map[string]any{"submitted": true, "confirmed": false}}
+		}
+		id = transportMobileText(data, "_id", "id")
+		if id == "" {
+			return nil, &siteError{Code: "mutation_unverified", Message: "请假单创建成功反馈已返回，但缺少请假单编号", Details: map[string]any{"submitted": true, "confirmed": false}}
+		}
+	}
+	updated, _, readbackErr := a.transportMobileVacationRow(ctx, id, token, cookie)
+	if readbackErr != nil || !transportMobileVacationMatches(updated, entity) {
+		cause := "content-mismatch"
+		if readbackErr != nil {
+			cause = readbackErr.Code
+		}
+		return nil, &siteError{Code: "mutation_unverified", Message: "请假单保存成功反馈已返回，但回读内容不一致", Details: map[string]any{"submitted": true, "confirmed": false, "id": id, "cause": cause}}
+	}
+	result := transportMobileResult("vacation-"+mode, "请假单保存接口成功且内容回读一致")
+	result["submitted"], result["id"], result["api_code"] = true, id, payload["code"]
+	return result, nil
+}
+
+func transportMobileWorkflowBody(id string) map[string]any {
+	return map[string]any{
+		"paginator": map[string]any{"page": 1, "pageSize": 1, "needAll": false, "pages": 0},
+		"sorter":    map[string]any{"code": -1},
+		"filter":    map[string]any{"_id": strings.TrimSpace(id)},
+		"selector":  []string{},
+		"populator": []map[string]any{{"path": "creater current.user history.user", "select": "name"}},
+	}
+}
+
+func (a NativeSite) transportMobileWorkflowRow(ctx context.Context, id, token, cookie string) (map[string]any, map[string]any, *siteError) {
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/realworkflow", transportMobileWorkflowBody(id), true, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, nil, &siteError{Code: "parse_error", Message: "审批流程详情响应缺少 data 对象"}
+	}
+	rows := transportMobileMaps(data["records"])
+	if len(rows) == 0 {
+		return nil, nil, &siteError{Code: "not_found", Message: "未找到该审批流程", Details: map[string]any{"id": strings.TrimSpace(id)}}
+	}
+	return rows[0], payload, nil
+}
+
+func transportMobileWorkflowStep(row map[string]any) string {
+	if current, ok := row["current"].(map[string]any); ok {
+		if step := transportMobileText(current, "node", "nodeId", "currentNode"); step != "" {
+			return step
+		}
+		if index, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(current["index"]))); err == nil {
+			if steps, ok := row["steps"].([]any); ok && index >= 0 && index < len(steps) {
+				if step, ok := steps[index].(map[string]any); ok {
+					return transportMobileText(step, "id", "_id", "nodeId")
+				}
+				return strings.TrimSpace(fmt.Sprint(steps[index]))
+			}
+		}
+	}
+	return strings.TrimSpace(fmt.Sprint(row["currentNode"]))
+}
+
+func transportMobileWorkflowActionNames(action string) []string {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "approve", "pass", "agree", "同意", "批准", "通过":
+		return []string{"批准", "同意", "通过", "approve", "pass", "agree"}
+	case "reject", "deny", "disagree", "驳回", "拒绝", "不批准":
+		return []string{"驳回", "拒绝", "不批准", "reject", "deny", "disagree"}
+	case "cancel", "撤销":
+		return []string{"撤销", "cancel"}
+	default:
+		return []string{strings.TrimSpace(action)}
+	}
+}
+
+func transportMobileWorkflowActionEdge(row map[string]any, action string) (map[string]any, []string, *siteError) {
+	step := transportMobileWorkflowStep(row)
+	if step == "" {
+		return nil, nil, &siteError{Code: "protocol_unconfirmed", Message: "审批流程缺少当前节点"}
+	}
+	names := transportMobileWorkflowActionNames(action)
+	candidates := make([]map[string]any, 0)
+	available := make([]string, 0)
+	for _, edge := range transportMobileMaps(row["edges"]) {
+		if transportMobileText(edge, "source", "sourceNodeId") != step {
+			continue
+		}
+		name := transportMobileText(edge, "text", "text.value", "name", "label", "action")
+		if name != "" {
+			available = append(available, name)
+		}
+		for _, candidate := range names {
+			if strings.EqualFold(name, candidate) {
+				candidates = append(candidates, edge)
+				break
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, available, &siteError{Code: "invalid_argument", Message: "当前审批节点不存在该业务动作", Details: map[string]any{"action": action, "available_actions": available}}
+	}
+	for _, edge := range candidates {
+		if main, ok := edge["isMain"].(bool); ok && main {
+			return edge, available, nil
+		}
+	}
+	return candidates[0], available, nil
+}
+
+func transportMobileWorkflowChanged(before, after map[string]any) bool {
+	for _, path := range []string{"version", "status", "current.index", "current.node", "current.nodeId"} {
+		if fmt.Sprint(transportMobileValue(before, path)) != fmt.Sprint(transportMobileValue(after, path)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a NativeSite) transportMobileWorkflowAction(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "执行交通移动端审批动作会改变远端流程，请加 --yes"}
+	}
+	id, idErr := businessRequired(args, "--id", "workflow-action 必须提供 --id")
+	if idErr != nil {
+		return nil, idErr
+	}
+	action, actionErr := businessRequired(args, "--action", "workflow-action 必须提供 --action approve、reject 或当前节点动作名")
+	if actionErr != nil {
+		return nil, actionErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	row, _, rowErr := a.transportMobileWorkflowRow(ctx, strings.TrimSpace(id), token, cookie)
+	if rowErr != nil {
+		return nil, rowErr
+	}
+	edge, _, edgeErr := transportMobileWorkflowActionEdge(row, action)
+	if edgeErr != nil {
+		return nil, edgeErr
+	}
+	edgeID := transportMobileText(edge, "id", "_id")
+	version := row["version"]
+	if edgeID == "" || version == nil || strings.TrimSpace(fmt.Sprint(version)) == "" {
+		return nil, &siteError{Code: "protocol_unconfirmed", Message: "审批流程缺少动作编号或并发版本号"}
+	}
+	reason, _, reasonErr := businessValue(args, "--reason")
+	if reasonErr != nil {
+		return nil, reasonErr
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/realworkflowsop/"+url.PathEscape(strings.TrimSpace(id)), map[string]any{"edge": edgeID, "reason": reason, "version": version}, true, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	after, _, readbackErr := a.transportMobileWorkflowRow(ctx, strings.TrimSpace(id), token, cookie)
+	if readbackErr != nil || !transportMobileWorkflowChanged(row, after) {
+		cause := "state-unchanged"
+		if readbackErr != nil {
+			cause = readbackErr.Code
+		}
+		return nil, &siteError{Code: "mutation_unverified", Message: "审批动作成功反馈已返回，但流程状态未确认变化", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(id), "cause": cause}}
+	}
+	result := transportMobileResult("workflow-action", "审批动作接口成功且流程状态回读发生变化")
+	result["submitted"], result["id"], result["action"], result["api_code"] = true, strings.TrimSpace(id), strings.TrimSpace(action), payload["code"]
 	return result, nil
 }
 
@@ -1440,8 +1837,10 @@ func transportMobileVacation(row map[string]any) map[string]any {
 	result := transportMobileRecord(row)
 	result["applicant"] = transportMobileValue(row, "user", "applicant")
 	result["department"] = row["department"]
+	result["start_date"] = transportMobileValue(row, "dateBegin", "start_date")
+	result["end_date"] = transportMobileValue(row, "dateEnd", "end_date")
 	result["period"] = transportMobileValue(row, "period", "time")
-	result["days"] = transportMobileValue(row, "days")
+	result["days"] = transportMobileValue(row, "numDay", "days")
 	result["leave_type"] = transportMobileValue(row, "type")
 	result["reason"] = transportMobileText(row, "reason")
 	result["applied_at"] = transportMobileValue(row, "dateCreate")

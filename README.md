@@ -148,7 +148,7 @@ password=密码
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
-| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务、财务明细增删改、留言新建/详情/回复/删除、改密及学院业务查询 |
+| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务、财务明细增删改、留言新建/详情/回复/删除、请假单新建/修改与审批、改密及学院业务查询 |
 | `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
 | `campus-network` | 校园网自助服务资料、账单、详单、缴费、套餐和设备 |
 | `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
@@ -305,6 +305,9 @@ password=密码
 ./csust transport-mobile finance-item-delete --id FINANCE_ITEM_ID --yes --json
 ./csust transport-mobile notices --keyword 评审 --json
 ./csust transport-mobile vacations --page-size 20 --json
+./csust transport-mobile vacation-create --from 2026-09-15 --to 2026-09-16 --type 出差 --reason 项目调研 --yes --json
+./csust transport-mobile vacation-update --id VACATION_ID --reason 修改后的事由 --yes --json
+./csust transport-mobile workflow-action --id WORKFLOW_ID --action approve --reason 同意 --yes --json
 ./csust transport-mobile note --id NOTE_ID --json
 ./csust transport-mobile note-create --recipient-id USER_ID --content 消息内容 --yes --json
 ./csust transport-mobile note-reply --id NOTE_ID --content 回复内容 --yes --json

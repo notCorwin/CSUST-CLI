@@ -467,6 +467,12 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--id", "--content", "--yes")
 		case "note-delete":
 			add("--id", "--message-id", "--yes")
+		case "vacation-create":
+			add("--from", "--to", "--days", "--type", "--reason", "--address", "--yes")
+		case "vacation-update":
+			add("--id", "--from", "--to", "--days", "--type", "--reason", "--address", "--yes")
+		case "workflow-action":
+			add("--id", "--action", "--reason", "--yes")
 		case "defense", "finance", "finance-item":
 			add("--id")
 		case "finances":
