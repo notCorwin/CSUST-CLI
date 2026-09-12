@@ -90,6 +90,7 @@ var knownSites = map[string]serviceInfo{
 	"theol":                    {host: "pt.csust.edu.cn", scheme: "http", path: "/meol/homepage/common/"},
 	"mooc":                     {host: "mooc.csust.edu.cn", scheme: "http", path: "/portal"},
 	"quality":                  {host: "zbxt.csust.edu.cn", scheme: "https", path: "/login"},
+	"quality-system":           {host: "zbxt.csust.edu.cn", scheme: "https", path: "/login"},
 	"recruitment":              {host: "rczpw.csust.edu.cn", scheme: "https", path: "/zp.html"},
 	"jxjy":                     {host: "jxjy.csust.edu.cn", scheme: "https", path: "/"},
 	"zyjx":                     {host: "zyjx.csust.edu.cn", scheme: "https", path: "/"},
@@ -513,7 +514,7 @@ func stripSiteInternal(value any) any {
 		result := make(map[string]any, len(typed))
 		for key, item := range typed {
 			switch key {
-			case "raw_url", "raw_path", "body_internal", "json_internal":
+			case "raw_url", "raw_path", "body_internal", "json_internal", "serialno_internal":
 				continue
 			}
 			result[key] = stripSiteInternal(item)
@@ -662,7 +663,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 		if saveErr := saveCookiesWithResponse(jar, cookiePath, saveTarget, response); saveErr != nil {
 			return nil, &siteError{Code: "session_error", Message: "无法保存 Cookie 会话: " + saveErr.Error()}
 		}
-		return map[string]any{
+		result := map[string]any{
 			"ok":           true,
 			"submitted":    false,
 			"confirmed":    true,
@@ -673,7 +674,11 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 			"output":       req.Output,
 			"bytes":        written,
 			"content_type": response.Header.Get("Content-Type"),
-		}, nil
+		}
+		if serialNo := response.Header.Get("Serialno"); serialNo != "" {
+			result["serialno_internal"] = serialNo
+		}
+		return result, nil
 	}
 	content, readErr := io.ReadAll(io.LimitReader(response.Body, maxSiteBody+1))
 	if readErr != nil {
@@ -801,6 +806,9 @@ func responsePayload(response *http.Response, content []byte, decoded any) map[s
 		}
 		payload["body"] = redactSiteText(string(content), payload["format"] == "html")
 		payload["body_internal"] = string(content)
+	}
+	if serialNo := response.Header.Get("Serialno"); serialNo != "" {
+		payload["serialno_internal"] = serialNo
 	}
 	return payload
 }

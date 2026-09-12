@@ -157,6 +157,7 @@ password=密码
 | `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
 | `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
 | `mooc` | 本校网络课程目录、院系筛选和分页查询 |
+| `quality-system` | 教学质量保障系统配置、登录和用户会话 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
 | `library` | 图书馆馆藏检索、书目详情和馆藏状态 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
@@ -300,6 +301,10 @@ password=密码
 # MOOC：本校课程、院系筛选和排序
 ./csust mooc courses --keyword 结构 --department 土木与环境工程学院 --sort views --json
 ./csust mooc departments --json
+# 教学质量保障系统：读取公开配置、登录并回读当前用户
+./csust quality-system config --json
+CSUST_QUALITY_SYSTEM_PASSWORD='密码' ./csust quality-system login --username 工号 --json
+./csust quality-system profile --json
 # 校园地图：校区、公共点分类/详情、地点搜索和全景资源
 ./csust campus-map zones --json
 ./csust campus-map types --campus 云塘 --json
