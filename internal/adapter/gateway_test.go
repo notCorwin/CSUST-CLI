@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestNativeVPNAPIAndTeachingGateway(t *testing.T) {
+func TestNativeTeachingGateway(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		if request.URL.Path == "/enclient/api/users/info" {
@@ -26,25 +26,11 @@ func TestNativeVPNAPIAndTeachingGateway(t *testing.T) {
 	t.Setenv("CSUST_VPN_COOKIE_FILE", filepath.Join(t.TempDir(), "vpn.cookies"))
 	t.Setenv("CSUST_VPN_SESSION_FILE", filepath.Join(t.TempDir(), "vpn.json"))
 
-	handled, stdout, _, code, err := (NativeSite{}).Run(context.Background(), []string{"vpn", "api", "--path", "/api/users/info", "--json"}, true)
+	handled, stdout, _, code, err := (NativeSite{}).Run(context.Background(), []string{"teaching", "courses", "--json"}, true)
 	if err != nil || !handled || code != 0 {
-		t.Fatalf("vpn api: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
+		t.Fatalf("teaching courses: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(stdout, &payload); err != nil {
-		t.Fatal(err)
-	}
-	response := payload["response"].(map[string]any)
-	jsonPayload := response["json"].(map[string]any)
-	if jsonPayload["code"].(float64) != 200 {
-		t.Fatalf("unexpected vpn response: %#v", jsonPayload)
-	}
-
-	handled, stdout, _, code, err = (NativeSite{}).Run(context.Background(), []string{"teaching", "get", "--path", "/meol/index.do", "--json"}, true)
-	if err != nil || !handled || code != 0 {
-		t.Fatalf("teaching get: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
-	}
-	payload = map[string]any{}
 	if err := json.Unmarshal(stdout, &payload); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +44,7 @@ func TestNativeVPNAPIAndTeachingGateway(t *testing.T) {
 	}
 }
 
-func TestNativeQualityCatalogPreservesQualityMetadata(t *testing.T) {
+func TestNativeQualityCatalogListsSemanticOperations(t *testing.T) {
 	handled, stdout, _, code, err := (NativeSite{}).Run(context.Background(), []string{"quality", "catalog", "--json"}, true)
 	if err != nil || !handled || code != 0 {
 		t.Fatalf("quality catalog: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
@@ -70,11 +56,8 @@ func TestNativeQualityCatalogPreservesQualityMetadata(t *testing.T) {
 	if payload["system"] != "教学质量保障系统" || payload["service"] != qualityServiceName {
 		t.Fatalf("unexpected quality identity: %#v", payload)
 	}
-	if payload["route_count"].(float64) != 69 {
-		t.Fatalf("unexpected quality route count: %#v", payload["route_count"])
-	}
-	evaluation := payload["evaluation"].(map[string]any)
-	if evaluation["page"] != "/jsxsd/xspj/xspj_find.do" || payload["request"] == nil {
+	operations, ok := payload["operations"].([]any)
+	if !ok || len(operations) != 5 {
 		t.Fatalf("unexpected quality metadata: %#v", payload)
 	}
 }
@@ -156,8 +139,10 @@ func TestNativeQualityEvaluationParsingAndSubmit(t *testing.T) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch request.URL.Path {
 		case "/http/quality.example/jsxsd/xspj/xspj_find.do":
-			_, _ = writer.Write([]byte(`<table><tr><th>序号</th><th>学期</th><th>类别</th><th>名称</th><th>开始</th><th>结束</th></tr><tr><td>1</td><td>2026-1</td><td>学生</td><td>评教</td><td>2026-01-01</td><td>2026-02-01</td><td><a href="/jsxsd/xspj/xspj_course.do?id=1">进入</a></td></tr></table>`))
-		case "/http/quality.example/jsxsd/xspj/xspj_course.do":
+			_, _ = writer.Write([]byte(`<table><tr><th>序号</th><th>学期</th><th>类别</th><th>名称</th><th>开始</th><th>结束</th></tr><tr><td>1</td><td>2026-1</td><td>学生</td><td>评教</td><td>2026-01-01</td><td>2026-02-01</td><td><a href="/jsxsd/xspj/xspj_courses.do?id=batch1">进入</a></td></tr></table>`))
+		case "/http/quality.example/jsxsd/xspj/xspj_courses.do":
+			_, _ = writer.Write([]byte(`<table id="dataList"><tr><th>序号</th><th>课程编号</th><th>课程</th><th>教师</th><th>类别</th><th>总分</th><th>已评价</th><th>已提交</th><th>学时</th></tr><tr><td>1</td><td>C001</td><td>课程</td><td>老师</td><td>学生</td><td>90</td><td>否</td><td>否</td><td>48</td><td><a href="/jsxsd/xspj/xspj_form.do?id=course1">进入</a></td></tr></table>`))
+		case "/http/quality.example/jsxsd/xspj/xspj_form.do":
 			_, _ = writer.Write([]byte(`<form method="post" action="/jsxsd/xspj/xspj_save.do"><input type="hidden" name="execution" value="secret"><table><tr><td><input name="pj06xh" value="q1">教学质量</td><td><input type="radio" name="q1opt" value="A"><input type="radio" name="q1opt" value="B"></td></tr></table><textarea name="suggestion"></textarea><button type="submit" onclick="saveData()">保存</button></form><script>function saveData(){}</script>`))
 		case "/http/quality.example/jsxsd/xspj/xspj_save.do":
 			_, _ = writer.Write([]byte(`<script>alert('评价成功')</script>`))
@@ -183,7 +168,7 @@ func TestNativeQualityEvaluationParsingAndSubmit(t *testing.T) {
 		t.Fatalf("unexpected batches: %#v", payload)
 	}
 
-	handled, stdout, _, code, err = (NativeSite{}).Run(context.Background(), []string{"quality", "evaluation", "form", "--path", "/jsxsd/xspj/xspj_course.do", "--json"}, true)
+	handled, stdout, _, code, err = (NativeSite{}).Run(context.Background(), []string{"quality", "evaluation", "form", "--batch", "1", "--course-id", "C001", "--json"}, true)
 	if err != nil || !handled || code != 0 {
 		t.Fatalf("form: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
 	}
@@ -195,7 +180,7 @@ func TestNativeQualityEvaluationParsingAndSubmit(t *testing.T) {
 		t.Fatalf("unexpected form: %#v", payload)
 	}
 
-	handled, stdout, _, code, err = (NativeSite{}).Run(context.Background(), []string{"quality", "evaluation", "save", "--path", "/jsxsd/xspj/xspj_course.do", "--answer", "q1=A", "--yes", "--json"}, true)
+	handled, stdout, _, code, err = (NativeSite{}).Run(context.Background(), []string{"quality", "evaluation", "save", "--batch", "1", "--course-id", "C001", "--answer", "q1=A", "--yes", "--json"}, true)
 	if err != nil || !handled || code != 0 {
 		t.Fatalf("save: handled=%v code=%d err=%v output=%s", handled, code, err, stdout)
 	}

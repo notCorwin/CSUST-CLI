@@ -66,16 +66,15 @@ func nativeUsage(args []string) []byte {
   terms/semester-start        学期信息
   textbooks                   教材操作
   evaluation                  学生评价
-  web/routes                  教务网页入口
-  vpn                         VPN 门户、工作台/分组、申请、设备、资料、分享、认证与 API
-  teaching                    网络教学平台
-  quality                     教学质量保障系统
+  vpn                         VPN 登录、状态、退出、工作台、消息、审批、设备和文件业务
+  teaching                    网络教学平台课程与课程顺序
+  quality                     教学质量保障系统登录、状态、评价和毕业设计入口
   services                    已映射业务服务目录
   admission-notice            研究生录取通知书查询/打印
   undergraduate-admissions    本科招生计划、历年分数、录取进程和结果查询
   union                       智慧工会模块、角色登录和会话
   journal                     期刊检索
-  employment                  云就业公开信息、学生会话与登录
+  employment                  云就业公开信息、学生会话、登录及邮箱二次验证
   onlinejudge                 OnlineJudge 题目/竞赛/提交
   mooc                        本校网络课程目录、院系筛选和分页查询
   quality-system              教学质量保障系统配置、登录、听评课和教学质量汇总查询
@@ -110,8 +109,7 @@ func nativeUsage(args []string) []byte {
   security-admin              安全运维管理平台
   cms-admin                   内容后台
   cms-admin-legacy            旧内容后台
-  site                        任意 csust.edu.cn 子域名
 
-页面能力使用结构化快照；写操作需要 --yes，并返回 confirmed/evidence。
+传统 HTML 只在内部适配器中解析；写操作需要 --yes，并返回 confirmed/evidence。
 `)
 }

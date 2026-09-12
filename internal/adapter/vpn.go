@@ -14,17 +14,6 @@ import (
 	"strings"
 )
 
-type vpnResource struct {
-	name, webPath, nativePath, kind string
-}
-
-var vpnResources = []vpnResource{
-	{"files", "/enclient/files/{path}", "/api/v1/files/{path}", "image/download"},
-	{"pics", "/enclient/files/{path}", "/api/v1/pics/{path}", "image"},
-	{"service-agreement", "/enclient/serviceAgreement.html", "", "login agreement"},
-	{"user-terms", "/enclient/userTerms.html", "", "login terms"},
-}
-
 func (a NativeSite) runVPNCommand(ctx context.Context, args []string, jsonMode bool) (bool, []byte, []byte, int, error) {
 	if len(args) == 0 || args[0] != "vpn" {
 		return false, nil, nil, 0, nil
@@ -91,26 +80,6 @@ func (a NativeSite) runVPNCommand(ctx context.Context, args []string, jsonMode b
 func (a NativeSite) executeVPNCommand(ctx context.Context, args []string) (map[string]any, *siteError) {
 	command := args[0]
 	switch command {
-	case "routes":
-		if err := onlyJSONArgs(args[1:]); err != nil {
-			return nil, err
-		}
-		return vpnRoutesResult(), nil
-	case "controls":
-		if err := onlyJSONArgs(args[1:]); err != nil {
-			return nil, err
-		}
-		return vpnControlsResult(), nil
-	case "catalog":
-		return parseVPNCatalog(args[1:])
-	case "page":
-		return parseVPNPage(args[1:])
-	case "api":
-		return a.runVPNAPI(ctx, args[1:])
-	case "resource":
-		return a.runVPNResource(ctx, args[1:])
-	case "sso-url":
-		return a.runVPNSSOURL(ctx, args[1:])
 	case "status":
 		return a.runVPNStatus(ctx, args[1:])
 	case "logout":
@@ -1026,236 +995,10 @@ func (a NativeSite) vpnCASLogin(ctx context.Context, base *url.URL, cookie strin
 func onlyJSONArgs(args []string) *siteError {
 	for _, arg := range args {
 		if arg != "--json" {
-			return &siteError{Code: "invalid_argument", Message: "该 vpn 清单命令不接受参数: " + arg}
+			return &siteError{Code: "invalid_argument", Message: "该命令不接受参数: " + arg}
 		}
 	}
 	return nil
-}
-
-func vpnRoutesResult() map[string]any {
-	routes := make([]map[string]any, 0, len(vpnRoutes))
-	for _, item := range vpnRoutes {
-		aliases := []string{}
-		for _, prefix := range []string{"/login/", "/home/"} {
-			if strings.HasPrefix(item.path, prefix) {
-				aliases = append(aliases, strings.TrimPrefix(item.path, prefix))
-			}
-		}
-		routes = append(routes, map[string]any{"name": item.name, "section": item.section, "path": item.path, "aliases": aliases, "description": item.description, "apis": item.apis})
-	}
-	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "source": "https://vpn.csust.edu.cn/enclient/start.html", "routes": routes, "route_count": len(routes), "api_count": len(vpnAPIRows)}
-}
-
-func vpnControlsResult() map[string]any {
-	controls := make([]map[string]any, 0, len(vpnControls))
-	for _, item := range vpnControls {
-		controls = append(controls, map[string]any{"name": item.name, "section": item.section, "label": item.label, "routes": item.routes, "apis": item.apis})
-	}
-	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "controls": controls, "control_count": len(controls), "api_count": len(vpnAPIRows)}
-}
-
-func parseVPNCatalog(args []string) (map[string]any, *siteError) {
-	group := ""
-	for index := 0; index < len(args); index++ {
-		arg, value, inline := splitInline(args[index])
-		if arg == "--json" {
-			continue
-		}
-		if arg != "--group" {
-			return nil, &siteError{Code: "invalid_argument", Message: "vpn catalog 参数无效: " + arg}
-		}
-		if !inline {
-			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
-				return nil, &siteError{Code: "invalid_argument", Message: "--group 缺少参数值"}
-			}
-			index++
-			value = args[index]
-		}
-		group = value
-	}
-	items := vpnAPICatalog()
-	if group != "" {
-		filtered := items[:0]
-		for _, item := range items {
-			if item["group"] == group {
-				filtered = append(filtered, item)
-			}
-		}
-		items = filtered
-	}
-	resources := make([]map[string]any, 0, len(vpnResources))
-	for _, item := range vpnResources {
-		resources = append(resources, map[string]any{"name": item.name, "web_path": item.webPath, "native_path": item.nativePath, "kind": item.kind})
-	}
-	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "source": "https://vpn.csust.edu.cn/enclient/start.html", "catalog": items, "api_count": len(items), "resources": resources}, nil
-}
-
-func parseVPNPage(args []string) (map[string]any, *siteError) {
-	routeName := ""
-	for index := 0; index < len(args); index++ {
-		arg, value, inline := splitInline(args[index])
-		if arg == "--json" {
-			continue
-		}
-		if arg != "--route" {
-			return nil, &siteError{Code: "invalid_argument", Message: "vpn page 参数无效: " + arg}
-		}
-		if !inline {
-			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
-				return nil, &siteError{Code: "invalid_argument", Message: "--route 缺少参数值"}
-			}
-			index++
-			value = args[index]
-		}
-		routeName = value
-	}
-	if routeName == "" {
-		return nil, &siteError{Code: "invalid_argument", Message: "vpn page 必须提供 --route"}
-	}
-	route, found, ambiguous := vpnFindRoute(routeName)
-	if ambiguous {
-		return nil, &siteError{Code: "ambiguous_route", Message: "VPN 路由别名有歧义，请使用完整路径或路由名"}
-	}
-	if !found {
-		return nil, &siteError{Code: "unknown_route", Message: "未知 VPN 路由: " + routeName}
-	}
-	controls := make([]map[string]any, 0)
-	for _, control := range vpnControls {
-		for _, name := range control.routes {
-			if name == route.name {
-				controls = append(controls, map[string]any{"name": control.name, "section": control.section, "label": control.label, "routes": control.routes, "apis": control.apis})
-				break
-			}
-		}
-	}
-	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "route": map[string]any{"name": route.name, "section": route.section, "path": route.path, "description": route.description, "apis": route.apis}, "controls": controls}, nil
-}
-
-func (a NativeSite) runVPNAPI(ctx context.Context, args []string) (map[string]any, *siteError) {
-	name, path, method, native, yes, output, dataJSON := "", "", "GET", false, false, "", ""
-	params, form, files, pathArgs := []pair{}, []pair{}, []filePart{}, []string{}
-	for index := 0; index < len(args); index++ {
-		arg, value, inline := splitInline(args[index])
-		if arg == "--json" {
-			continue
-		}
-		if arg == "--yes" || arg == "--native" {
-			if inline {
-				return nil, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			if arg == "--yes" {
-				yes = true
-			} else {
-				native = true
-			}
-			continue
-		}
-		if !inline {
-			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
-				return nil, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
-			}
-			index++
-			value = args[index]
-		}
-		switch arg {
-		case "--name":
-			name = value
-		case "--path":
-			path = value
-		case "--method":
-			method = strings.ToUpper(value)
-		case "--data-json", "--data":
-			dataJSON = value
-		case "--form":
-			item, err := splitPair(value, "--form")
-			if err != nil {
-				return nil, err
-			}
-			form = append(form, item)
-		case "--file":
-			item, err := readFilePart(value)
-			if err != nil {
-				return nil, err
-			}
-			files = append(files, item)
-		case "--param":
-			item, err := splitPair(value, "--param")
-			if err != nil {
-				return nil, err
-			}
-			params = append(params, item)
-		case "--path-arg":
-			pathArgs = append(pathArgs, value)
-		case "--output":
-			output = expandUserPath(value)
-		default:
-			return nil, &siteError{Code: "invalid_argument", Message: "vpn api 参数无效: " + arg}
-		}
-	}
-	if (name == "") == (path == "") {
-		return nil, &siteError{Code: "invalid_argument", Message: "--name 与 --path 必须且只能指定一个"}
-	}
-	spec := vpnAPISpec{method: method, path: path}
-	if name != "" {
-		var found bool
-		spec, found = vpnSpec(name)
-		if !found {
-			return nil, &siteError{Code: "unknown_api", Message: "未知 VPN API: " + name}
-		}
-		method = spec.method
-	} else if method == "" {
-		method = "GET"
-	}
-	if !supportedSiteMethod(method) {
-		return nil, &siteError{Code: "invalid_argument", Message: "不支持的 HTTP 方法: " + method}
-	}
-	mutating := vpnAPIMutating(method, spec.path)
-	if mutating && !yes {
-		return nil, &siteError{Code: "confirmation_required", Message: "VPN API 可能改变远端状态，请加 --yes"}
-	}
-	if readOnlyMethod(method) && (dataJSON != "" || len(form) > 0 || len(files) > 0) {
-		return nil, &siteError{Code: "invalid_argument", Message: "GET/HEAD/OPTIONS 只能使用 --param"}
-	}
-	if len(form) > 0 && dataJSON != "" {
-		return nil, &siteError{Code: "invalid_argument", Message: "--data-json 不能与 --form/--file 同时使用"}
-	}
-	base, cookie, session, err := vpnConnection(native)
-	if err != nil {
-		return nil, err
-	}
-	requestPath := resolveVPNPath(spec.path, pathArgs, nil)
-	target, targetErr := vpnAPIPath(base, requestPath, native)
-	if targetErr != nil {
-		return nil, targetErr
-	}
-	request := siteRequest{Target: target, CookieFile: cookie, Method: method, Params: params, Headers: vpnHeaders(base, target, session, native), Yes: yes, Output: output, RequireLogin: true, ReadOnly: !mutating}
-	if len(form) > 0 {
-		request.Data = form
-		request.Files = files
-	} else if len(files) > 0 {
-		request.Files = files
-	} else if dataJSON != "" {
-		body, parseErr := readJSONArgument(dataJSON)
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		request.JSON, request.HasJSON = body, true
-	}
-	result, runErr := a.execute(ctx, request)
-	if runErr != nil {
-		return nil, runErr
-	}
-	if vpnResponseCode(result) == "3010" {
-		return nil, &siteError{Code: "login_required", Message: "VPN 会话已失效"}
-	}
-	result["vpn"] = true
-	result["request"] = map[string]any{"name": func() string {
-		if name != "" {
-			return name
-		}
-		return vpnAPIName(spec.path)
-	}(), "method": method, "path": spec.path, "native": native}
-	return result, nil
 }
 
 func splitInline(value string) (string, string, bool) {
@@ -1267,31 +1010,45 @@ func splitInline(value string) (string, string, bool) {
 	return value, "", false
 }
 
-func resolveVPNPath(path string, pathArgs []string, params []pair) string {
-	for _, value := range pathArgs {
-		if index := strings.Index(path, "{"); index >= 0 {
-			end := strings.Index(path[index:], "}")
-			if end > 0 {
-				path = path[:index] + url.PathEscape(value) + path[index+end+1:]
-				continue
+func vpnAPIPath(base *url.URL, path string, native bool) (*url.URL, *siteError) {
+	if strings.TrimSpace(path) == "" {
+		return nil, &siteError{Code: "invalid_path", Message: "VPN API 路径不能为空"}
+	}
+	path = strings.TrimSpace(path)
+	parsed, err := url.Parse(path)
+	if err != nil || parsed.User != nil {
+		return nil, &siteError{Code: "invalid_path", Message: "VPN API 路径格式无效"}
+	}
+	if parsed.IsAbs() || parsed.Host != "" {
+		if !strings.EqualFold(parsed.Hostname(), base.Hostname()) {
+			return nil, &siteError{Code: "invalid_path", Message: "VPN API 必须保持当前 VPN 主机"}
+		}
+	} else {
+		requestPath := parsed.Path
+		for i := 0; i < 2; i++ {
+			requestPath, _ = url.PathUnescape(requestPath)
+		}
+		if strings.Contains(requestPath, "\\") {
+			return nil, &siteError{Code: "invalid_path", Message: "VPN API 路径无效"}
+		}
+		for _, part := range strings.Split(requestPath, "/") {
+			if part == "." || part == ".." {
+				return nil, &siteError{Code: "invalid_path", Message: "VPN API 路径不能包含目录跳转"}
 			}
 		}
-		path = strings.TrimRight(path, "/") + "/" + url.PathEscape(value)
+		if native {
+			if strings.HasPrefix(parsed.Path, "/enclient/") {
+				parsed.Path = strings.TrimPrefix(parsed.Path, "/enclient")
+			}
+			if !strings.HasPrefix(parsed.Path, "/api/") {
+				parsed.Path = "/api/v1/" + strings.TrimPrefix(parsed.Path, "/")
+			}
+		} else if !strings.HasPrefix(parsed.Path, "/enclient/") {
+			parsed.Path = "/enclient/" + strings.TrimPrefix(parsed.Path, "/")
+		}
+		parsed.Scheme, parsed.Host = base.Scheme, base.Host
 	}
-	return pathWithParams(path, params)
-}
-
-func pathWithParams(path string, params []pair) string {
-	parsed, err := url.Parse(path)
-	if err != nil {
-		return path
-	}
-	query := parsed.Query()
-	for _, item := range params {
-		query.Add(item.name, item.value)
-	}
-	parsed.RawQuery = query.Encode()
-	return parsed.String()
+	return parsed, nil
 }
 
 func vpnConnection(native bool) (*url.URL, string, map[string]any, *siteError) {
@@ -1358,119 +1115,6 @@ func vpnHeaders(base, target *url.URL, session map[string]any, native bool) []pa
 	}
 	_ = target
 	return headers
-}
-
-func (a NativeSite) runVPNResource(ctx context.Context, args []string) (map[string]any, *siteError) {
-	name, resourcePath, output := "", "", ""
-	native := false
-	for index := 0; index < len(args); index++ {
-		arg, value, inline := splitInline(args[index])
-		if arg == "--json" {
-			continue
-		}
-		if arg == "--native" {
-			if inline {
-				return nil, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			native = true
-			continue
-		}
-		if !inline {
-			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
-				return nil, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
-			}
-			index++
-			value = args[index]
-		}
-		switch arg {
-		case "--name":
-			name = value
-		case "--path":
-			resourcePath = value
-		case "--output":
-			output = expandUserPath(value)
-		default:
-			return nil, &siteError{Code: "invalid_argument", Message: "vpn resource 参数无效: " + arg}
-		}
-	}
-	var resource vpnResource
-	found := false
-	for _, item := range vpnResources {
-		if item.name == name {
-			resource, found = item, true
-			break
-		}
-	}
-	if !found {
-		return nil, &siteError{Code: "unknown_resource", Message: "未知 VPN 资源: " + name}
-	}
-	if resourcePath == "" {
-		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "resource": map[string]any{"name": resource.name, "web_path": resource.webPath, "native_path": resource.nativePath, "kind": resource.kind}}, nil
-	}
-	if output == "" {
-		return nil, &siteError{Code: "invalid_argument", Message: "下载 VPN 资源时必须提供 --output"}
-	}
-	decoded, err := url.PathUnescape(resourcePath)
-	if err != nil || strings.Contains(decoded, "\\") || strings.Contains(decoded, "..") {
-		return nil, &siteError{Code: "invalid_path", Message: "VPN 资源路径不能包含目录跳转"}
-	}
-	template := resource.webPath
-	if native {
-		template = resource.nativePath
-	}
-	if template == "" {
-		return nil, &siteError{Code: "unsupported", Message: "该 VPN 资源不支持当前请求模式"}
-	}
-	base, cookie, session, connErr := vpnConnection(native)
-	if connErr != nil {
-		return nil, connErr
-	}
-	requestPath := strings.Replace(template, "{path}", url.PathEscape(strings.TrimLeft(resourcePath, "/")), 1)
-	target, pathErr := vpnAPIPath(base, requestPath, native)
-	if pathErr != nil {
-		return nil, pathErr
-	}
-	result, runErr := a.execute(ctx, siteRequest{Target: target, CookieFile: cookie, Method: "GET", Headers: vpnHeaders(base, target, session, native), Output: output, RequireLogin: true, ReadOnly: true, Yes: true})
-	if runErr != nil {
-		return nil, runErr
-	}
-	result["resource"] = resource.name
-	return result, nil
-}
-
-func (a NativeSite) runVPNSSOURL(ctx context.Context, args []string) (map[string]any, *siteError) {
-	if err := onlyJSONArgs(args); err != nil {
-		return nil, err
-	}
-	base, cookie, session, connErr := vpnConnection(false)
-	if connErr != nil {
-		return nil, connErr
-	}
-	target, pathErr := vpnAPIPath(base, "/api/users/custom/page/login/cfg/select", false)
-	if pathErr != nil {
-		return nil, pathErr
-	}
-	result, runErr := a.execute(ctx, siteRequest{Target: target, CookieFile: cookie, Method: "POST", Headers: vpnHeaders(base, target, session, false), JSON: map[string]any{}, HasJSON: true, ReadOnly: true, Yes: true})
-	if runErr != nil {
-		return nil, runErr
-	}
-	configured := ""
-	if response, ok := result["response"].(map[string]any); ok {
-		if payload, ok := response["json"].(map[string]any); ok {
-			if data, ok := payload["data"].(map[string]any); ok {
-				configured, _ = data["casLoginUrl"].(string)
-			}
-		}
-	}
-	if configured == "" {
-		configured = "/enclient/api/users/admin/custom/page/login/sso/cas"
-	}
-	urlValue, urlErr := vpnAPIPath(base, configured, false)
-	if urlErr != nil {
-		return nil, urlErr
-	}
-	result["url"] = safeSiteURL(urlValue)
-	return result, nil
 }
 
 func (a NativeSite) runVPNStatus(ctx context.Context, args []string) (map[string]any, *siteError) {

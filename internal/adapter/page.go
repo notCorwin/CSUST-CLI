@@ -724,33 +724,6 @@ func pageTable(node *pageNode) map[string]any {
 	return map[string]any{"headers": headers, "data_rows": dataRows, "rows": rows}
 }
 
-func pageShapeFingerprint(document *pageNode) string {
-	var parts []string
-	shapeAttrs := map[string]bool{"type": true, "name": true, "role": true, "aria-label": true, "aria-labelledby": true, "placeholder": true, "method": true, "enctype": true, "multiple": true}
-	var visit func(*pageNode)
-	visit = func(node *pageNode) {
-		if node == nil || node.tag == "#text" || node.tag == "script" || node.tag == "style" {
-			return
-		}
-		parts = append(parts, "<"+node.tag)
-		keys := make([]string, 0)
-		for key := range node.attrs {
-			if shapeAttrs[key] {
-				keys = append(keys, key)
-			}
-		}
-		sort.Strings(keys)
-		parts = append(parts, strings.Join(keys, ",")+">")
-		for _, child := range node.children {
-			visit(child)
-		}
-		parts = append(parts, "</"+node.tag+">")
-	}
-	visit(document)
-	hash := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
-	return hex.EncodeToString(hash[:])
-}
-
 func pageInspect(source, pageURL string) (map[string]any, *siteError) {
 	document, err := parsePage(source)
 	if err != nil {
@@ -877,9 +850,7 @@ func pageInspect(source, pageURL string) (map[string]any, *siteError) {
 			}(),
 			"script_count": len(scripts), "link_count": len(links), "form_count": len(forms), "table_count": len(tables), "action_count": len(actions), "visible_text_length": len(text),
 		},
-		"url":               pageSafeValue(pageURL, pageURL),
-		"fingerprint":       sha256String(source),
-		"shape_fingerprint": pageShapeFingerprint(document),
+		"url": pageSafeValue(pageURL, pageURL),
 		"title": func() string {
 			if title := document.first("title", ""); title != nil {
 				return pageDisplayText(title)
@@ -891,9 +862,37 @@ func pageInspect(source, pageURL string) (map[string]any, *siteError) {
 	}, nil
 }
 
-func sha256String(value string) string {
-	hash := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(hash[:])
+// sitePageResult is the legacy HTML adapter used by semantic commands whose
+// service has no structured endpoint.
+func sitePageResult(result map[string]any) map[string]any {
+	response, ok := result["response"].(map[string]any)
+	if !ok {
+		return result
+	}
+	if format, _ := response["format"].(string); format == "json" {
+		if value, exists := response["json"]; exists {
+			result["response"] = value
+		}
+		return result
+	}
+	body, _ := response["body_internal"].(string)
+	if body == "" {
+		body, _ = response["body"].(string)
+	}
+	pageURL, _ := response["raw_url"].(string)
+	if pageURL == "" {
+		pageURL, _ = response["url"].(string)
+	}
+	if body == "" {
+		return result
+	}
+	page, err := pageInspect(body, pageURL)
+	if err != nil {
+		result["response"] = map[string]any{"kind": "text", "body": body, "confidence": "low", "confidence_evidence": map[string]any{"reason": "响应不是可解析的 HTML 页面"}}
+		return result
+	}
+	result["response"] = page
+	return result
 }
 
 func uniqueStrings(values []string) []string {

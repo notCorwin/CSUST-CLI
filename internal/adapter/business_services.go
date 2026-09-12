@@ -26,9 +26,9 @@ import (
 	"time"
 )
 
-// These commands are semantic adapters for services discovered outside the
-// original academic/VPN catalog.  Their inputs are business concepts; the
-// service paths below stay inside the adapter boundary.
+// These commands are semantic adapters for services outside the core
+// academic/VPN commands. Their inputs are business concepts; service paths
+// stay inside the adapter boundary.
 
 type businessRequestOptions struct {
 	cookieFile           string

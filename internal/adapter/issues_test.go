@@ -29,71 +29,6 @@ func runIssueJSON(t *testing.T, args ...string) map[string]any {
 	return result
 }
 
-func TestSiteRedactionKeepsInternalPageActionsUsable(t *testing.T) {
-	const rawToken = "raw-token-12345678901234567890"
-	const password = "password-secret-12345678901234567890"
-	const csrf = "csrf-secret-12345678901234567890"
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-		switch request.URL.Path {
-		case "/":
-			_, _ = fmt.Fprintf(writer, `<html><head><meta name="csrf-token" content="%s"></head><body><div data-token="%s"></div><input type="password" name="password" value="%s"><input type="hidden" name="csrf" value="%s"><textarea name="token">%s</textarea><script>csrfToken = "%s"</script><a href="/next?token=%s">继续</a></body></html>`, csrf, csrf, password, csrf, csrf, csrf, rawToken)
-		case "/next":
-			if request.URL.Query().Get("token") != rawToken {
-				writer.WriteHeader(http.StatusBadRequest)
-				_, _ = writer.Write([]byte("token invalid"))
-				return
-			}
-			writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			_, _ = writer.Write([]byte("操作成功"))
-		default:
-			writer.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("CSUST_BASE_URL", server.URL)
-	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
-
-	requestResult := runIssueJSON(t, "site", "request", "--service", "official", "--path", "/")
-	response := requestResult["response"].(map[string]any)
-	publicBody := response["body"].(string)
-	for _, secret := range []string{rawToken, password, csrf} {
-		if strings.Contains(string(mustMarshalIssue(requestResult)), secret) || strings.Contains(publicBody, secret) {
-			t.Fatalf("secret leaked in public response: %s", secret)
-		}
-	}
-	for _, key := range []string{"raw_url", "body_internal"} {
-		if _, exists := response[key]; exists {
-			t.Fatalf("internal response field leaked: %s", key)
-		}
-	}
-
-	pageResult := runIssueJSON(t, "site", "get", "--service", "official", "--path", "/")
-	page := pageResult["response"].(map[string]any)
-	links := page["links"].([]any)
-	if len(links) != 1 {
-		t.Fatalf("unexpected page links: %#v", links)
-	}
-	link := links[0].(map[string]any)
-	if strings.Contains(fmt.Sprint(link["href"]), rawToken) || strings.Contains(fmt.Sprint(link["path"]), rawToken) {
-		t.Fatalf("page link was not redacted: %#v", link)
-	}
-
-	result := runIssueJSON(t, "site", "action", "--service", "official", "--index", "1", "--yes")
-	if result["ok"] != true || result["confirmed"] != true {
-		t.Fatalf("internal raw action was not executed and confirmed: %#v", result)
-	}
-	if text := redactSiteText("csrf=plain-secret token=plain-token", false); strings.Contains(text, "plain-secret") || strings.Contains(text, "plain-token") {
-		t.Fatalf("plain-text secret was not redacted: %q", text)
-	}
-	errorOutput := string(errorJSON(&siteError{Code: "failed", Message: "password=error-secret", Details: map[string]any{
-		"response": map[string]any{"body_internal": "csrf=error-secret", "password": "error-secret"},
-	}}))
-	if strings.Contains(errorOutput, "error-secret") || strings.Contains(errorOutput, "body_internal") {
-		t.Fatalf("error output leaked internal response data: %s", errorOutput)
-	}
-}
-
 func TestAdmissionNoticePasswordUsesPOSTBody(t *testing.T) {
 	const password = "notice-password-secret"
 	var method, rawQuery, body string
@@ -325,17 +260,6 @@ func TestGradeHeadersKeepOriginalAndRetakeFields(t *testing.T) {
 	}
 	if rows[0]["semester"] != "T1" || rows[0]["retake_semester"] != "T2" || rows[0]["score"] != "90" || rows[0]["original_score"] != "60" {
 		t.Fatalf("grade columns were overwritten: %#v", rows[0])
-	}
-}
-
-func TestTeachingLookupUsesMethodForSameEndpoint(t *testing.T) {
-	item, known, ambiguous := teachingLookup("course-search", "GET", false)
-	if !known || ambiguous || item.method != "GET" || item.path != "/meol/course.do" {
-		t.Fatalf("unexpected default teaching lookup: %#v known=%v ambiguous=%v", item, known, ambiguous)
-	}
-	item, known, ambiguous = teachingLookup("course-search", "POST", true)
-	if !known || ambiguous || item.method != "POST" || item.path != "/meol/course.do" {
-		t.Fatalf("unexpected POST teaching lookup: %#v known=%v ambiguous=%v", item, known, ambiguous)
 	}
 }
 

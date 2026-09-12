@@ -11,7 +11,7 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 		return nil, &siteError{Code: "invalid_argument", Message: "academic evaluation 缺少子命令"}
 	}
 	operation := args[0]
-	path, batchSelector, courseID, courseName, yes, suggestion, clearSuggestion := "", "", "", "", false, "", false
+	batchSelector, courseID, courseName, yes, suggestion, clearSuggestion := "", "", "", false, "", false
 	answers := []pair{}
 	for index := 1; index < len(args); index++ {
 		arg, value, inline := splitInline(args[index])
@@ -34,8 +34,6 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 			value = args[index]
 		}
 		switch arg {
-		case "--path":
-			path = value
 		case "--batch":
 			batchSelector = value
 		case "--course-id":
@@ -54,7 +52,8 @@ func (a NativeSite) runAcademicEvaluation(ctx context.Context, args []string) (m
 			return nil, &siteError{Code: "invalid_argument", Message: "academic evaluation 参数无效: " + arg}
 		}
 	}
-	if operation != "batches" && path == "" {
+	path := ""
+	if operation != "batches" {
 		var targetErr *siteError
 		path, targetErr = a.academicEvaluationTarget(ctx, operation, batchSelector, courseID, courseName)
 		if targetErr != nil {

@@ -4,7 +4,7 @@
 
 面向智能体的长沙理工大学服务 CLI。项目使用 Go 直接调用学校服务的 HTTP、CAS、JSON 和传统表单协议，把常用网页能力转换为语义化命令，并为脚本和智能体提供统一的 JSON 结果。
 
-项目不是无头浏览器，也不是爬虫客户端。`site discover` 和 `site scripts` 只用于开发阶段的能力发现；正式命令直接通过 adapter 调用服务协议。
+项目不是无头浏览器，也不是爬虫客户端。Playwright CLI 仅用于开发阶段的能力发现；正式命令由 adapter 直接调用服务协议，运行时不启动浏览器。
 
 ## 能做什么
 
@@ -12,14 +12,12 @@
 - 学籍：学籍预警、学籍卡片及毕业相关页面的结构化入口。
 - 公告：已收公告列表及详情入口。
 - 考试报名：重修报名可报课程及资格状态。
-- 网页映射：教务菜单、页面快照、表单和动作调用、公开入口及毕业设计跳转。
-- VPN：登录、状态、退出、工作台应用/分组、消息、审批、页面/控件/API 目录、文件资源和已映射 API 调用。
-- 网络教学与教学质量保障：课程、课程详情、页面请求、教学评价和页面目录。
+- VPN：登录、状态、退出、工作台应用/分组、消息、审批、设备和文件业务。
+- 网络教学与教学质量保障：课程、课程详情、课程顺序、教学评价和毕业设计入口。
 - eHall：当前账号可用服务目录、服务详情、权限、消息、企业邮箱状态、新闻和服务周期提醒。
 - 其他业务服务：录取通知书、期刊、云就业、企业邮箱登录、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、实验室仪器、人才招聘、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
-- 全站适配：对 `csust.edu.cn` 根域名和子域名提供结构化页面、表单、动作和通用请求能力。
 
-业务命令使用语义参数；需要保留网页特有能力时，再使用 `web`、`teaching`、`quality`、`vpn` 或 `site` 的通用映射命令。服务目录和页面/API 目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
+业务命令使用语义参数；传统页面解析和底层协议请求只在 adapter 内部使用。服务目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
 
 ## 快速开始
 
@@ -168,7 +166,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
 | `mail` | 企业邮箱登录节点、RSA 预登录、验证码和会话 |
 | `transport-info` | 交通学院综合信息登录、验证码和会话 |
-| `employment` | 云就业公开信息、学生会话与登录（行为验证码需显式提供） |
+| `employment` | 云就业公开信息、学生会话、登录及邮箱二次验证（行为验证码需显式提供） |
 | `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |
 | `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
 | `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
@@ -179,30 +177,23 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `library-center` | 图书馆个人资料、信用记录、联系方式/密码、空间/座位资源、可用状态、个人预约查询以及预约/取消 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
-| `web` / `routes` | 教务页面目录、快照、表单和动作 |
-| `vpn` | VPN 门户、工作台/分组、申请、设备、会话、目录和 API |
-| `teaching` | 网络教学平台页面和课程 |
-| `quality` | 教学质量保障系统及评价 |
+| `vpn` | VPN 登录、状态、退出、工作台/分组、申请、设备、会话、消息和文件 |
+| `teaching` | 网络教学平台课程、课程详情和课程顺序 |
+| `quality` | 教学质量保障系统登录、状态、评价和毕业设计入口 |
 | `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价、服务项收藏和周期提醒 |
 | `services` | 已映射业务服务及依据 |
-| `site` | 任意官方子域名的通用适配器 |
 
 更多业务命令可先查看目录：
 
 ```bash
 ./csust services catalog --json
-./csust web catalog --json
-./csust vpn catalog --json
-./csust site catalog --json
+./csust teaching catalog --json
+./csust quality catalog --json
 ```
 
 一些完整用法示例：
 
 ```bash
-# 教务页面快照与结构化动作
-./csust web get --name course-selection-center --json
-./csust web semester-timetable --output timetable.html --json
-
 # 教材写操作必须显式确认，成功还会回读验证
 ./csust textbooks list --json
 ./csust textbooks subscribe --index 1 --yes --json
@@ -232,13 +223,9 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust vpn shares --view received --search 文件名 --json
 ./csust vpn links --search 文件名 --json
 ./csust vpn profile password --current-password-stdin --new-password "$CSUST_VPN_NEW_PASSWORD" --yes --json
-./csust vpn api --name users-info --json
 ./csust teaching courses --json
 ./csust quality status --json
 
-# eHall 的当前 SSO 回调由 adapter 处理，成功后再访问门户
-./csust site login --service ehall --auth sso --password-stdin --json
-./csust site get --service ehall --path /index.html --require-login --json
 ./csust ehall services --json
 ./csust ehall service --id SERVICE_ID --json
 ./csust ehall health --id SERVICE_ID --json
@@ -256,11 +243,6 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust ehall rating --id SERVICE_ID --page 1 --page-size 10 --json
 ./csust ehall favorite add --service-id SERVICE_ID --yes --json
 ./csust ehall favorite remove --service-id SERVICE_ID --yes --json
-
-# 无密码认证：扫码，或先发送动态码再登录
-./csust site login --service ehall --auth qr --qr-image ./ehall-qr.png --json
-./csust site login --service ehall --auth dynamic --mobile 手机号 --send-code --yes --json
-./csust site login --service ehall --auth dynamic --mobile 手机号 --dynamic-code 动态码 --captcha 验证码 --json
 
 # 语义化业务服务
 ./csust journal search --journal transport --query 软岩 --page-size 20 --json
@@ -408,31 +390,21 @@ CSUST_QUALITY_SYSTEM_PASSWORD='密码' ./csust quality-system login --username �
 ./csust campus-map point --id 1 --json
 ./csust campus-map panoramas --campus 云塘 --kind panorama --json
 
-# 全站通用页面与请求；写请求需要 --yes
-./csust site get --service official --path / --json
-./csust site request --service official --path / --method GET --json
-```
-
-开发阶段的发现命令必须显式开启：
-
-```bash
-CSUST_EXPLORATION=1 ./csust site discover --service official --path / --depth 1 --json
-CSUST_EXPLORATION=1 ./csust site scripts --service map --path / --json
 ```
 
 ## 认证与会话
 
 会话文件由 adapter 管理并尽量以 `600` 权限保存。默认位置如下：
 
-- 教务及 `web`：`~/.config/csust-cli/cookies.txt`
-- `site` 和多数业务服务：`~/.config/csust-cli/sites/<host>.cookies.txt`
+- 教务：`~/.config/csust-cli/cookies.txt`
+- 多数业务服务：`~/.config/csust-cli/sites/<host>.cookies.txt`
 - VPN：`~/.config/csust-cli/vpn-cookies.txt` 和 `~/.config/csust-cli/vpn-session.json`
 - `teaching` 和 `quality`：复用 VPN 的认证会话，并动态解析服务网关
 
 可用以下方式覆盖默认配置：
 
-- `CSUST_COOKIE_FILE`：教务/通用站点的 Cookie 文件
-- `CSUST_BASE_URL`：站点适配器的基地址，适合测试或受控环境
+- `CSUST_COOKIE_FILE`：教务 Cookie 文件
+- `CSUST_BASE_URL`：部分传统业务适配器的基地址，适合测试或受控环境
 - `CSUST_ENV_FILE`：替代默认 `.env` 文件
 - `CSUST_VPN_BASE_URL`、`CSUST_VPN_COOKIE_FILE`、`CSUST_VPN_SESSION_FILE`：VPN 会话配置
 - `CSUST_VPN_CURRENT_PASSWORD`、`CSUST_VPN_NEW_PASSWORD`：VPN 修改密码时的密码来源
@@ -465,7 +437,7 @@ CSUST_EXPLORATION=1 ./csust site scripts --service map --path / --json
 代码按适配边界组织：
 
 - [`main.go`](main.go)：Go CLI 入口、全局 JSON 处理和退出码
-- [`internal/adapter`](internal/adapter)：教务、VPN、网关、业务服务和全站协议适配器
+- [`internal/adapter`](internal/adapter)：教务、VPN、网关、业务服务和底层协议适配器
 - [`internal/contract`](internal/contract)：统一结果模型和置信度/写操作判定
 - [`AGENTS.md`](AGENTS.md)：项目需求、架构边界和功能完成标准
 - [`.github/workflows/tests.yml`](.github/workflows/tests.yml)：持续集成检查
@@ -485,7 +457,7 @@ go run . --help
 
 ## 获取帮助
 
-- 首先运行 `./csust --help`，再使用 `services catalog`、`web catalog`、`vpn catalog` 或 `site catalog` 查看当前能力目录。
+- 首先运行 `./csust --help`，再使用 `services catalog`、`teaching catalog` 或 `quality catalog` 查看当前能力目录。
 - 阅读 [`AGENTS.md`](AGENTS.md) 了解项目约束和验证要求。
 - 报告问题或提交功能建议：[GitHub Issues](https://github.com/notCorwin/csust-cli/issues)。
 - 查看自动化检查：[GitHub Actions](https://github.com/notCorwin/csust-cli/actions)。

@@ -12,21 +12,8 @@ import (
 	"testing"
 )
 
-func TestSiteRequestParsingAndResolution(t *testing.T) {
-	request, parseErr := parseSiteRequest([]string{
-		"--service=app",
-		"--path=/api",
-		"--method=post",
-		`--data-json={"page":1}`,
-		"--header=X-Test=value",
-		"--yes",
-	})
-	if parseErr != nil {
-		t.Fatal(parseErr)
-	}
-	if request.Method != "POST" || !request.HasJSON || request.Service != "app" {
-		t.Fatalf("unexpected request: %#v", request)
-	}
+func TestInternalSiteRequestResolution(t *testing.T) {
+	request := siteRequest{Service: "app", Path: "/api", Method: "POST", JSON: map[string]any{"page": 1}, HasJSON: true}
 	target, _, resolveErr := resolveSite(request)
 	if resolveErr != nil {
 		t.Fatal(resolveErr)
@@ -35,11 +22,7 @@ func TestSiteRequestParsingAndResolution(t *testing.T) {
 		t.Fatalf("unexpected target: %s", target)
 	}
 
-	get, parseErr := parseSiteRequest([]string{"--service", "official", "--path", "/logout"})
-	if parseErr != nil {
-		t.Fatal(parseErr)
-	}
-	logout, _, resolveErr := resolveSite(get)
+	logout, _, resolveErr := resolveSite(siteRequest{Service: "official", Path: "/logout"})
 	if resolveErr != nil {
 		t.Fatal(resolveErr)
 	}
@@ -100,18 +83,35 @@ func TestEHallSSOUsesCurrentPortalCallback(t *testing.T) {
 	}
 }
 
-func TestSiteLoginParsesPasswordAndPasswordlessModes(t *testing.T) {
-	password, err := parseSiteCommand([]string{"login", "--service", "ehall", "--auth", "sso", "--password-stdin"})
-	if err != nil || !password.login.passwordStdin {
-		t.Fatalf("site SSO password stdin was not parsed: %#v %v", password, err)
+func TestGenericCommandSurfaceRemoved(t *testing.T) {
+	commands := [][]string{
+		{"site", "discover"},
+		{"site", "scripts"},
+		{"site", "get"},
+		{"site", "request"},
+		{"web", "routes"},
+		{"web", "get"},
+		{"teaching", "get"},
+		{"teaching", "service"},
+		{"teaching", "courses", "--raw"},
+		{"quality", "public"},
+		{"quality", "evaluation", "form", "--path", "/jsxsd/xspj/xspj_course.do"},
+		{"vpn", "api"},
+		{"vpn", "page"},
+		{"vpn", "catalog"},
 	}
-	qr, err := parseSiteCommand([]string{"login", "--service", "ehall", "--auth", "qr", "--qr-image", "./login.png"})
-	if err != nil || qr.login.auth != "qr" || qr.login.qrImage != "./login.png" {
-		t.Fatalf("site QR login was not parsed: %#v %v", qr, err)
-	}
-	dynamic, err := parseSiteCommand([]string{"login", "--service", "ehall", "--auth", "dynamic", "--mobile", "13800138000", "--send-code", "--yes"})
-	if err != nil || dynamic.login.auth != "dynamic" || dynamic.login.mobile != "13800138000" || !dynamic.login.sendCode || !dynamic.request.Yes {
-		t.Fatalf("site dynamic login was not parsed: %#v %v", dynamic, err)
+	for _, command := range commands {
+		handled, stdout, stderr, code, err := (NativeSite{}).Run(context.Background(), command, true)
+		if err != nil || !handled || code != 2 || len(stderr) != 0 {
+			t.Fatalf("removed command %v: handled=%v code=%d err=%v stderr=%q stdout=%q", command, handled, code, err, stderr, stdout)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(stdout, &payload); err != nil {
+			t.Fatalf("removed command %v returned invalid JSON: %v", command, err)
+		}
+		if payload["code"] == nil || payload["error"] == nil {
+			t.Fatalf("removed command %v did not return an error envelope: %#v", command, payload)
+		}
 	}
 }
 
@@ -164,7 +164,7 @@ func TestSiteExecuteHonorsExplicitMutationForGET(t *testing.T) {
 	}
 }
 
-func TestNativeSiteRunReturnsContractReadyParseErrors(t *testing.T) {
+func TestNativeSiteRunReturnsContractReadyErrors(t *testing.T) {
 	handled, stdout, stderr, code, err := (NativeSite{}).Run(context.Background(), []string{
 		"site", "request", "--service", "official", "--method", "POST", "--data", "x=y", "--json",
 	}, true)
@@ -175,7 +175,7 @@ func TestNativeSiteRunReturnsContractReadyParseErrors(t *testing.T) {
 	if err := json.Unmarshal(stdout, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result["code"] != "confirmation_required" {
+	if result["code"] != "unknown_command" {
 		t.Fatalf("unexpected error: %#v", result)
 	}
 	if handled, stdout, _, code, _ := (NativeSite{}).Run(context.Background(), []string{"site", "request", "--help"}, false); !handled || code != 0 || !strings.Contains(string(stdout), "Go 原生协议 CLI") {

@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -17,16 +16,12 @@ const (
 )
 
 type gatewayRequest struct {
-	name, path, method, referer, output string
-	params, data                        []pair
-	files                               []filePart
-	json                                any
-	hasJSON, yes, raw, readOnly         bool
-	methodSet                           bool
-	forceMutating                       bool
-	public                              bool
-	form, button, index                 int
-	ref, fingerprint                    string
+	path, method, referer, output string
+	params, data                  []pair
+	files                         []filePart
+	json                          any
+	hasJSON, yes, raw, readOnly   bool
+	forceMutating                 bool
 }
 
 func (a NativeSite) runGatewayCommand(ctx context.Context, args []string, jsonMode bool) (bool, []byte, []byte, int, error) {
@@ -90,40 +85,7 @@ func (a NativeSite) executeGatewayCommand(ctx context.Context, service string, a
 		if err := onlyJSONArgs(args[1:]); err != nil {
 			return nil, err
 		}
-		if service == teachingServiceName {
-			return teachingCatalog(), nil
-		}
-		result := webCatalogResult()
-		routes := make([]map[string]any, 0, len(webRoutes))
-		for _, route := range webRoutes {
-			routes = append(routes, map[string]any{"name": route.command, "section": route.group, "label": route.name, "path": route.path, "description": route.name})
-		}
-		public := make([]map[string]any, 0, len(webPublicRoutes))
-		for _, route := range webPublicRoutes {
-			public = append(public, map[string]any{"name": route["command"], "label": route["name"], "path": route["path"]})
-		}
-		result["routes"] = routes
-		result["public"] = public
-		result["route_count"] = len(routes)
-		result["evaluation"] = map[string]any{"commands": []string{"batches", "courses", "form", "save", "submit"}, "page": "/jsxsd/xspj/xspj_find.do"}
-		result["request"] = "csust quality request --path /jsxsd/... --method POST --data NAME=VALUE --yes --json"
-		result["service"] = service
-		result["system"] = "教学质量保障系统"
-		return result, nil
-	}
-	if child == "service" {
-		if service != teachingServiceName {
-			return nil, &siteError{Code: "invalid_argument", Message: "quality 不支持 service 子命令"}
-		}
-		if err := onlyJSONArgs(args[1:]); err != nil {
-			return nil, err
-		}
-		_, _, prefix, serviceInfo, err := a.discoverGateway(ctx, service)
-		if err != nil {
-			return nil, err
-		}
-		serviceInfo["urlPlus"] = prefix
-		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "service": serviceInfo}, nil
+		return gatewayCatalog(service), nil
 	}
 	if service == teachingServiceName {
 		switch child {
@@ -133,13 +95,18 @@ func (a NativeSite) executeGatewayCommand(ctx context.Context, service string, a
 			return a.teachingCourse(ctx, args[1:])
 		case "course-order":
 			return a.teachingCourseOrder(ctx, args[1:])
+		case "public-courses":
+			return a.teachingPublicCourses(ctx, args[1:])
+		case "public-teachers":
+			return a.teachingPublicTeachers(ctx, args[1:])
+		case "public-teacher":
+			return a.teachingPublicTeacher(ctx, args[1:])
+		case "public-departments":
+			return a.teachingPublicDepartments(ctx, args[1:])
 		}
 	}
 	if service == qualityServiceName && child == "status" {
 		return a.qualityStatus(ctx, args[1:])
-	}
-	if service == qualityServiceName && child == "public" {
-		return a.runQualityPublic(ctx, args[1:])
 	}
 	if service == qualityServiceName && child == "graduation-design" {
 		return a.runQualityGraduation(ctx, args[1:])
@@ -150,163 +117,44 @@ func (a NativeSite) executeGatewayCommand(ctx context.Context, service string, a
 	if service == qualityServiceName && child == "logout" {
 		return a.runQualityLogout(ctx, args[1:])
 	}
-	if service == qualityServiceName && child == "routes" {
-		request := gatewayRequest{path: "/jsxsd/framework/xsMain.jsp", method: "GET"}
-		return a.runGatewayRequest(ctx, service, request)
-	}
 	if service == qualityServiceName && (child == "evaluation" || child == "evaluate") {
 		return a.runQualityEvaluation(ctx, args)
-	}
-	if child == "form" || child == "action" || child == "run" {
-		return a.runGatewayPageAction(ctx, service, child, args[1:], false)
-	}
-	if child == "get" || child == "request" || child == "api" || child == "page" {
-		request, err := parseGatewayRequest(args[1:], child == "get")
-		if err != nil {
-			return nil, err
-		}
-		return a.runGatewayRequest(ctx, service, request)
 	}
 	return nil, &siteError{Code: "invalid_argument", Message: "未知网关子命令: " + child}
 }
 
-func parseGatewayRequest(args []string, getOnly bool) (gatewayRequest, *siteError) {
-	request := gatewayRequest{method: "GET"}
-	for index := 0; index < len(args); index++ {
-		arg, value, inline := splitInline(args[index])
-		if arg == "--json" {
-			continue
+func gatewayCatalog(service string) map[string]any {
+	operations := []map[string]any{}
+	system := ""
+	if service == teachingServiceName {
+		system = "网络教学平台"
+		operations = []map[string]any{
+			{"name": "courses", "description": "课程列表"},
+			{"name": "course", "description": "课程详情"},
+			{"name": "course-order", "description": "调整课程顺序", "mutating": true},
+			{"name": "public-courses", "description": "公开课程检索"},
+			{"name": "public-teachers", "description": "公开教师检索"},
+			{"name": "public-teacher", "description": "公开教师主讲课程"},
+			{"name": "public-departments", "description": "公开院系目录"},
 		}
-		if arg == "--yes" {
-			if inline {
-				return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			request.yes = true
-			continue
-		}
-		if arg == "--raw" {
-			if inline {
-				return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			request.raw = true
-			continue
-		}
-		if !inline {
-			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
-				return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
-			}
-			index++
-			value = args[index]
-		}
-		switch arg {
-		case "--name":
-			request.name = value
-		case "--path":
-			request.path = value
-		case "--method":
-			request.method = strings.ToUpper(value)
-			request.methodSet = true
-		case "--param":
-			item, err := splitPair(value, "--param")
-			if err != nil {
-				return gatewayRequest{}, err
-			}
-			request.params = append(request.params, item)
-		case "--data":
-			item, err := splitPair(value, "--data")
-			if err != nil {
-				return gatewayRequest{}, err
-			}
-			request.data = append(request.data, item)
-		case "--data-json":
-			body, err := readJSONArgument(value)
-			if err != nil {
-				return gatewayRequest{}, err
-			}
-			request.json, request.hasJSON = body, true
-		case "--file":
-			item, err := readFilePart(value)
-			if err != nil {
-				return gatewayRequest{}, err
-			}
-			request.files = append(request.files, item)
-		case "--output":
-			request.output = expandUserPath(value)
-		case "--referer":
-			request.referer = value
-		case "--form":
-			parsed, parseErr := parsePositiveInt(value, "--form")
-			if parseErr != nil {
-				return gatewayRequest{}, parseErr
-			}
-			request.form = parsed
-		case "--button":
-			parsed, parseErr := parsePositiveInt(value, "--button")
-			if parseErr != nil {
-				return gatewayRequest{}, parseErr
-			}
-			request.button = parsed
-		case "--index":
-			parsed, parseErr := parsePositiveInt(value, "--index")
-			if parseErr != nil {
-				return gatewayRequest{}, parseErr
-			}
-			request.index = parsed
-		case "--ref":
-			request.ref = value
-		case "--fingerprint":
-			request.fingerprint = value
-		default:
-			return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "网关参数无效: " + arg}
+	} else {
+		system = "教学质量保障系统"
+		operations = []map[string]any{
+			{"name": "status", "description": "认证状态"},
+			{"name": "login", "description": "登录"},
+			{"name": "logout", "description": "退出登录"},
+			{"name": "evaluation", "description": "教学评价", "operations": []string{"batches", "courses", "form", "save", "submit"}},
+			{"name": "graduation-design", "description": "毕业设计入口"},
 		}
 	}
-	if request.name != "" && request.path != "" {
-		return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "--name 与 --path 不能同时使用"}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed",
+		"service": service, "system": system, "operations": operations,
 	}
-	if request.name == "" && request.path == "" {
-		return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "--name 与 --path 至少指定一个"}
-	}
-	if getOnly {
-		request.method = "GET"
-		if len(request.data) > 0 || len(request.files) > 0 || request.hasJSON {
-			return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "GET 只能使用 --param"}
-		}
-	}
-	if !supportedSiteMethod(request.method) {
-		return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "不支持的 HTTP 方法: " + request.method}
-	}
-	if request.hasJSON && (len(request.data) > 0 || len(request.files) > 0) {
-		return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "--data-json 不能与 --data/--file 同时使用"}
-	}
-	if readOnlyMethod(request.method) && (len(request.data) > 0 || len(request.files) > 0 || request.hasJSON) {
-		return gatewayRequest{}, &siteError{Code: "invalid_argument", Message: "GET/HEAD/OPTIONS 只能使用 --param"}
-	}
-	return request, nil
-}
-
-func parsePositiveInt(value, flag string) (int, *siteError) {
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed < 1 {
-		return 0, &siteError{Code: "invalid_argument", Message: flag + " 必须是正整数"}
-	}
-	return parsed, nil
 }
 
 func (a NativeSite) runGatewayRequest(ctx context.Context, service string, request gatewayRequest) (map[string]any, *siteError) {
-	item, known, ambiguous := gatewayEntry(service, request.name, request.method, request.methodSet)
-	if request.name != "" {
-		if ambiguous {
-			return nil, &siteError{Code: "ambiguous_route", Message: "目录名称有歧义，请改用 --path"}
-		}
-		if !known {
-			return nil, &siteError{Code: "unknown_route", Message: "未知目录项: " + request.name}
-		}
-		request.path, request.method = item.path, item.method
-	}
-	mutating := item.mutating
-	if request.name == "" {
-		mutating = !readOnlyMethod(request.method) || sideEffectSitePattern.MatchString(request.path) || gatewayParamsMutate(request.params)
-	}
+	mutating := !readOnlyMethod(request.method) || sideEffectSitePattern.MatchString(request.path) || gatewayParamsMutate(request.params)
 	if request.readOnly {
 		mutating = false
 	}
@@ -321,22 +169,7 @@ func (a NativeSite) runGatewayRequest(ctx context.Context, service string, reque
 		return nil, err
 	}
 	result["service"] = service
-	if request.name != "" {
-		result["request"] = map[string]any{"name": request.name, "method": request.method, "path": request.path, "service": service}
-	}
 	return result, nil
-}
-
-func gatewayEntry(service, name, method string, methodSet bool) (teachingCatalogItem, bool, bool) {
-	if service == teachingServiceName {
-		return teachingLookup(name, method, methodSet)
-	}
-	for _, route := range webRoutes {
-		if strings.EqualFold(route.command, name) || strings.EqualFold(route.name, name) {
-			return teachingCatalogItem{name: route.command, section: route.group, label: route.name, method: "GET", path: route.path}, true, false
-		}
-	}
-	return teachingCatalogItem{}, false, false
 }
 
 func gatewayParamsMutate(params []pair) bool {
@@ -365,7 +198,7 @@ func (a NativeSite) executeGateway(ctx context.Context, service string, request 
 			headers = append(headers, pair{"Referer", referer.String()})
 		}
 	}
-	submit := siteRequest{Target: target, CookieFile: cookie, Method: request.method, Params: nil, Data: request.data, Files: request.files, JSON: request.json, HasJSON: request.hasJSON, Headers: headers, Yes: request.yes, Output: request.output, RequireLogin: !request.public, ReadOnly: !mutating}
+	submit := siteRequest{Target: target, CookieFile: cookie, Method: request.method, Params: nil, Data: request.data, Files: request.files, JSON: request.json, HasJSON: request.hasJSON, Headers: headers, Yes: request.yes, Output: request.output, RequireLogin: true, ReadOnly: !mutating}
 	result, runErr := a.execute(ctx, submit)
 	if runErr != nil {
 		return nil, runErr
@@ -496,31 +329,6 @@ func findGatewayService(payload map[string]any, service string) map[string]any {
 	return nil
 }
 
-func (a NativeSite) runGatewayPageAction(ctx context.Context, service, child string, args []string, public bool) (map[string]any, *siteError) {
-	request, err := parseGatewayRequest(args, false)
-	if err != nil {
-		return nil, err
-	}
-	if request.path == "" {
-		return nil, &siteError{Code: "invalid_argument", Message: "页面动作必须提供 --path"}
-	}
-	base, cookie, prefix, _, discoverErr := a.discoverGateway(ctx, service)
-	if discoverErr != nil {
-		return nil, discoverErr
-	}
-	target, targetErr := gatewayTarget(base, prefix, request.path, request.params)
-	if targetErr != nil {
-		return nil, targetErr
-	}
-	command := siteCommand{request: siteRequest{Target: target, CookieFile: cookie, Method: "GET", Headers: []pair{{"Accept", "text/html,application/xhtml+xml,application/json,text/plain,*/*"}, {"Accept-Encoding", "identity"}}, RequireLogin: !public, Yes: request.yes, Output: request.output}, data: request.data, files: request.files, form: request.form, button: request.button, index: request.index, ref: request.ref, fingerprint: request.fingerprint, allowExternal: false}
-	result, submitErr := a.submitSiteForm(ctx, command, child == "action" || child == "run")
-	if submitErr != nil {
-		return nil, submitErr
-	}
-	result["service"] = service
-	return result, nil
-}
-
 func (a NativeSite) qualityStatus(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if err := onlyJSONArgs(args); err != nil {
 		return nil, err
@@ -546,14 +354,10 @@ func (a NativeSite) qualityStatus(ctx context.Context, args []string) (map[strin
 }
 
 func (a NativeSite) teachingCourses(ctx context.Context, args []string) (map[string]any, *siteError) {
-	name, tutor, raw := "", "", false
+	name, tutor := "", ""
 	for index := 0; index < len(args); index++ {
 		arg, value, inline := splitInline(args[index])
 		if arg == "--json" {
-			continue
-		}
-		if arg == "--raw" {
-			raw = true
 			continue
 		}
 		if !inline {
@@ -589,9 +393,6 @@ func (a NativeSite) teachingCourses(ctx context.Context, args []string) (map[str
 	result, err := a.runGatewayRequest(ctx, teachingServiceName, list)
 	if err != nil {
 		return nil, err
-	}
-	if raw {
-		result["raw"] = true
 	}
 	return result, nil
 }

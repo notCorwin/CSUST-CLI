@@ -33,7 +33,7 @@ const (
 
 var errSiteRequestTooLarge = errors.New("site request body exceeds limit")
 
-// NativeSite handles the direct-protocol path for the generic site API.
+// NativeSite owns the shared direct-protocol transport used by semantic adapters.
 type NativeSite struct{}
 
 type siteRequest struct {
@@ -74,6 +74,42 @@ type serviceInfo struct {
 	host   string
 	scheme string
 	path   string
+}
+
+func academicCookiePath() string {
+	if value := os.Getenv("CSUST_COOKIE_FILE"); value != "" {
+		return expandUserPath(value)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".csust-cookies", "cookies.txt")
+	}
+	return filepath.Join(home, ".config", "csust-cli", "cookies.txt")
+}
+
+func flagPresent(values []string, flag string) bool {
+	for _, value := range values {
+		if value == flag || strings.HasPrefix(value, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func removeCookieFile(path string) error {
+	return withSiteFileLock(path, func() error {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("会话文件必须是普通文件且不能是符号链接")
+		}
+		return os.Remove(path)
+	})
 }
 
 var knownSites = map[string]serviceInfo{
@@ -174,9 +210,6 @@ func (a NativeSite) Run(ctx context.Context, args []string, jsonMode bool) (hand
 	if handled, stdout, stderr, code, err := a.runAcademicCommand(ctx, args, jsonMode); handled {
 		return handled, stdout, stderr, code, err
 	}
-	if handled, stdout, stderr, code, err := a.runWebCommand(ctx, args, jsonMode); handled {
-		return handled, stdout, stderr, code, err
-	}
 	if handled, stdout, stderr, code, err := a.runVPNCommand(ctx, args, jsonMode); handled {
 		return handled, stdout, stderr, code, err
 	}
@@ -186,39 +219,11 @@ func (a NativeSite) Run(ctx context.Context, args []string, jsonMode bool) (hand
 	if handled, stdout, stderr, code, err := a.runBusinessCommand(ctx, args, jsonMode); handled {
 		return handled, stdout, stderr, code, err
 	}
-	if handled, stdout, stderr, code, err := a.runSiteCommand(ctx, args, jsonMode); handled {
-		return handled, stdout, stderr, code, err
-	}
-	start := siteRequestStart(args)
-	if start < 0 {
-		unknown := &siteError{Code: "unknown_command", Message: "未知命令: " + strings.Join(args, " ")}
-		if jsonMode {
-			return true, errorJSON(unknown), nil, 2, nil
-		}
-		return true, nil, []byte("错误: " + unknown.Message + "\n"), 2, nil
-	}
-	req, parseErr := parseSiteRequest(args[start+2:])
-	if parseErr != nil {
-		if jsonMode {
-			return true, errorJSON(parseErr), nil, 2, nil
-		}
-		return true, nil, []byte("错误: " + parseErr.Error() + "\n"), 2, nil
-	}
-	result, runErr := a.execute(ctx, req)
-	if runErr != nil {
-		if jsonMode {
-			return true, errorJSON(runErr), nil, 2, nil
-		}
-		return true, nil, []byte("错误: " + runErr.Error() + "\n"), 2, nil
-	}
+	unknown := &siteError{Code: "unknown_command", Message: "未知命令: " + strings.Join(args, " ")}
 	if jsonMode {
-		encoded, encodeErr := json.Marshal(stripSiteInternal(result))
-		if encodeErr != nil {
-			return true, nil, nil, 2, encodeErr
-		}
-		return true, encoded, nil, 0, nil
+		return true, errorJSON(unknown), nil, 2, nil
 	}
-	return true, []byte(renderSiteResult(result)), nil, 0, nil
+	return true, nil, []byte("错误: " + unknown.Message + "\n"), 2, nil
 }
 
 func withoutGlobalJSON(args []string) []string {
@@ -231,18 +236,6 @@ func withoutGlobalJSON(args []string) []string {
 	return result
 }
 
-func siteRequestStart(args []string) int {
-	if len(args) < 2 || args[1] != "request" {
-		return -1
-	}
-	switch args[0] {
-	case "site", "domain", "portal":
-		return 0
-	default:
-		return -1
-	}
-}
-
 func containsHelp(args []string) bool {
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
@@ -252,134 +245,33 @@ func containsHelp(args []string) bool {
 	return false
 }
 
-func parseSiteRequest(args []string) (siteRequest, *siteError) {
-	req := siteRequest{Method: "GET"}
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		inlineValue := ""
-		inline := false
-		if strings.HasPrefix(arg, "--") {
-			if name, value, found := strings.Cut(arg, "="); found {
-				arg, inlineValue, inline = name, value, true
-			}
-		}
-		if arg == "--json" {
-			if inline {
-				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			continue
-		}
-		if arg == "--yes" {
-			if inline {
-				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			req.Yes = true
-			continue
-		}
-		value, next, hasValue := inlineValue, index, inline
-		if !inline {
-			value, next, hasValue = nextValue(args, index)
-		}
-		if hasValue && !inline {
-			index = next
-		}
-		switch arg {
-		case "--service":
-			req.Service = value
-		case "--path":
-			req.Path = value
-		case "--scheme":
-			req.Scheme = value
-		case "--method":
-			req.Method = strings.ToUpper(value)
-		case "--param":
-			pairValue, parseErr := splitPair(value, "--param")
-			if parseErr != nil {
-				return siteRequest{}, parseErr
-			}
-			req.Params = append(req.Params, pairValue)
-		case "--data":
-			pairValue, parseErr := splitPair(value, "--data")
-			if parseErr != nil {
-				return siteRequest{}, parseErr
-			}
-			req.Data = append(req.Data, pairValue)
-		case "--data-json":
-			body, parseErr := readJSONArgument(value)
-			if parseErr != nil {
-				return siteRequest{}, parseErr
-			}
-			req.JSON, req.HasJSON = body, true
-		case "--file":
-			part, parseErr := readFilePart(value)
-			if parseErr != nil {
-				return siteRequest{}, parseErr
-			}
-			req.Files = append(req.Files, part)
-		case "--header":
-			pairValue, parseErr := splitPair(value, "--header")
-			if parseErr != nil {
-				return siteRequest{}, parseErr
-			}
-			req.Headers = append(req.Headers, pairValue)
-		case "--output":
-			req.Output = expandUserPath(value)
-		case "--cookie-file":
-			req.CookieFile = expandUserPath(value)
-		case "--require-login":
-			if inline {
-				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			req.RequireLogin = true
-		case "--insecure":
-			if inline {
-				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			req.InsecureTLS = true
-		case "--allow-external":
-			if inline {
-				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "布尔参数不接受 =VALUE"}
-			}
-			// Generic requests stay same-origin; retain the shared page CLI flag for compatibility.
-		default:
-			if strings.HasPrefix(arg, "-") {
-				return siteRequest{}, &siteError{Code: "invalid_argument", Message: "site request 参数无效: " + arg}
-			}
-			return siteRequest{}, &siteError{Code: "invalid_argument", Message: "site request 不接受位置参数"}
-		}
-		if !hasValue && arg != "--yes" && arg != "--require-login" && arg != "--allow-external" && arg != "--insecure" && arg != "--json" {
-			return siteRequest{}, &siteError{Code: "invalid_argument", Message: arg + " 缺少参数值"}
-		}
-	}
-	if req.Service == "" {
-		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "必须提供 --service"}
-	}
-	if req.Method == "" {
-		req.Method = "GET"
-	}
-	if !supportedSiteMethod(req.Method) {
-		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "不支持的 HTTP 方法: " + req.Method}
-	}
-	if req.Scheme != "" && req.Scheme != "http" && req.Scheme != "https" {
-		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "服务传输方案只能是 http 或 https"}
-	}
-	if req.HasJSON && (len(req.Data) > 0 || len(req.Files) > 0) {
-		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "--data-json 不能与 --data/--file 同时使用"}
-	}
-	if readOnlyMethod(req.Method) && (req.HasJSON || len(req.Data) > 0 || len(req.Files) > 0) {
-		return siteRequest{}, &siteError{Code: "invalid_argument", Message: "GET/HEAD/OPTIONS 请使用 --param"}
-	}
-	if mutatingMethod(req.Method) && !req.Yes {
-		return siteRequest{}, &siteError{Code: "confirmation_required", Message: "site 请求可能修改远端数据，请加 --yes"}
-	}
-	return req, nil
-}
-
 func nextValue(args []string, index int) (string, int, bool) {
 	if index+1 < len(args) && !strings.HasPrefix(args[index+1], "--") {
 		return args[index+1], index + 1, true
 	}
 	return "", index, false
+}
+
+func validatePageActionTarget(value, base string, allowExternal bool) (*url.URL, *siteError) {
+	targetValue := resolvePageURL(base, value)
+	if targetValue == "" {
+		return nil, &siteError{Code: "invalid_path", Message: "页面动作目标不是 HTTP(S) 地址"}
+	}
+	target, err := url.Parse(targetValue)
+	if err != nil || target.User != nil || target.Hostname() == "" {
+		return nil, &siteError{Code: "invalid_path", Message: "页面动作目标格式无效"}
+	}
+	baseURL, baseErr := url.Parse(base)
+	if baseErr != nil || baseURL.Host == "" {
+		return nil, &siteError{Code: "invalid_path", Message: "页面基地址无效"}
+	}
+	if !allowExternal && !strings.EqualFold(target.Host, baseURL.Host) {
+		return nil, &siteError{Code: "invalid_path", Message: "页面动作必须保持当前子域名；如页面明确指向外部服务请加 --allow-external"}
+	}
+	if strings.EqualFold(baseURL.Scheme, "https") && strings.EqualFold(target.Scheme, "http") && strings.EqualFold(baseURL.Host, target.Host) {
+		return nil, &siteError{Code: "invalid_path", Message: "不允许 HTTPS 页面降级到 HTTP 动作"}
+	}
+	return target, nil
 }
 
 func splitPair(value, flag string) (pair, *siteError) {
@@ -802,7 +694,7 @@ func responsePayload(response *http.Response, content []byte, decoded any) map[s
 			payload["format"] = "html"
 			payload["confidence"] = "low"
 			payload["confidence_evidence"] = map[string]any{
-				"reason":       "通用 HTTP 适配器保留原始 HTML；页面结构请使用 site get",
+				"reason":       "HTML 响应未提供可确认的业务结果；由具体业务适配器解析",
 				"content_type": response.Header.Get("Content-Type"),
 				"bytes":        len(content),
 			}
@@ -1044,7 +936,8 @@ func successMessage(value string) bool {
 
 func failureMessage(value string) bool {
 	text := strings.TrimSpace(value)
-	// ponytail: inspect short plain-text acknowledgements only; structural HTML uses site get.
+	// ponytail: inspect short plain-text acknowledgements only; structural HTML
+	// requires a service-specific adapter.
 	if text == "" || len(text) > 4096 || (strings.Contains(text, "<") && strings.Contains(text, ">")) {
 		return false
 	}
@@ -1620,22 +1513,6 @@ func withSiteFileLock(filename string, action func() error) error {
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	return action()
-}
-
-func renderSiteResult(result map[string]any) string {
-	if result["downloaded"] == true {
-		return fmt.Sprintf("已保存：%v（%v bytes）\n", result["output"], result["bytes"])
-	}
-	if response, ok := result["response"].(map[string]any); ok {
-		if body, ok := response["body"].(string); ok {
-			return body
-		}
-		if value, ok := response["json"]; ok {
-			encoded, _ := json.MarshalIndent(value, "", "  ")
-			return string(encoded) + "\n"
-		}
-	}
-	return "请求已确认\n"
 }
 
 func resolveSite(req siteRequest) (*url.URL, string, *siteError) {

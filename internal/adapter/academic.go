@@ -418,7 +418,7 @@ func (a NativeSite) academicCourseSelection(ctx context.Context, args []string) 
 		items = academicSelectionWindowRows(document, keyword, pageURL)
 	}
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "未找到选课表；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "未找到选课表；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -608,7 +608,7 @@ func (a NativeSite) academicSocialExamRegistration(ctx context.Context, args []s
 		}
 	}
 	if len(available) == 0 && len(enrolled) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "社会考试报名页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "社会考试报名页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -683,7 +683,7 @@ func (a NativeSite) academicMakeUpExamRegistration(ctx context.Context, args []s
 	}
 	statusMessage := academicMakeUpExamStatus(page)
 	if len(items) == 0 && statusMessage == "" && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "补考报名页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "补考报名页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	return academicWrap(map[string]any{
 		"kind": "make-up-exam-registration", "path": academicMakeUpExamRegistrationPath, "keyword": nullableString(keyword),
@@ -769,7 +769,7 @@ func (a NativeSite) academicSummerRemedialRegistration(ctx context.Context, args
 	}
 	statusMessage := academicPageStatusMessage(page, "请选择审核批次进行查询")
 	if len(items) == 0 && statusMessage == "" && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "暑期补修报名页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "暑期补修报名页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	return academicWrap(map[string]any{
 		"kind": "summer-remedial-registration", "path": academicSummerRemedialRegistrationPath, "keyword": nullableString(keyword),
@@ -886,7 +886,7 @@ func (a NativeSite) academicStructuredPageWithField(ctx context.Context, args []
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicStructuredRows(document, keyword, field)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: kind + " 页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: kind + " 页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -958,7 +958,7 @@ func (a NativeSite) academicDeferredExamApplications(ctx context.Context, args [
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicStructuredRowsWithLinks(document, keyword, academicDeferredExamField, pageURL)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "缓考申请页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "缓考申请页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1002,7 +1002,7 @@ func (a NativeSite) academicExemptExamApplications(ctx context.Context, args []s
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicStructuredRowsWithLinks(document, keyword, academicExemptExamField, pageURL)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "免考申请页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "免考申请页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1075,7 +1075,7 @@ func (a NativeSite) academicGraduateExamRegistration(ctx context.Context, args [
 		statusMessage = messages[0]
 	}
 	if len(items) == 0 && statusMessage == "" && len(document.findAll("table")) == 0 && page["kind"] == "html" {
-		return nil, &siteError{Code: "parse_error", Message: "毕业生插考查询未返回记录或状态消息；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "毕业生插考查询未返回记录或状态消息；当前响应结构尚未被适配器识别"}
 	}
 	return academicWrap(map[string]any{
 		"kind": "graduate-exam-registration", "path": listPath, "term": nullableString(term),
@@ -1123,7 +1123,7 @@ func (a NativeSite) academicDeferredExamRegistration(ctx context.Context, args [
 	}
 	statusMessage := academicRegistrationStatusMessage(document, page)
 	if len(items) == 0 && statusMessage == "" && len(document.findAll("table")) == 0 && page["kind"] == "html" {
-		return nil, &siteError{Code: "parse_error", Message: "缓考报名查询未返回记录或状态消息；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "缓考报名查询未返回记录或状态消息；当前响应结构尚未被适配器识别"}
 	}
 	return academicWrap(map[string]any{
 		"kind": "deferred-exam-registration", "path": listPath, "term": nullableString(term),
@@ -1185,7 +1185,7 @@ func (a NativeSite) academicClassChanges(ctx context.Context, args []string) (ma
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicStructuredRowsWithLinks(document, keyword, academicClassChangeField, pageURL)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "调停课查询未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "调停课查询未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1361,7 +1361,7 @@ func (a NativeSite) academicSecondClassCreditApplications(ctx context.Context, a
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicSecondClassCreditApplicationRows(document, keyword, pageURL)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "第二课堂学分申报页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "第二课堂学分申报页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1466,7 +1466,7 @@ func (a NativeSite) academicAnnouncements(ctx context.Context, args []string) (m
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicStructuredRowsWithLinks(document, keyword, academicAnnouncementField, pageURL)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "公告页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "公告页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1491,7 +1491,7 @@ func (a NativeSite) academicMessages(ctx context.Context, args []string) (map[st
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicMessageRows(document, keyword, pageURL)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "留言页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "留言页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1613,7 +1613,7 @@ func (a NativeSite) academicRetakeCourses(ctx context.Context, args []string) (m
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicRetakeRows(document, keyword)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "重修报名页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "重修报名页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1706,7 +1706,7 @@ func (a NativeSite) academicTrainingPlan(ctx context.Context, args []string) (ma
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicStructuredRows(document, keyword, academicTrainingPlanField)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "培养方案页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "培养方案页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -1732,7 +1732,7 @@ func (a NativeSite) academicTrainingProgress(ctx context.Context, args []string)
 	keyword := strings.TrimSpace(flagValue(args, "--keyword"))
 	items := academicTrainingProgressRows(document, keyword)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "培养方案完成情况页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "培养方案完成情况页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {
@@ -2529,31 +2529,29 @@ func (a NativeSite) academicSchedule(ctx context.Context, args []string) (map[st
 
 func (a NativeSite) academicGrades(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) > 0 && args[0] == "detail" {
-		path := flagValue(args[1:], "--path")
-		if path == "" {
-			courseID, courseName := flagValue(args[1:], "--course-id"), flagValue(args[1:], "--course-name")
-			if courseID == "" && courseName == "" {
-				return nil, &siteError{Code: "invalid_argument", Message: "grades detail 必须提供 --course-id 或 --course-name"}
+		courseID, courseName := flagValue(args[1:], "--course-id"), flagValue(args[1:], "--course-name")
+		if courseID == "" && courseName == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "grades detail 必须提供 --course-id 或 --course-name"}
+		}
+		term := flagValue(args[1:], "--term")
+		rows, _, _, listErr := a.academicGradeRows(ctx, term, flagValue(args[1:], "--course-nature"), "", flagValue(args[1:], "--study-mode-id"), firstNonEmpty(flagValue(args[1:], "--display"), "all"))
+		if listErr != nil {
+			return nil, listErr
+		}
+		path := ""
+		for _, row := range rows {
+			if (courseID != "" && fmt.Sprint(row["course_id"]) == courseID) || (courseName != "" && strings.Contains(fmt.Sprint(row["course"]), courseName)) {
+				path = fmt.Sprint(row["grade_detail_url"])
+				break
 			}
-			term := flagValue(args[1:], "--term")
-			rows, _, _, listErr := a.academicGradeRows(ctx, term, flagValue(args[1:], "--course-nature"), "", flagValue(args[1:], "--study-mode-id"), firstNonEmpty(flagValue(args[1:], "--display"), "all"))
-			if listErr != nil {
-				return nil, listErr
-			}
-			for _, row := range rows {
-				if (courseID != "" && fmt.Sprint(row["course_id"]) == courseID) || (courseName != "" && strings.Contains(fmt.Sprint(row["course"]), courseName)) {
-					path = fmt.Sprint(row["grade_detail_url"])
-					break
-				}
-			}
-			if path == "" || path == "<nil>" {
-				return nil, &siteError{Code: "not_found", Message: "成绩列表中找不到对应课程详情"}
-			}
-			var pathErr *siteError
-			path, pathErr = academicPath(path)
-			if pathErr != nil {
-				return nil, pathErr
-			}
+		}
+		if path == "" || path == "<nil>" {
+			return nil, &siteError{Code: "not_found", Message: "成绩列表中找不到对应课程详情"}
+		}
+		var pathErr *siteError
+		path, pathErr = academicPath(path)
+		if pathErr != nil {
+			return nil, pathErr
 		}
 		body, pageURL, err := a.academicPage(ctx, "GET", path, nil, nil)
 		if err != nil {
@@ -2704,7 +2702,7 @@ func (a NativeSite) academicInClassExams(ctx context.Context, args []string) (ma
 	}
 	items := academicStructuredRows(document, "", academicInClassExamField)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "随堂考查询未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "随堂考查询未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {

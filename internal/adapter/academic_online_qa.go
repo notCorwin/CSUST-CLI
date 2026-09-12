@@ -47,7 +47,7 @@ func (a NativeSite) academicOnlineQAList(ctx context.Context, args []string) (ma
 	}
 	items := academicOnlineQARows(document, strings.TrimSpace(flagValue(args, "--keyword")), pageURL)
 	if len(items) == 0 && !noAcademicData(document) && len(document.findAll("table")) == 0 {
-		return nil, &siteError{Code: "parse_error", Message: "在线问答页面未包含可解析表格；请使用 web get 查看页面结构"}
+		return nil, &siteError{Code: "parse_error", Message: "在线问答页面未包含可解析表格；当前响应结构尚未被适配器识别"}
 	}
 	page, pageErr := pageInspect(body, pageURL)
 	if pageErr != nil {

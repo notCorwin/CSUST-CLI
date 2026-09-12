@@ -13,7 +13,7 @@ func (a NativeSite) runQualityEvaluation(ctx context.Context, args []string) (ma
 		return nil, &siteError{Code: "invalid_argument", Message: "quality evaluation 缺少子命令"}
 	}
 	operation := args[1]
-	path, batchSelector, courseID, courseName, yes, suggestion, clearSuggestion := "", "", "", "", false, "", false
+	batchSelector, courseID, courseName, yes, suggestion, clearSuggestion := "", "", "", false, "", false
 	answers := []pair{}
 	for index := 2; index < len(args); index++ {
 		arg, value, inline := splitInline(args[index])
@@ -36,8 +36,6 @@ func (a NativeSite) runQualityEvaluation(ctx context.Context, args []string) (ma
 			value = args[index]
 		}
 		switch arg {
-		case "--path":
-			path = value
 		case "--batch":
 			batchSelector = value
 		case "--course-id":
@@ -56,7 +54,8 @@ func (a NativeSite) runQualityEvaluation(ctx context.Context, args []string) (ma
 			return nil, &siteError{Code: "invalid_argument", Message: "quality evaluation 参数无效: " + arg}
 		}
 	}
-	if operation != "batches" && path == "" {
+	path := ""
+	if operation != "batches" {
 		var targetErr *siteError
 		path, targetErr = a.qualityEvaluationTarget(ctx, operation, batchSelector, courseID, courseName)
 		if targetErr != nil {

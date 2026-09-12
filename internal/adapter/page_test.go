@@ -72,15 +72,3 @@ func TestPageActionResolvesFunctionBody(t *testing.T) {
 		t.Fatalf("method=%s target=%s", method, target)
 	}
 }
-
-func TestSiteExplorationCommandsAreOptIn(t *testing.T) {
-	t.Setenv("CSUST_EXPLORATION", "0")
-	if _, err := parseSiteCommand([]string{"discover", "--service", "official"}); err == nil || err.Code != "exploration_required" {
-		t.Fatalf("discover should require exploration mode: %#v", err)
-	}
-	t.Setenv("CSUST_EXPLORATION", "1")
-	command, err := parseSiteCommand([]string{"discover", "--service", "official", "--depth", "0"})
-	if err != nil || command.depth != 0 {
-		t.Fatalf("discover parsing failed: %#v %#v", command, err)
-	}
-}
