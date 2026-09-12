@@ -168,6 +168,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `union` | 智慧工会模块、角色登录、验证码和会话 |
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
 | `mail` | 企业邮箱登录节点、RSA 预登录、验证码和会话 |
+| `fcmg` | fcmg 基础 API 服务状态；业务 schema 需认证，当前未取得公开协议 |
 | `transport-info` | 交通学院综合信息登录、验证码和会话 |
 | `employment` | 云就业公开信息、学生会话、登录及邮箱二次验证（行为验证码需显式提供） |
 | `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |

@@ -87,6 +87,7 @@ func nativeUsage(args []string) []byte {
   highway-experiment          公路工程实验中心公开网站状态
   recruitment                 人才招聘频道、公告、岗位筛选和详情
   mail                        企业邮箱登录、验证码和会话
+  fcmg                        fcmg 基础 API 服务状态（业务 schema 需认证）
   professional-learning       专业技术人员继续教育课程、分类、通知和详情
   institutional-learning      事业单位工作人员继续教育课程、分类、通知和详情
   transport-mobile            交通运输工程综合信息登录、身份、待办、字典、答辩、财务、成果、业绩、通知、留言、请假单与审批、改密及学院业务查询

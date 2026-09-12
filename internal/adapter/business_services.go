@@ -70,6 +70,7 @@ var businessServices = []businessService{
 	{"campus-map", "校园地图与公共点", "campus-map", "校园服务", "high", "live GIS APIs expose zones, public point types, points, point details, search and aerial/panorama resources"},
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data; student login uses vi_code, encode token and behavioral captcha"},
 	{"mail", "企业邮箱登录与会话", "mail", "邮件", "medium", "live page exposes 163 enterprise-mail provider, RSA prelogin, domainEntLogin and captcha protocol"},
+	{"fcmg", "fcmg 基础 API 服务", "fcmg", "基础服务", "low", "live root is a Spring Boot health page; Swagger UI is present, while /api and /openapi.json require authentication and expose no public business schema"},
 	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "live form supports appointment/upload and linked script calls arctrace queryExpressCode for express tracking"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
 	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
@@ -104,7 +105,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -151,6 +152,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeEmployment(ctx, args[1:])
 	case "mail":
 		return a.executeMail(ctx, args[1:])
+	case "fcmg":
+		return a.executeServiceStatusCommand(ctx, args[1:], "fcmg", "fcmg 基础 API 服务")
 	case "onlinejudge", "judge":
 		return a.executeOnlineJudge(ctx, args[1:])
 	case "mooc":
@@ -800,6 +803,9 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "login":
 			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
 		}
+	case "fcmg":
+		common()
+		add("--insecure")
 	case "graduate-admissions":
 		common()
 		if operation == "login" {
