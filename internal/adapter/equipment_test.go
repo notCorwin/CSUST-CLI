@@ -15,7 +15,7 @@ func TestEquipmentProtocolAndSemanticModels(t *testing.T) {
 		t.Fatalf("unexpected equipment DES payload: %q %v", encrypted, err)
 	}
 
-	var listPlain, detailPlain, calendarPlain, favoritePlain string
+	var listPlain, detailPlain, calendarPlain, favoritePlain, profilePlain, reservationsPlain, favoritesPlain, cancelPlain string
 	calls := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != equipmentEndpoint || request.Method != http.MethodPost {
@@ -89,6 +89,23 @@ func TestEquipmentProtocolAndSemanticModels(t *testing.T) {
 		case "AddDevsCollect":
 			favoritePlain = plain
 			writeEquipmentResponse(t, writer, map[string]any{"flag": "0", "msg": "收藏成功！"})
+		case "GetUserInfo":
+			profilePlain = plain
+			writeEquipmentResponse(t, writer, map[string]any{
+				"message": []any{map[string]any{"ReturnFlag": "1", "ReturnMsg": "返回成功！"}},
+				"data":    []any{map[string]any{"ID": "U-1", "ZH": "student", "XM": "测试用户", "LX": "1", "YHWP": "学生", "BMID": "118", "BMMC": "交通学院", "LXDH": "13800000000", "LXYX": "student@example.com", "KH1": "CARD-1", "XYJF": "100", "GROUPNUM": "1", "YHYE": "2000"}},
+			})
+		case "GetDevsPreList":
+			reservationsPlain = plain
+			writeEquipmentResponse(t, writer, map[string]any{
+				"count": "1", "data": []any{map[string]any{"YYBH": "RES-1", "YYDZT": "未审批", "STATE": "2< br >0", "YQBH": "EQ-1", "YQMC": "压力老化仪", "YYLX": "1", "YYKSSJ": "2026-09-14 09:00", "YYJSSJ": "2026-09-14 10:00", "YYRXM": "测试用户", "YYMONEY": "10"}},
+			})
+		case "GetDevsCollect":
+			favoritesPlain = plain
+			writeEquipmentResponse(t, writer, map[string]any{"total": "1", "rows": []any{map[string]any{"ZCBH": "EQ-1", "YQMC": "压力老化仪", "YQXH": "PR9300"}}})
+		case "CancelPre":
+			cancelPlain = plain
+			writeEquipmentResponse(t, writer, map[string]any{"message": []any{map[string]any{"ReturnFlag": "1", "ReturnMsg": "取消成功！"}}})
 		default:
 			t.Errorf("unexpected equipment action %s/%s with %s", action.Function, action.Component, plain)
 			writeEquipmentResponse(t, writer, map[string]any{"code": "1", "msg": "unknown"})
@@ -130,6 +147,22 @@ func TestEquipmentProtocolAndSemanticModels(t *testing.T) {
 	favorite := runIssueJSON(t, "equipment", "favorite", "--id", "EQ-1", "--yes")
 	if favorite["submitted"] != true || favorite["confirmed"] != true || favorite["favorite"] != true || !strings.Contains(favoritePlain, "YQBH:'EQ-1'") {
 		t.Fatalf("equipment favorite was not confirmed: %#v plain=%s", favorite, favoritePlain)
+	}
+	profile := runIssueJSON(t, "equipment", "profile")
+	if profile["profile"].(map[string]any)["account"] != "student" || !strings.Contains(profilePlain, "{}") {
+		t.Fatalf("equipment profile was not mapped: %#v plain=%s", profile, profilePlain)
+	}
+	reservations := runIssueJSON(t, "equipment", "reservations", "--status", "pending", "--page", "2", "--page-size", "12")
+	if reservations["status"] != "pending" || reservations["total"] != float64(1) || reservations["data"].([]any)[0].(map[string]any)["reservation_id"] != "RES-1" || !strings.Contains(reservationsPlain, `"crzt":"0"`) {
+		t.Fatalf("equipment reservations were not mapped: %#v plain=%s", reservations, reservationsPlain)
+	}
+	favorites := runIssueJSON(t, "equipment", "favorites", "--page", "2", "--page-size", "12")
+	if favorites["total"] != float64(1) || favorites["data"].([]any)[0].(map[string]any)["id"] != "EQ-1" || !strings.Contains(favoritesPlain, "PageIndex:'2'") {
+		t.Fatalf("equipment favorites were not mapped: %#v plain=%s", favorites, favoritesPlain)
+	}
+	cancel := runIssueJSON(t, "equipment", "cancel", "--id", "RES-1", "--yes")
+	if cancel["submitted"] != true || cancel["confirmed"] != true || !strings.Contains(cancelPlain, "yyid:'RES-1'") {
+		t.Fatalf("equipment cancellation was not confirmed: %#v plain=%s", cancel, cancelPlain)
 	}
 	for _, action := range []string{"GetUIToken", "GetApparatusList_Nei", "GetIndexDevBm", "GetDevListCols", "GetApparatusOne", "GetDeviceCalendar", "AddDevsCollect"} {
 		if !containsString(calls, action) {

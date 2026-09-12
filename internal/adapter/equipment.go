@@ -142,6 +142,14 @@ func (a NativeSite) executeEquipment(ctx context.Context, args []string) (map[st
 		result := equipmentResult("availability", "GetDeviceCalendar returned the instrument availability calendar")
 		result["id"], result["date"], result["data"], result["raw"] = id, date, payload["data"], payload
 		return result, nil
+	case "profile":
+		return a.equipmentProfile(ctx, cookie)
+	case "reservations":
+		return a.equipmentReservations(ctx, args[1:], cookie)
+	case "favorites":
+		return a.equipmentFavorites(ctx, args[1:], cookie)
+	case "cancel":
+		return a.equipmentCancel(ctx, args[1:], cookie)
 	case "favorite":
 		if !businessBool(args[1:], "--yes") {
 			return nil, &siteError{Code: "confirmation_required", Message: "修改仪器收藏状态必须加 --yes"}
@@ -188,8 +196,164 @@ func (a NativeSite) executeEquipment(ctx context.Context, args []string) (map[st
 			}}
 		}
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "equipment 只支持 status、login、logout、list、filters、detail、availability、calendar、favorite、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "equipment 只支持 status、login、logout、list、filters、detail、availability、calendar、profile、reservations、favorites、cancel、favorite、catalog"}
 	}
+}
+
+func (a NativeSite) equipmentProfile(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	token, tokenErr := a.equipmentToken(ctx, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	value, requestErr := a.equipmentCall(ctx, cookie, "GetUserInfo", "PublicInterface", "{}", token)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := equipmentMap(value, "个人资料")
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	flag, message, ok := equipmentReturnStatus(payload["message"])
+	if !ok {
+		return nil, equipmentRejected("GetUserInfo", flag, message)
+	}
+	rows := equipmentMaps(payload["data"])
+	if len(rows) == 0 {
+		return nil, &siteError{Code: "not_found", Message: "实验室系统未返回个人资料"}
+	}
+	result := equipmentResult("profile", "GetUserInfo returned the authenticated user profile")
+	result["profile"], result["data"], result["raw"] = equipmentUserProfile(rows[0]), rows, payload
+	return result, nil
+}
+
+func (a NativeSite) equipmentReservations(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	pageSize, pageSizeErr := businessInt(args, "--page-size", 6)
+	if pageSizeErr != nil {
+		return nil, pageSizeErr
+	}
+	statusValue, statusFound, statusErr := businessValue(args, "--status")
+	if statusErr != nil {
+		return nil, statusErr
+	}
+	status := "all"
+	statusCode := ""
+	if statusFound {
+		statusValue = strings.ToLower(strings.TrimSpace(statusValue))
+		codes := map[string]string{
+			"pending": "0", "approved": "6", "awaiting-sample": "1", "testing": "2",
+			"awaiting-confirmation": "5", "awaiting-payment": "3", "completed": "4",
+		}
+		if statusValue != "" && statusValue != "all" {
+			var known bool
+			statusCode, known = codes[statusValue]
+			if !known {
+				return nil, &siteError{Code: "invalid_argument", Message: "--status 只能是 all、pending、approved、awaiting-sample、testing、awaiting-confirmation、awaiting-payment 或 completed"}
+			}
+			status = statusValue
+		}
+	}
+	inner := `{"data":[{"1":"1"`
+	if statusCode != "" {
+		inner += `,"crzt":"` + statusCode + `"`
+	}
+	inner += `}]}`
+	plaintext := fmt.Sprintf("{StrJson:'%s',page:'%d',limit:'%d',URL:'',lang:'zh-CN'}", equipmentJSString(inner), page, pageSize)
+	token, tokenErr := a.equipmentToken(ctx, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	value, requestErr := a.equipmentCall(ctx, cookie, "GetDevsPreList", "Center", plaintext, token)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := equipmentMap(value, "预约列表")
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	rows := equipmentMaps(payload["data"])
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, equipmentReservation(row))
+	}
+	result := equipmentResult("reservations", "GetDevsPreList returned reservation records")
+	result["data"], result["raw"] = items, payload
+	result["total"], result["page"], result["page_size"], result["status"] = equipmentNumber(payload["count"]), page, pageSize, status
+	return result, nil
+}
+
+func (a NativeSite) equipmentFavorites(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	pageSize, pageSizeErr := businessInt(args, "--page-size", 20)
+	if pageSizeErr != nil {
+		return nil, pageSizeErr
+	}
+	plaintext := fmt.Sprintf("{PageIndex:'%d',PageSize:'%d',lang:'zh-CN'}", page, pageSize)
+	token, tokenErr := a.equipmentToken(ctx, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	value, requestErr := a.equipmentCall(ctx, cookie, "GetDevsCollect", "Center", plaintext, token)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := equipmentMap(value, "收藏列表")
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	rows := equipmentMaps(payload["rows"])
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, equipmentInstrument(row))
+	}
+	result := equipmentResult("favorites", "GetDevsCollect returned favorite instruments")
+	result["data"], result["raw"] = items, payload
+	result["total"], result["page"], result["page_size"] = equipmentNumber(payload["total"]), page, pageSize
+	return result, nil
+}
+
+func (a NativeSite) equipmentCancel(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "取消仪器预约必须加 --yes"}
+	}
+	id, requiredErr := businessRequired(args, "--id", "equipment cancel 必须提供预约 --id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "equipment cancel 的 --id 不能为空"}
+	}
+	token, tokenErr := a.equipmentToken(ctx, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	plaintext := fmt.Sprintf("{yyid:'%s',URL:''}", equipmentJSString(id))
+	value, requestErr := a.equipmentCall(ctx, cookie, "CancelPre", "Center", plaintext, token)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := equipmentMap(value, "取消预约")
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	flag, message, ok := equipmentReturnStatus(payload["message"])
+	if !ok {
+		return nil, &siteError{Code: "mutation_rejected", Message: "取消仪器预约被服务端拒绝: " + firstNonEmpty(message, "远端返回失败"), Details: map[string]any{
+			"submitted": true, "confirmed": false, "evidence": "CancelPre flag=" + flag, "id": id, "raw": payload,
+		}}
+	}
+	return map[string]any{
+		"ok": true, "submitted": true, "confirmed": true, "evidence": "CancelPre ReturnFlag=1",
+		"service": equipmentServiceName, "operation": "cancel", "id": id, "message": message,
+		"api": "CancelPre", "raw": payload,
+	}, nil
 }
 
 func equipmentDate(args []string) (string, *siteError) {
@@ -208,15 +372,18 @@ func equipmentDate(args []string) (string, *siteError) {
 }
 
 func equipmentCalendarSucceeded(value any) bool {
-	items, ok := value.([]any)
-	if !ok || len(items) == 0 {
-		return false
+	_, _, ok := equipmentReturnStatus(value)
+	return ok
+}
+
+func equipmentReturnStatus(value any) (flag, message string, ok bool) {
+	items := equipmentMaps(value)
+	if len(items) == 0 {
+		return "", "", false
 	}
-	message, ok := items[0].(map[string]any)
-	if !ok {
-		return false
-	}
-	return equipmentText(message["ReturnFlag"]) == "1"
+	flag = equipmentText(items[0]["ReturnFlag"])
+	message = equipmentText(items[0]["ReturnMsg"])
+	return flag, message, flag == "1"
 }
 
 func equipmentListPayload(args []string, page, pageSize int) (string, map[string]any, *siteError) {
@@ -409,6 +576,12 @@ func equipmentMaps(value any) []map[string]any {
 		if typed, ok := value.([]map[string]any); ok {
 			return typed
 		}
+		if text, ok := value.(string); ok {
+			var decoded any
+			if json.Unmarshal([]byte(text), &decoded) == nil {
+				return equipmentMaps(decoded)
+			}
+		}
 		return nil
 	}
 	result := make([]map[string]any, 0, len(items))
@@ -459,6 +632,44 @@ func equipmentInstrument(record map[string]any) map[string]any {
 		"open":          firstEquipmentText(record, "OpenState", "openstate"),
 		"service_modes": modes,
 		"raw":           record,
+	}
+}
+
+func equipmentUserProfile(record map[string]any) map[string]any {
+	return map[string]any{
+		"id":            firstEquipmentText(record, "ID", "GUID"),
+		"account":       firstEquipmentText(record, "ZH"),
+		"name":          firstEquipmentText(record, "XM"),
+		"type":          firstEquipmentText(record, "LX"),
+		"role":          firstEquipmentText(record, "YHWP"),
+		"department_id": firstEquipmentText(record, "BMID"),
+		"department":    firstEquipmentText(record, "BMMC"),
+		"phone":         firstEquipmentText(record, "LXDH"),
+		"email":         firstEquipmentText(record, "LXYX"),
+		"card_number":   firstEquipmentText(record, "KH1", "KH2"),
+		"credit":        equipmentNumber(record["XYJF"]),
+		"group_count":   equipmentNumber(record["GROUPNUM"]),
+		"balance":       equipmentNumber(record["YHYE"]),
+		"raw":           record,
+	}
+}
+
+func equipmentReservation(record map[string]any) map[string]any {
+	return map[string]any{
+		"reservation_id":   firstEquipmentText(record, "YYBH", "ID"),
+		"status":           firstEquipmentText(record, "YYDZT"),
+		"state":            firstEquipmentText(record, "STATE"),
+		"instrument_id":    firstEquipmentText(record, "YQBH"),
+		"instrument_name":  firstEquipmentText(record, "YQMC"),
+		"reservation_type": firstEquipmentText(record, "YYLX"),
+		"start_at":         firstEquipmentText(record, "YYKSSJ"),
+		"end_at":           firstEquipmentText(record, "YYJSSJ"),
+		"requester":        firstEquipmentText(record, "YYRXM"),
+		"manager":          firstEquipmentText(record, "GLYMC"),
+		"manager_phone":    firstEquipmentText(record, "GLYDH"),
+		"amount":           equipmentNumber(record["YYMONEY"]),
+		"actual_amount":    equipmentNumber(record["HDJG"]),
+		"raw":              record,
 	}
 }
 
