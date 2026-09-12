@@ -1334,9 +1334,9 @@ func (a NativeSite) journalSearch(ctx context.Context, args []string, prefix, se
 	if requestErr != nil {
 		return nil, requestErr
 	}
-	payload, parseErr := businessJSONMap(result)
-	if parseErr != nil {
-		return nil, parseErr
+	payload, jsonErr := businessJSONMap(result)
+	if jsonErr != nil {
+		return nil, jsonErr
 	}
 	rows, _ := payload["rows"].([]any)
 	articles := make([]map[string]any, 0, len(rows))
@@ -1600,9 +1600,9 @@ func (a NativeSite) studentRecordTrace(ctx context.Context, args []string) (map[
 	if strings.TrimSpace(studentID) == "" && strings.TrimSpace(idCard) == "" {
 		return nil, &siteError{Code: "invalid_argument", Message: "trace 至少需要 --student-id 或 --id-card"}
 	}
-	target, parseErr := url.Parse("https://arctrace.csust.edu.cn" + studentRecordTracePath)
-	if parseErr != nil {
-		return nil, &siteError{Code: "protocol_error", Message: "学生档案去向查询地址无效: " + parseErr.Error()}
+	target, targetErr := url.Parse("https://arctrace.csust.edu.cn" + studentRecordTracePath)
+	if targetErr != nil {
+		return nil, &siteError{Code: "protocol_error", Message: "学生档案去向查询地址无效: " + targetErr.Error()}
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
 	if valueErr != nil {
