@@ -83,7 +83,7 @@ func nativeUsage(args []string) []byte {
   student-record              学籍档案去向查询、预约和材料上传
   staff-record                教工人事档案预约
   sunshine                    教育阳光服务诉求提交/查询与短信验证
-  equipment                   实验室仪器列表、筛选和详情
+  equipment                   实验室仪器列表、筛选、详情和收藏
   recruitment                 人才招聘频道、公告、岗位筛选和详情
   mail                        企业邮箱登录、验证码和会话
   professional-learning       专业技术人员继续教育课程、分类、通知和详情

@@ -21,6 +21,9 @@ func (a NativeSite) executeEquipment(ctx context.Context, args []string) (map[st
 	if len(args) == 0 || args[0] == "catalog" {
 		return businessCatalogNames("equipment"), nil
 	}
+	if args[0] == "status" || args[0] == "login" || args[0] == "logout" {
+		return a.executeSSOServiceCommand(ctx, args, equipmentServiceName, "实验室综合管理系统")
+	}
 	cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
 	if valueErr != nil {
 		return nil, valueErr
@@ -106,8 +109,53 @@ func (a NativeSite) executeEquipment(ctx context.Context, args []string) (map[st
 		result := equipmentResult("detail", "GetApparatusOne returned the instrument record")
 		result["data"], result["instrument"], result["raw"] = value, equipmentInstrument(rows[0]), value
 		return result, nil
+	case "favorite":
+		if !businessBool(args[1:], "--yes") {
+			return nil, &siteError{Code: "confirmation_required", Message: "修改仪器收藏状态必须加 --yes"}
+		}
+		id, requiredErr := businessRequired(args[1:], "--id", "equipment favorite 必须提供 --id")
+		if requiredErr != nil {
+			return nil, requiredErr
+		}
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "equipment favorite 的 --id 不能为空"}
+		}
+		token, tokenErr := a.equipmentToken(ctx, cookie)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		plaintext := fmt.Sprintf("{YQBH:'%s',kzJson:'{\"lang\":\"zh-CN\"}'}", equipmentJSString(id))
+		value, requestErr := a.equipmentCall(ctx, cookie, "AddDevsCollect", "YQKF", plaintext, token)
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		payload, payloadErr := equipmentMap(value, "收藏")
+		if payloadErr != nil {
+			return nil, payloadErr
+		}
+		flag := equipmentText(payload["flag"])
+		message := equipmentText(payload["msg"])
+		switch flag {
+		case "0":
+			favorite := !strings.Contains(message, "取消")
+			return map[string]any{
+				"ok": true, "submitted": true, "confirmed": true,
+				"evidence": "AddDevsCollect flag=0", "service": equipmentServiceName,
+				"operation": "favorite", "id": id, "favorite": favorite,
+				"message": message, "api": "AddDevsCollect", "raw": payload,
+			}, nil
+		case "2":
+			return nil, &siteError{Code: "login_required", Message: "仪器收藏需要先登录", Details: map[string]any{
+				"submitted": false, "confirmed": false, "evidence": "AddDevsCollect flag=2", "id": id,
+			}}
+		default:
+			return nil, &siteError{Code: "mutation_rejected", Message: "仪器收藏被服务端拒绝: " + firstNonEmpty(message, "远端返回失败"), Details: map[string]any{
+				"submitted": true, "confirmed": false, "evidence": "AddDevsCollect flag=" + flag, "id": id, "raw": payload,
+			}}
+		}
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "equipment 只支持 list、filters、detail、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "equipment 只支持 status、login、logout、list、filters、detail、favorite、catalog"}
 	}
 }
 

@@ -152,7 +152,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
-| `equipment` | 实验室仪器列表、筛选字典、列定义和详情 |
+| `equipment` | 实验室仪器列表、筛选字典、列定义、详情和收藏 |
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
@@ -275,6 +275,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust equipment filters --json
 ./csust equipment list --keyword 压力 --department-id 118 --page-size 20 --json
 ./csust equipment detail --id 20180390SB --json
+./csust equipment favorite --id 20180390SB --yes --json
 # 人才招聘：频道、公告、单位筛选、岗位和岗位详情
 ./csust recruitment home --json
 ./csust recruitment notices --channel faculty --page 1 --json
