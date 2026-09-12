@@ -52,6 +52,7 @@ var businessServices = []businessService{
 	{"graduate-notice", "研究生录取通知书", "graduate-notice", "招生", "high", "Nuxt bundle exports /api/print/admissionnotice/query/idcard and /generate/pdf; live endpoint returned JSON"},
 	{"undergraduate-admissions", "本科招生计划、分数和录取进程", "undergraduate-admissions", "招生", "high", "live zslq APIs expose plan, historical score, admission progress and candidate lookup endpoints"},
 	{"union", "智慧工会", "union", "工会", "high", "live homepage exposes proposal, membership, activity, survey, quiz and benefits modules; role login API is observable"},
+	{"service-hall", "融合服务大厅", "service-hall", "校园服务", "high", "authenticated mservice portal exposes the current service catalogue through POST /handleHall/getApp"},
 	{"journal-transport", "交通科学与工程期刊", "journal-transport", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
 	{"journal-highways", "公路与汽运期刊", "journal-highways", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
 	{"journal-highway", "中外公路期刊", "journal-highway", "期刊", "high", "live zwgl /zwgl/ajax/search returned article metadata and public abstract/HTML/PDF links"},
@@ -101,7 +102,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -134,6 +135,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return businessCatalog(), nil
 	case "ehall":
 		return a.executeEhall(ctx, args[1:])
+	case "service-hall", "mservice":
+		return a.executeServiceHall(ctx, args[1:])
 	case "admission-notice", "admission":
 		return a.executeAdmissionNotice(ctx, args[1:])
 	case "undergraduate-admissions", "undergrad-admissions":
@@ -229,6 +232,8 @@ func validateBusinessArgs(args []string) *siteError {
 		service = "student-record"
 	case "party-exam":
 		service = "party-school-exam"
+	case "mservice":
+		service = "service-hall"
 	}
 	operation := "catalog"
 	if len(args) > 1 && !strings.HasPrefix(args[1], "--") {
@@ -703,6 +708,18 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		}
 		if operation == "favorite" {
 			add("--service-id", "--folder-id", "--yes")
+		}
+	case "service-hall":
+		common()
+		switch operation {
+		case "catalog":
+		case "services", "list":
+			add("--page", "--page-size", "--keyword", "--category-id", "--label-id", "--department-id", "--serve-type", "--sort", "--favorites")
+		case "login":
+			add("--auth", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			add("--yes")
+		case "status":
 		}
 	case "continuing-education":
 		common()

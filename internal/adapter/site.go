@@ -115,6 +115,7 @@ func removeCookieFile(path string) error {
 var knownSites = map[string]serviceInfo{
 	"official":                 {host: "www.csust.edu.cn", scheme: "https", path: "/"},
 	"ehall":                    {host: "ehall.csust.edu.cn", scheme: "https", path: "/"},
+	"service-hall":             {host: "mservice.csust.edu.cn", scheme: "https", path: "/homePage/index"},
 	"auth":                     {host: "authserver.csust.edu.cn", scheme: "https", path: "/authserver/login"},
 	"academic":                 {host: "xk.csust.edu.cn", scheme: "http", path: "/"},
 	"vpn":                      {host: "vpn.csust.edu.cn", scheme: "https", path: "/enclient/start.html"},
