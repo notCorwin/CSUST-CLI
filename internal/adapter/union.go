@@ -222,8 +222,8 @@ func (a NativeSite) unionOrganization(ctx context.Context, args []string, cookie
 			}
 		}
 	}
-	if links := unionDirectoryItems(document, safeResponseURL(result), ""); len(links) > 0 {
-		data["name"] = links[0]["name"]
+	if name := strings.TrimSpace(pageDisplayText(libraryRemoteNodeWithClass(document, "userbox-text1"))); name != "" {
+		data["name"] = name
 	}
 	return map[string]any{
 		"ok": true, "submitted": false, "confirmed": true,

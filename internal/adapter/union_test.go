@@ -74,7 +74,7 @@ func TestUnionPublicOrganizationDirectoryAndDetail(t *testing.T) {
 		case query.Get("dispatch") == "listByType_" && query.Get("ntype_id") == "0901":
 			_, _ = fmt.Fprint(writer, `<a class="GH-mian-card1" href="/front/news.do?dispatch=shetuanMain&amp;ntype_id=090101"><div class="text1">篮球协会</div></a>`)
 		case query.Get("dispatch") == "shetuanMain" && query.Get("ntype_id") == "090301":
-			_, _ = fmt.Fprint(writer, `<div class="pc-user-box2"><div class="info-text1">所辖部门：</div><div class="info-text2">交通学院</div></div><div class="pc-user-box2"><div class="info-text1">分工会主席：</div><div class="info-text2">叶群山</div></div>`)
+			_, _ = fmt.Fprint(writer, `<div class="userbox-text1">交通学院</div><div class="pc-user-box2"><div class="info-text1">所辖部门：</div><div class="info-text2">交通学院</div></div><div class="pc-user-box2"><div class="info-text1">分工会主席：</div><div class="info-text2">叶群山</div></div>`)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -94,7 +94,7 @@ func TestUnionPublicOrganizationDirectoryAndDetail(t *testing.T) {
 	}
 	detail := runIssueJSON(t, "union", "organization", "--id", "090301")
 	data := detail["data"].(map[string]any)
-	if data["department"] != "交通学院" || data["leader"] != "叶群山" {
+	if data["name"] != "交通学院" || data["department"] != "交通学院" || data["leader"] != "叶群山" {
 		t.Fatalf("union organization detail was not parsed: %#v", detail)
 	}
 }
