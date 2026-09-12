@@ -60,6 +60,7 @@ var businessServices = []businessService{
 	{"journal-science", "长沙理工大学学报（自然科学版）", "journal-science", "期刊", "high", "live cslgdxxbzk /ajax/search returned article metadata and public links"},
 	{"journal-experiment", "实验教学与仪器", "journal-experiment", "期刊", "high", "live syjxyyq /ajax/search and public article links are available"},
 	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines /api/problem, /api/contest, /api/submissions and /api/submission"},
+	{"mooc", "本校网络课程目录", "mooc", "教学", "high", "live courseNetwork page exposes keyword, department, pagination and sort parameters with course rows"},
 	{"library-personal", "图书馆个人中心", "library-personal", "图书馆", "medium", "book.csust.edu.cn redirects ClientWeb personal center into authserver CAS"},
 	{"library-catalog", "图书馆馆藏书目", "library-catalog", "图书馆", "high", "live OPAC exposes server-side catalogue search, book detail and /api/holding availability data"},
 	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
@@ -93,7 +94,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "onlinejudge", "judge", "mooc", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -138,6 +139,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeEmployment(ctx, args[1:])
 	case "onlinejudge", "judge":
 		return a.executeOnlineJudge(ctx, args[1:])
+	case "mooc":
+		return a.executeMooc(ctx, args[1:])
 	case "party-exam":
 		return a.executePartyExam(ctx, args[1:])
 	case "archive":
@@ -315,6 +318,13 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--username")
 		case "submit":
 			add("--problem-id", "--language", "--code", "--contest-id", "--yes")
+		}
+	case "mooc":
+		common()
+		switch operation {
+		case "courses", "search", "list":
+			add("--keyword", "--query", "--department", "--department-id", "--page", "--page-size", "--sort", "--order")
+		case "departments", "department":
 		}
 	case "party-school-exam":
 		common()

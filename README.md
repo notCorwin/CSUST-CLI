@@ -156,6 +156,7 @@ password=密码
 | `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |
 | `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
 | `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
+| `mooc` | 本校网络课程目录、院系筛选和分页查询 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
 | `library` | 图书馆馆藏检索、书目详情和馆藏状态 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
@@ -296,6 +297,9 @@ password=密码
 ./csust library search --query 人工智能 --field title --in-library --json
 ./csust library book --id 91103 --json
 ./csust library holdings --id 91103 --json
+# MOOC：本校课程、院系筛选和排序
+./csust mooc courses --keyword 结构 --department 土木与环境工程学院 --sort views --json
+./csust mooc departments --json
 # 校园地图：校区、公共点分类/详情、地点搜索和全景资源
 ./csust campus-map zones --json
 ./csust campus-map types --campus 云塘 --json
