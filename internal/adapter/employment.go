@@ -10,6 +10,7 @@ import (
 )
 
 var employmentRealIPPattern = regexp.MustCompile(`(?m)\bvar\s+real_ip\s*=\s*["']([^"']+)["']`)
+var employmentEmailPattern = regexp.MustCompile(`^[a-zA-Z0-9]+([-_.][A-Za-z\d]+)*@([a-zA-Z0-9]+[-.])+[A-Za-z\d]{2,5}$`)
 
 func employmentLoginPage(body string) bool {
 	return strings.Contains(body, `id="user_name"`) && strings.Contains(body, `id="password"`)
@@ -158,7 +159,11 @@ func (a NativeSite) employmentLogin(ctx context.Context, args []string, cookie s
 	}
 	if data, ok := loginPayload["data"].(map[string]any); ok {
 		if _, requiresEmail := data["student_login_email"]; requiresEmail {
-			return nil, &siteError{Code: "authentication_required", Message: "就业平台要求邮箱二次验证，当前 CLI 未实现该交互", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "login-submit-email-verification"}}
+			details := map[string]any{"submitted": true, "confirmed": false, "evidence": "login-submit-email-verification", "next_operations": []string{"send-email-code", "verify-email"}}
+			if email := strings.TrimSpace(fmt.Sprint(data["student_login_email"])); email != "" && email != "<nil>" {
+				details["email_hint"] = employmentEmailHint(email)
+			}
+			return nil, &siteError{Code: "email_verification_required", Message: "就业平台要求邮箱二次验证，请先发送邮箱验证码，再执行 verify-email", Details: details}
 		}
 	}
 	evidence, probeErr := a.confirmBusinessLogin(ctx, "employment", "/student", cookie, employmentLoginPage)
@@ -166,4 +171,88 @@ func (a NativeSite) employmentLogin(ctx context.Context, args []string, cookie s
 		return nil, probeErr
 	}
 	return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "get_encode_token-login-submit-and-" + evidence, "service": "employment", "operation": "login", "username": account}, nil
+}
+
+func employmentEmailValue(args []string) (string, *siteError) {
+	email, requiredErr := businessRequired(args, "--email", "必须提供 --email")
+	if requiredErr != nil {
+		return "", requiredErr
+	}
+	email = strings.TrimSpace(email)
+	if !employmentEmailPattern.MatchString(email) {
+		return "", &siteError{Code: "invalid_argument", Message: "--email 格式无效"}
+	}
+	return email, nil
+}
+
+func employmentEmailHint(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at <= 0 || at == len(email)-1 {
+		return "<redacted>"
+	}
+	local := email[:at]
+	if len(local) == 1 {
+		return "*@" + email[at+1:]
+	}
+	if len(local) == 2 {
+		return local[:1] + "*@" + email[at+1:]
+	}
+	return local[:1] + "***" + local[len(local)-1:] + email[at:]
+}
+
+func (a NativeSite) employmentSendEmailCode(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "发送就业平台邮箱验证码需要 --yes"}
+	}
+	email, emailErr := employmentEmailValue(args)
+	if emailErr != nil {
+		return nil, emailErr
+	}
+	viCode, viCodeErr := a.employmentViCode(ctx, cookie)
+	if viCodeErr != nil {
+		return nil, viCodeErr
+	}
+	encrypted, encryptErr := employmentEncrypt(email, viCode)
+	if encryptErr != nil {
+		return nil, encryptErr
+	}
+	result, requestErr := businessRequest(ctx, "employment", "POST", "/login/send_mail_code", nil, []pair{{"mail", encrypted}}, nil, businessRequestOptions{cookieFile: cookie, allowBusinessFailure: true}, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if fmt.Sprint(payload["code"]) != "1" {
+		return nil, &siteError{Code: "business_rejected", Message: firstNonEmpty(fmt.Sprint(payload["msg"]), "邮箱验证码发送失败"), Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "send-mail-code-response"}}
+	}
+	return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "send-mail-code-response", "service": "employment", "operation": "send-email-code", "email_hint": employmentEmailHint(email)}, nil
+}
+
+func (a NativeSite) employmentVerifyEmail(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	email, emailErr := employmentEmailValue(args)
+	if emailErr != nil {
+		return nil, emailErr
+	}
+	emailCode, codeErr := businessRequired(args, "--email-code", "verify-email 必须提供 --email-code")
+	if codeErr != nil {
+		return nil, codeErr
+	}
+	result, requestErr := businessRequest(ctx, "employment", "POST", "/login/check_mail_login", nil, []pair{{"mail", email}, {"mail_code", strings.TrimSpace(emailCode)}}, nil, businessRequestOptions{cookieFile: cookie, allowBusinessFailure: true}, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if fmt.Sprint(payload["code"]) != "1" {
+		return nil, &siteError{Code: "authentication_failed", Message: firstNonEmpty(fmt.Sprint(payload["msg"]), "就业平台邮箱验证失败"), Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "check-mail-login-response"}}
+	}
+	evidence, probeErr := a.confirmBusinessLogin(ctx, "employment", "/student", cookie, employmentLoginPage)
+	if probeErr != nil {
+		return nil, probeErr
+	}
+	return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "check-mail-login-and-" + evidence, "service": "employment", "operation": "verify-email", "email_hint": employmentEmailHint(email), "logged_in": true}, nil
 }

@@ -317,6 +317,12 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "login":
 			common()
 			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-token")
+		case "send-email-code":
+			common()
+			add("--email", "--yes")
+		case "verify-email":
+			common()
+			add("--email", "--email-code")
 		case "home":
 			common()
 		case "list":
@@ -1399,7 +1405,7 @@ func safeResponseURL(result map[string]any) string {
 func (a NativeSite) executeEmployment(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		result := businessCatalogFilter("employment")
-		result["operations"] = []string{"status", "home", "list", "detail", "login"}
+		result["operations"] = []string{"status", "home", "list", "detail", "login", "send-email-code", "verify-email"}
 		return result, nil
 	}
 	switch args[0] {
@@ -1415,6 +1421,18 @@ func (a NativeSite) executeEmployment(ctx context.Context, args []string) (map[s
 			return nil, err
 		}
 		return a.employmentLogin(ctx, args[1:], cookie)
+	case "send-email-code":
+		cookie, _, err := businessValue(args[1:], "--cookie-file")
+		if err != nil {
+			return nil, err
+		}
+		return a.employmentSendEmailCode(ctx, args[1:], cookie)
+	case "verify-email":
+		cookie, _, err := businessValue(args[1:], "--cookie-file")
+		if err != nil {
+			return nil, err
+		}
+		return a.employmentVerifyEmail(ctx, args[1:], cookie)
 	case "home", "list":
 		cookie, _, err := businessValue(args[1:], "--cookie-file")
 		if err != nil {
@@ -1468,7 +1486,7 @@ func (a NativeSite) executeEmployment(ctx context.Context, args []string) (map[s
 		result["service"], result["operation"], result["kind"], result["id"] = "employment", "detail", kind, id
 		return result, nil
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "employment 只支持 status、home、list、detail、login、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "employment 只支持 status、home、list、detail、login、send-email-code、verify-email、catalog"}
 	}
 }
 
