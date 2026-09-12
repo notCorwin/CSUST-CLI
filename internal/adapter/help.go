@@ -75,6 +75,7 @@ func nativeUsage(args []string) []byte {
   institutional-learning      事业单位工作人员继续教育课程、分类、通知和详情
   transport-mobile            交通运输工程综合信息登录、身份、待办、字典、答辩、财务及学院业务查询
   electronic-documents         电子成绩单与在校证明登录、文件类型、申请记录和申请/下载
+  campus-network              校园网自助服务资料、账单、详单、缴费、套餐和设备
   research                    科研管理系统角色登录、验证码和会话
   transport-info              交通学院综合信息服务登录、验证码和会话
   transport-lab               实验室预约用户/教职工登录、注册、找回密码和会话

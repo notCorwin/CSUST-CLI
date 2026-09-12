@@ -118,6 +118,7 @@ var knownSites = map[string]serviceInfo{
 	"app":                      {host: "app.csust.edu.cn:8087", scheme: "http", path: "/magus/appapi/downloadpage"},
 	"library-remote":           {host: "tsgvpn2.csust.edu.cn", scheme: "https", path: "/"},
 	"campus-map":               {host: "gis.csust.edu.cn", scheme: "https", path: "/"},
+	"campus-network":           {host: "bw.csust.edu.cn", scheme: "http", path: "/Self/idstarlogin.action"},
 	"equipment":                {host: "cslgdygx.csust.edu.cn", scheme: "https", path: "/"},
 	"highway":                  {host: "highwayexperiment.csust.edu.cn", scheme: "https", path: "/"},
 	"training":                 {host: "gcxljxgl.csust.edu.cn", scheme: "http", path: "/"},
@@ -958,6 +959,14 @@ func jsonBusinessState(value any) (bool, bool) {
 					}
 				}
 			}
+			if message, ok := typed["outmessage"]; ok {
+				switch value := message.(type) {
+				case bool:
+					states = append(states, value)
+				case string:
+					states = append(states, strings.EqualFold(strings.TrimSpace(value), "true"))
+				}
+			}
 			if state, ok := typed["state"].(string); ok {
 				switch strings.ToLower(strings.TrimSpace(state)) {
 				case "success", "ok", "1":
@@ -1193,7 +1202,42 @@ func looksLikeLogin(response *http.Response, content []byte) bool {
 		return false
 	}
 	text := strings.ToLower(string(content))
-	return strings.Contains(text, "<form") && (strings.Contains(text, "login") || strings.Contains(text, "登录"))
+	if !strings.Contains(text, "<form") {
+		return false
+	}
+	hasPassword := strings.Contains(text, `type="password"`) || strings.Contains(text, `type='password'`)
+	for _, marker := range []string{
+		`id="loginform"`,
+		`id='loginform'`,
+		`id="pwdfromid"`,
+		`id='pwdfromid'`,
+		`action="/login`,
+		`action='/login`,
+		`action="/logon`,
+		`action='/logon`,
+	} {
+		if strings.Contains(text, marker) {
+			return hasPassword
+		}
+	}
+	if !hasPassword {
+		return false
+	}
+	for _, marker := range []string{
+		`name="username"`,
+		`name='username'`,
+		`name="useraccount"`,
+		`name='useraccount'`,
+		`name="account"`,
+		`name='account'`,
+		"请输入账号",
+		"用户名或密码",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func safeSiteRedirect(previous, next *url.URL) bool {
