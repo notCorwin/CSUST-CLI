@@ -58,6 +58,16 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 			} else {
 				_, _ = fmt.Fprint(writer, `{"code":200,"data":{"total":1,"records":[{"_id":"f-1","code":"F-1","name":"科研项目","ownname":"交通老师","ficode":"R-1","stage":"开题","status":"报账中","stat":{"total":1000,"fee":200,"left":800,"allow":900,"allowleft":700,"feerate":20,"allowrate":22.2}}]},"success":true}`)
 			}
+		case "/api/table/fitem":
+			if request.Method != http.MethodPut || request.Header.Get("token") != token {
+				t.Errorf("finance-item request was not authenticated PUT: method=%s token=%q", request.Method, request.Header.Get("token"))
+			}
+			var body map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Errorf("finance-item body is not JSON: %v", err)
+			}
+			tableBodies = append(tableBodies, body)
+			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"total":1,"records":[{"_id":"fi-1","project":{"_id":"f-1","name":"科研项目","fitype":"纵向","status":"执行中"},"money":120.5,"type":"差旅","dir":"支出","remark":"现场调研","creater":{"name":"交通老师","code":"T001"},"dateCreate":"2026-09-12","file":[{"name":"票据","size":12}]}]},"success":true}`)
 		case "/api/defensesop/d-1":
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"_id":"d-1","name":"博士答辩组","expert":[{"name":"专家一","type":"主席"}],"student":[{"code":"S-1","name":"学生一","title":"论文"}],"stat":{"expert":1,"student":1}},"success":true}`)
 		case "/api/verifys":
@@ -120,6 +130,15 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 	if financeDetail["finance"].(map[string]any)["owner"] != "交通老师" {
 		t.Fatalf("finance detail model failed: %#v", financeDetail)
 	}
+	financeItems := runIssueJSON(t, "transport-mobile", "finance-items", "--keyword", "现场")
+	financeItem := financeItems["data"].([]any)[0].(map[string]any)
+	if financeItem["id"] != "fi-1" || financeItem["project_name"] != "科研项目" || financeItem["amount"] != 120.5 || financeItem["direction"] != "支出" {
+		t.Fatalf("finance-item model failed: %#v", financeItems)
+	}
+	financeItemDetail := runIssueJSON(t, "transport-mobile", "finance-item", "--id", "fi-1")
+	if financeItemDetail["finance_item"].(map[string]any)["remark"] != "现场调研" {
+		t.Fatalf("finance-item detail model failed: %#v", financeItemDetail)
+	}
 	changedPassword := runIssueJSON(t, "transport-mobile", "change-password", "--current-password", "old-secret", "--new-password", "new-secret", "--password-confirm", "new-secret", "--yes")
 	if changedPassword["operation"] != "change-password" || changedPassword["confirmed"] != true || strings.Contains(string(mustMarshalIssue(changedPassword)), "secret") {
 		t.Fatalf("change-password result or redaction failed: %#v", changedPassword)
@@ -129,12 +148,20 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 	if code["phone"] != "13800138000" || code["confirmed"] != true {
 		t.Fatalf("verification-code result failed: %#v", code)
 	}
-	if len(tableBodies) != 3 {
+	if len(tableBodies) != 5 {
 		t.Fatalf("unexpected table calls: %d", len(tableBodies))
 	}
 	defenseBody := tableBodies[0]
 	if defenseBody["paginator"].(map[string]any)["page"] != float64(2) || defenseBody["fuzzyFilter"].([]any)[0].(map[string]any)["name"].(map[string]any)["$regex"] != "博士" {
 		t.Fatalf("defense filters were not mapped: %#v", defenseBody)
+	}
+	financeItemBody := tableBodies[3]
+	if financeItemBody["fuzzyFilter"].([]any)[1].(map[string]any)["remark"].(map[string]any)["$regex"] != "现场" {
+		t.Fatalf("finance-item filters were not mapped: %#v", financeItemBody)
+	}
+	financeItemDetailBody := tableBodies[4]
+	if financeItemDetailBody["filter"].(map[string]any)["_id"] != "fi-1" {
+		t.Fatalf("finance-item detail filter was not mapped: %#v", financeItemDetailBody)
 	}
 
 	logout := runIssueJSON(t, "transport-mobile", "logout")

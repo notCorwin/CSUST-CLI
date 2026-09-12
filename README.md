@@ -148,7 +148,7 @@ password=密码
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
-| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务及学院业务查询 |
+| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务、财务明细、改密及学院业务查询 |
 | `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
 | `campus-network` | 校园网自助服务资料、账单、详单、缴费、套餐和设备 |
 | `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
@@ -286,7 +286,7 @@ password=密码
 ./csust professional-learning notices --json
 ./csust professional-learning notice --id NOTICE_ID --json
 ./csust institutional-learning courses --kind public --year 2026 --json
-# 交通运输工程综合信息：登录后保存令牌并验证身份，再查询待办、字典、答辩和财务项目
+# 交通运输工程综合信息：登录后保存令牌并验证身份，再查询待办、字典、答辩、财务项目和财务明细
 ./csust transport-mobile login --username 工号 --password-stdin --json
 ./csust transport-mobile change-password --current-password-stdin --new-password-stdin --password-confirm 新密码 --yes --json
 ./csust transport-mobile profile --json
@@ -294,6 +294,8 @@ password=密码
 ./csust transport-mobile dictionaries --code Finance.Type --json
 ./csust transport-mobile defenses --keyword 博士 --page-size 20 --json
 ./csust transport-mobile finances --keyword 科研 --json
+./csust transport-mobile finance-items --keyword 差旅 --json
+./csust transport-mobile finance-item --id FINANCE_ITEM_ID --json
 ./csust transport-mobile notices --keyword 评审 --json
 ./csust transport-mobile vacations --page-size 20 --json
 # 电子成绩单与在校证明：CAS 登录后查询类型、申请记录，并申请下载或发送到邮箱

@@ -32,6 +32,11 @@ var transportMobileTables = map[string]transportMobileTable{
 		populator: []map[string]any{{"path": "group", "select": "name"}, {"path": "creater", "select": "name code"}},
 		model:     transportMobileFinance,
 	},
+	"finance-items": {
+		table: "fitem", sortColumn: "dateCreate", fuzzy: []string{"money", "remark"},
+		populator: []map[string]any{{"path": "creater", "select": "name code"}, {"path": "project", "select": "name fitype status creater"}, {"path": "file", "select": "name fullname fname size"}},
+		model:     transportMobileFinanceItem,
+	},
 	"notes": {
 		table: "note", sortColumn: "dateModified", fuzzy: []string{"name"},
 		populator: []map[string]any{{"path": "creater participants.user", "select": "name code"}},
@@ -113,8 +118,12 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["finances"], "finances")
 	case "finance":
 		return a.transportMobileFinanceDetail(ctx, args[1:], cookie)
+	case "finance-items":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["finance-items"], "finance-items")
+	case "finance-item":
+		return a.transportMobileFinanceItemDetail(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、finance-items、finance-item、catalog"}
 	}
 }
 
@@ -583,6 +592,44 @@ func (a NativeSite) transportMobileFinanceDetail(ctx context.Context, args []str
 	return result, nil
 }
 
+func (a NativeSite) transportMobileFinanceItemDetail(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	id, requiredErr := businessRequired(args, "--id", "finance-item detail 必须提供 --id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	spec := transportMobileTables["finance-items"]
+	body := map[string]any{
+		"paginator": map[string]any{"page": 1, "pageSize": 1, "needAll": false, "pages": 0},
+		"sorter":    map[string]any{spec.sortColumn: -1},
+		"filter":    map[string]any{"_id": strings.TrimSpace(id)},
+		"selector":  []string{},
+		"populator": spec.populator,
+	}
+	token, _, sessionErr := a.transportMobileSession(args, cookie)
+	if sessionErr != nil {
+		return nil, sessionErr
+	}
+	if token == "" {
+		return nil, &siteError{Code: "login_required", Message: "请先运行 transport-mobile login 或提供 --access-token"}
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/"+spec.table, body, true, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "财务明细详情响应缺少 data 对象"}
+	}
+	rows := transportMobileMaps(data["records"])
+	if len(rows) == 0 {
+		return nil, &siteError{Code: "not_found", Message: "未找到该财务明细", Details: map[string]any{"id": strings.TrimSpace(id)}}
+	}
+	item := spec.model(rows[0])
+	result := transportMobileResult("finance-item", "财务明细通过列表接口精确回读")
+	result["id"], result["data"], result["finance_item"], result["raw"] = strings.TrimSpace(id), item, item, redactSiteJSON(payload)
+	return result, nil
+}
+
 func transportMobileUser(row map[string]any) map[string]any {
 	return map[string]any{
 		"id":            transportMobileText(row, "_id", "ID", "id"),
@@ -641,6 +688,20 @@ func transportMobileFinance(row map[string]any) map[string]any {
 	result["allowed_balance"] = transportMobileValue(row, "stat.allowleft")
 	result["expense_rate"] = transportMobileValue(row, "stat.feerate")
 	result["allowed_rate"] = transportMobileValue(row, "stat.allowrate")
+	return result
+}
+
+func transportMobileFinanceItem(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	result["project_id"] = transportMobileText(row, "project._id", "project.id", "projectId", "project_id")
+	result["project_name"] = transportMobileText(row, "project.name")
+	result["project"] = row["project"]
+	result["amount"] = row["money"]
+	result["direction"] = transportMobileValue(row, "dir", "direction")
+	result["item_type"] = row["type"]
+	result["remark"] = transportMobileText(row, "remark")
+	result["creator_detail"] = transportMobileValue(row, "creater", "creator")
+	result["files"] = row["file"]
 	return result
 }
 
