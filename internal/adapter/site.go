@@ -156,6 +156,7 @@ var knownSites = map[string]serviceInfo{
 	"library-remote":           {host: "tsgvpn2.csust.edu.cn", scheme: "https", path: "/"},
 	"campus-map":               {host: "gis.csust.edu.cn", scheme: "https", path: "/"},
 	"campus-network":           {host: "bw.csust.edu.cn", scheme: "http", path: "/Self/idstarlogin.action"},
+	"campus-card":              {host: "yktfw.csust.edu.cn:8090", scheme: "http", path: "/ias/prelogin"},
 	"student-digital-archive":  {host: "pdp.csust.edu.cn:8900", scheme: "https", path: "/stu/home/"},
 	"equipment":                {host: "cslgdygx.csust.edu.cn", scheme: "https", path: "/"},
 	"highway-experiment":       {host: "highwayexperiment.csust.edu.cn", scheme: "http", path: "/"},

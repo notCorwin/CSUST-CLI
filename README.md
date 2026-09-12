@@ -160,6 +160,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、成果增改与提交/审核/驳回/撤回、财务、财务明细增删改、业绩与通知公告增改、留言新建/详情/回复/删除、请假单新建/修改与审批、改密及学院业务查询 |
 | `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
 | `campus-network` | 校园网自助服务资料、账单、详单、缴费、套餐和设备 |
+| `campus-card` | 校园卡入口状态；卡务 API 尚未取得可验证响应 |
 | `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
 | `finance-query` | 智慧财务收费、奖助、减免、退费、缓交、收入和贷款查询 |
 | `undergraduate-admissions` | 本科招生计划、历年分数、录取进程和考生录取结果查询 |
@@ -183,7 +184,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `teaching` | 网络教学平台课程、课程详情和课程顺序 |
 | `quality` | 教学质量保障系统登录、状态、评价和毕业设计入口 |
 | `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价、服务项收藏和周期提醒 |
-| `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页和关键词/分类/部门筛选 |
+| `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选和网络报修表单结构 |
 | `services` | 已映射业务服务及依据 |
 
 更多业务命令可先查看目录：

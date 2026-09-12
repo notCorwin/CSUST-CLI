@@ -92,6 +92,7 @@ func nativeUsage(args []string) []byte {
   transport-mobile            交通运输工程综合信息登录、身份、待办、字典、答辩、财务、成果、业绩、通知、留言、请假单与审批、改密及学院业务查询
   electronic-documents         电子成绩单与在校证明登录、文件类型、申请记录和申请/下载
   campus-network              校园网自助服务资料、账单、详单、缴费、套餐和设备
+  campus-card                 校园卡入口可用性状态（卡务 API 待网络恢复后确认）
   student-digital-archive     学生数字档案个人资料、学业、借阅、消费、上网和随手记
   finance-query/finance       智慧财务收费、奖助、减免、退费、缓交、收入和贷款查询
   research                    科研管理系统角色登录、验证码和会话
