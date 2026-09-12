@@ -216,3 +216,62 @@ func TestTransportMobileAdditionalSemanticModels(t *testing.T) {
 		t.Fatalf("vacation model failed: %#v", vacation)
 	}
 }
+
+func TestTransportMobileRoomsAndAttendance(t *testing.T) {
+	const token = "rooms-test-token"
+	var buildingBody, attendanceBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.Header.Get("token") != token {
+			t.Errorf("missing rooms token: %q", request.Header.Get("token"))
+		}
+		switch request.URL.Path {
+		case "/api/table/building":
+			if request.Method != http.MethodPut || json.NewDecoder(request.Body).Decode(&buildingBody) != nil {
+				t.Fatalf("rooms query was not an authenticated JSON PUT")
+			}
+			_, _ = fmt.Fprint(writer, `{"code":200,"success":true,"data":{"total":1,"records":[{"_id":"b-1","code":"实验楼","name":"实验楼","floors":[{"_id":"f-1","code":"3","block":"A","rooms":[{"_id":"r-1","code":"301","seats":[{"code":"01","status":"在用"},{"code":"02","status":"可用"}]}]}]}]}}`)
+		case "/api/accessrecordsop":
+			if request.Method != http.MethodPut || json.NewDecoder(request.Body).Decode(&attendanceBody) != nil {
+				t.Fatalf("attendance query was not an authenticated JSON PUT")
+			}
+			_, _ = fmt.Fprint(writer, `{"code":200,"success":true,"data":{"T002":"2026-09-13T09:02:00Z","T001":"2026-09-13T09:01:00Z"}}`)
+		case "/api/zklink":
+			if request.Method != http.MethodGet {
+				t.Fatalf("room sync used %s", request.Method)
+			}
+			_, _ = fmt.Fprint(writer, `{"code":200,"success":true,"data":{"totalCount":2,"inserted":1,"updated":1}}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "transport.cookies.txt"))
+
+	rooms := runIssueJSON(t, "transport-mobile", "rooms", "--access-token", token, "--keyword", "实验", "--page", "2", "--page-size", "5")
+	room := rooms["data"].([]any)[0].(map[string]any)
+	if room["id"] != "b-1" || room["floor_count"] != float64(1) || room["room_count"] != float64(1) || room["seat_count"] != float64(2) {
+		t.Fatalf("room tree model failed: %#v", rooms)
+	}
+	if buildingBody["paginator"].(map[string]any)["page"] != float64(2) || buildingBody["fuzzyFilter"].([]any)[0].(map[string]any)["name"].(map[string]any)["$regex"] != "实验" {
+		t.Fatalf("room filters were not mapped: %#v", buildingBody)
+	}
+
+	attendance := runIssueJSON(t, "transport-mobile", "room-attendance", "--access-token", token, "--date", "2026-09-13")
+	if attendanceBody["date"] != "2026-09-13" {
+		t.Fatalf("attendance date was not mapped: %#v", attendanceBody)
+	}
+	records := attendance["records"].([]any)
+	if len(records) != 2 || records[0].(map[string]any)["employee_code"] != "T001" || records[1].(map[string]any)["employee_code"] != "T002" {
+		t.Fatalf("attendance records were not sorted or mapped: %#v", attendance)
+	}
+
+	if handled, _, _, code, err := (NativeSite{}).Run(t.Context(), []string{"transport-mobile", "room-sync", "--access-token", token}, false); err != nil || !handled || code != 2 {
+		t.Fatalf("room sync without confirmation was not rejected: handled=%v code=%d err=%v", handled, code, err)
+	}
+	syncResult := runIssueJSON(t, "transport-mobile", "room-sync", "--access-token", token, "--yes")
+	if syncResult["submitted"] != true || syncResult["confirmed"] != true || syncResult["data"].(map[string]any)["inserted"] != float64(1) {
+		t.Fatalf("room sync was not confirmed: %#v", syncResult)
+	}
+}

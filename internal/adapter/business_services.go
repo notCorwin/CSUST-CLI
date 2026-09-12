@@ -83,7 +83,7 @@ var businessServices = []businessService{
 	{"recruitment", "人才招聘", "recruitment", "招聘", "high", "live rczpw public SM2 ajaxService exposes channels, notices, organizations, positions and position detail"},
 	{"professional-learning", "专业技术人员继续教育", "jxjy", "继续教育", "high", "live jxjy public course, category, notice and course-detail APIs"},
 	{"institutional-learning", "事业单位工作人员继续教育", "zyjx", "继续教育", "high", "live zyjx public course, category, notice and course-detail APIs"},
-	{"transport-mobile", "交通运输工程综合信息", "transport-mobile", "学院管理", "high", "live WiJat SPA defines token authentication, user profile, pending count, password change, protected defense and finance project/item query plus finance-item create/update/delete, achievement create/update/status, KPI and notice create/update, note, access, workflow and vacation tables"},
+	{"transport-mobile", "交通运输工程综合信息", "transport-mobile", "学院管理", "high", "live WiJat SPA defines token authentication, user profile, pending count, password change, protected defense and finance project/item query plus finance-item create/update/delete, achievement create/update/status, KPI and notice create/update, note, access, workflow, vacation and workroom attendance/tree APIs"},
 	{"electronic-documents", "电子成绩单与在校证明", "electronic-documents", "学生服务", "high", "eHall service link reaches kxpz CAS; live SPA exposes file types, application records, previews, PDF download and email delivery APIs"},
 	{"campus-network", "校园网自助服务", "campus-network", "校园网络", "high", "eHall 上网信息管理入口的服务器端表单和 JSON 端点提供资料、账单、详单、缴费、在线设备、套餐及设备绑定业务"},
 	{"campus-card", "校园卡", "campus-card", "校园服务", "medium", "服务大厅当前目录将校园卡映射到 yktfw.csust.edu.cn:8090/ias/prelogin；当前网络探测未取得可验证的卡务 API"},
@@ -549,6 +549,12 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--keyword", "--page", "--page-size")
 		case "notes", "access-records", "achievements", "kpis", "notices", "workflows", "vacations":
 			add("--keyword", "--page", "--page-size")
+		case "rooms", "buildings":
+			add("--keyword", "--page", "--page-size")
+		case "room-attendance":
+			add("--date")
+		case "room-sync":
+			add("--yes")
 		case "achievement":
 			add("--id")
 		case "achievement-create":

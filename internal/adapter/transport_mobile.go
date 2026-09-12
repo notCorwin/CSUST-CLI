@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -75,12 +76,17 @@ var transportMobileTables = map[string]transportMobileTable{
 		populator: []map[string]any{{"path": "creater department", "select": "name"}},
 		model:     transportMobileVacation,
 	},
+	"rooms": {
+		table: "building", sortColumn: "name", fuzzy: []string{"name", "code"},
+		populator: []map[string]any{{"path": "floors.rooms.seats.users.user", "select": "name code"}},
+		model:     transportMobileBuilding,
+	},
 }
 
 func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		result := businessCatalogNames(transportMobileService)
-		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "achievement", "achievement-create", "achievement-update", "achievement-status", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update"}
+		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "achievement", "achievement-create", "achievement-update", "achievement-status", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update", "rooms", "room-attendance", "room-sync"}
 		return result, nil
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
@@ -142,6 +148,12 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["workflows"], "workflows")
 	case "vacations":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["vacations"], "vacations")
+	case "rooms", "buildings":
+		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["rooms"], "rooms")
+	case "room-attendance":
+		return a.transportMobileRoomAttendance(ctx, args[1:], cookie)
+	case "room-sync":
+		return a.transportMobileRoomSync(ctx, args[1:], cookie)
 	case "vacation-create":
 		return a.transportMobileVacationSave(ctx, args[1:], cookie, "create")
 	case "vacation-update":
@@ -165,7 +177,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance-item-delete":
 		return a.transportMobileFinanceItemDelete(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、achievement、achievement-create、achievement-update、achievement-status、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、achievement、achievement-create、achievement-update、achievement-status、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、rooms、room-attendance、room-sync、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
 	}
 }
 
@@ -505,6 +517,67 @@ func (a NativeSite) transportMobileDictionaries(ctx context.Context, args []stri
 	}
 	result := transportMobileResult("dictionaries", "公开系统字典接口返回 success=true")
 	result["data"], result["filters"], result["raw"] = items, map[string]any{"code": strings.TrimSpace(code)}, redactSiteJSON(payload)
+	return result, nil
+}
+
+func transportMobileRoomDate(args []string) (string, *siteError) {
+	value, found, valueErr := businessValue(args, "--date")
+	if valueErr != nil {
+		return "", valueErr
+	}
+	if !found || strings.TrimSpace(value) == "" {
+		return time.Now().Format("2006-01-02"), nil
+	}
+	value = strings.TrimSpace(value)
+	if _, parseErr := time.Parse("2006-01-02", value); parseErr != nil {
+		return "", &siteError{Code: "invalid_argument", Message: "--date 必须是 YYYY-MM-DD"}
+	}
+	return value, nil
+}
+
+func (a NativeSite) transportMobileRoomAttendance(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	date, dateErr := transportMobileRoomDate(args)
+	if dateErr != nil {
+		return nil, dateErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/accessrecordsop", map[string]any{"date": date}, true, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "工位考勤响应缺少 data 对象"}
+	}
+	records := make([]map[string]any, 0, len(data))
+	for code, eventTime := range data {
+		records = append(records, map[string]any{"employee_code": code, "event_time": eventTime})
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i]["employee_code"].(string) < records[j]["employee_code"].(string)
+	})
+	result := transportMobileResult("room-attendance", "工位考勤接口返回 success=true")
+	result["date"], result["records"], result["data"], result["raw"] = date, records, data, redactSiteJSON(payload)
+	return result, nil
+}
+
+func (a NativeSite) transportMobileRoomSync(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "同步门禁数据会更新远端考勤记录，请加 --yes"}
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "GET", "/api/zklink", nil, false, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result := transportMobileResult("room-sync", "门禁同步接口返回 success=true")
+	result["submitted"], result["data"], result["raw"] = true, payload["data"], redactSiteJSON(payload)
 	return result, nil
 }
 
@@ -2267,6 +2340,22 @@ func transportMobileAccessRecord(row map[string]any) map[string]any {
 	result["event_description"] = transportMobileText(row, "eventDescription")
 	result["event_time"] = transportMobileValue(row, "eventTime")
 	result["verify_mode"] = transportMobileText(row, "verifyModeName")
+	return result
+}
+
+func transportMobileBuilding(row map[string]any) map[string]any {
+	result := transportMobileRecord(row)
+	floors := transportMobileMaps(row["floors"])
+	roomCount, seatCount := 0, 0
+	for _, floor := range floors {
+		rooms := transportMobileMaps(floor["rooms"])
+		roomCount += len(rooms)
+		for _, room := range rooms {
+			seatCount += len(transportMobileMaps(room["seats"]))
+		}
+	}
+	result["floors"] = row["floors"]
+	result["floor_count"], result["room_count"], result["seat_count"] = len(floors), roomCount, seatCount
 	return result
 }
 
