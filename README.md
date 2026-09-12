@@ -153,7 +153,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
 | `equipment` | 实验室仪器列表、筛选字典、列定义、详情、预约日历、个人资料、我的预约、收藏和取消预约 |
-| `highway-experiment` | 公路工程实验中心公开网站状态；设备预约以公开页面/须知为主 |
+| `highway-experiment` | 公路工程实验中心设备目录、设备详情和预约须知；未发现独立预约 API |
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
@@ -285,6 +285,10 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust equipment favorites --json
 ./csust equipment favorite --id 20180390SB --yes --json
 ./csust equipment cancel --id RESERVATION_ID --yes --json
+# 公路工程实验中心：公开设备目录、详情和预约须知（只读）
+./csust highway-experiment resources --category 土工类 --keyword 三轴 --json
+./csust highway-experiment resource --id 50 --json
+./csust highway-experiment booking-info --json
 # 人才招聘：频道、公告、单位筛选、岗位和岗位详情
 ./csust recruitment home --json
 ./csust recruitment notices --channel faculty --page 1 --json

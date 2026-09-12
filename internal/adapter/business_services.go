@@ -75,7 +75,7 @@ var businessServices = []businessService{
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
 	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
 	{"equipment", "实验室仪器", "equipment", "实验", "high", "live encrypted APIs expose instrument list, filters, detail, availability, user profile, reservations, favorites and cancellation"},
-	{"highway-experiment", "公路工程实验中心网站", "highway-experiment", "实验", "medium", "live public site exposes center information, device booking guidance and equipment pages; no independent structured business API observed"},
+	{"highway-experiment", "公路工程实验中心网站", "highway-experiment", "实验", "medium", "live public site exposes the equipment catalogue /pclass, detail pages /pro and booking guidance; no independent booking API observed"},
 	{"recruitment", "人才招聘", "recruitment", "招聘", "high", "live rczpw public SM2 ajaxService exposes channels, notices, organizations, positions and position detail"},
 	{"professional-learning", "专业技术人员继续教育", "jxjy", "继续教育", "high", "live jxjy public course, category, notice and course-detail APIs"},
 	{"institutional-learning", "事业单位工作人员继续教育", "zyjx", "继续教育", "high", "live zyjx public course, category, notice and course-detail APIs"},
@@ -173,7 +173,7 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 	case "equipment":
 		return a.executeEquipment(ctx, args[1:])
 	case "highway-experiment":
-		return a.executeServiceStatusCommand(ctx, args[1:], "highway-experiment", "公路工程实验中心网站")
+		return a.executeHighwayExperiment(ctx, args[1:])
 	case "recruitment":
 		return a.executeRecruitment(ctx, args[1:])
 	case "professional-learning", "institutional-learning":
@@ -462,6 +462,12 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		}
 	case "highway-experiment":
 		common()
+		switch operation {
+		case "resources", "list":
+			add("--category", "--keyword", "--page")
+		case "resource", "detail":
+			add("--id")
+		}
 	case "recruitment":
 		common()
 		switch operation {

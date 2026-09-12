@@ -84,7 +84,7 @@ func nativeUsage(args []string) []byte {
   staff-record                教工人事档案预约
   sunshine                    教育阳光服务诉求提交/查询与短信验证
   equipment                   实验室仪器、预约日历、个人资料、我的预约和收藏
-  highway-experiment          公路工程实验中心公开网站状态
+  highway-experiment          公路工程实验中心设备目录、详情和预约须知
   recruitment                 人才招聘频道、公告、岗位筛选和详情
   mail                        企业邮箱登录、验证码和会话
   fcmg                        fcmg 基础 API 服务状态（业务 schema 需认证）
