@@ -167,7 +167,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
-| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、成果增改与提交/审核/驳回/撤回、财务、财务明细增删改、业绩与通知公告增改、留言新建/详情/回复/删除、请假单新建/修改与审批、工作室/房间/工位树、按日考勤和门禁同步、改密及学院业务查询 |
+| `transport-mobile` | 交通运输工程综合信息登录、个人信息、权限路由、待办、公开字典、答辩、成果增改与提交/审核/驳回/撤回、财务、财务明细增删改、业绩与通知公告增改、留言新建/详情/回复/删除、请假单新建/修改与审批、工作室/房间/工位树、按日考勤和门禁同步、改密及学院业务查询 |
 | `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
 | `campus-network` | 校园网自助服务资料、账单、详单、缴费、套餐和设备 |
 | `campus-card` | 校园卡入口状态；卡务 API 尚未取得可验证响应 |
@@ -333,6 +333,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust transport-mobile change-password --current-password-stdin --new-password-stdin --password-confirm 新密码 --yes --json
 ./csust transport-mobile profile --json
 ./csust transport-mobile pending --json
+./csust transport-mobile routes --json
 ./csust transport-mobile dictionaries --code Finance.Type --json
 ./csust transport-mobile defenses --keyword 博士 --page-size 20 --json
 ./csust transport-mobile finances --keyword 科研 --json

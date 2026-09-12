@@ -86,7 +86,7 @@ var transportMobileTables = map[string]transportMobileTable{
 func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		result := businessCatalogNames(transportMobileService)
-		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "achievement", "achievement-create", "achievement-update", "achievement-status", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update", "rooms", "room-attendance", "room-sync"}
+		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "routes", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "achievement", "achievement-create", "achievement-update", "achievement-status", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update", "rooms", "room-attendance", "room-sync"}
 		return result, nil
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
@@ -106,6 +106,8 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileProfile(ctx, args[1:], cookie)
 	case "pending":
 		return a.transportMobilePending(ctx, args[1:], cookie)
+	case "routes":
+		return a.transportMobileRoutes(ctx, args[1:], cookie)
 	case "dictionaries", "dict":
 		return a.transportMobileDictionaries(ctx, args[1:], cookie)
 	case "defenses":
@@ -177,7 +179,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance-item-delete":
 		return a.transportMobileFinanceItemDelete(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、achievement、achievement-create、achievement-update、achievement-status、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、rooms、room-attendance、room-sync、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、routes、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、achievement、achievement-create、achievement-update、achievement-status、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、rooms、room-attendance、room-sync、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
 	}
 }
 
@@ -494,6 +496,24 @@ func (a NativeSite) transportMobilePending(ctx context.Context, args []string, c
 	result := transportMobileResult("pending", "待办数量接口返回 success=true")
 	result["data"] = payload["data"]
 	result["pending_count"] = transportMobileValue(payload["data"], "numPending", "pending", "count")
+	result["raw"] = redactSiteJSON(payload)
+	return result, nil
+}
+
+func (a NativeSite) transportMobileRoutes(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	token, _, sessionErr := a.transportMobileSession(args, cookie)
+	if sessionErr != nil {
+		return nil, sessionErr
+	}
+	if token == "" {
+		return nil, &siteError{Code: "login_required", Message: "请先运行 transport-mobile login 或提供 --access-token"}
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "GET", "/api/user/routes", nil, false, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result := transportMobileResult("routes", "用户路由接口返回 success=true")
+	result["data"] = payload["data"]
 	result["raw"] = redactSiteJSON(payload)
 	return result, nil
 }

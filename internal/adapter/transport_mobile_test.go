@@ -30,6 +30,11 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"_id":"u-1","code":"T001","name":"交通老师","jobNumber":"T001","title":["讲师"],"phone":"13800138000","numPending":3,"roles":["teacher"],"permissions":["defense:view"]},"success":true}`)
 		case "/api/user/getPendingCount":
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"numPending":3},"success":true}`)
+		case "/api/user/routes":
+			if request.Header.Get("token") != token {
+				t.Errorf("missing routes token: %q", request.Header.Get("token"))
+			}
+			_, _ = fmt.Fprint(writer, `{"code":200,"data":[{"path":"/oa/achievement","title":"成果"}],"success":true}`)
 		case "/api/user/changepwd":
 			if request.Method != http.MethodPost || request.Header.Get("token") != token {
 				t.Errorf("change-password request was not authenticated POST: method=%s token=%q", request.Method, request.Header.Get("token"))
@@ -105,6 +110,10 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 	pending := runIssueJSON(t, "transport-mobile", "pending")
 	if pending["pending_count"] != float64(3) {
 		t.Fatalf("pending count was not mapped: %#v", pending)
+	}
+	routes := runIssueJSON(t, "transport-mobile", "routes")
+	if routes["operation"] != "routes" || len(routes["data"].([]any)) != 1 || routes["data"].([]any)[0].(map[string]any)["path"] != "/oa/achievement" {
+		t.Fatalf("user routes were not mapped: %#v", routes)
 	}
 	dictionaries := runIssueJSON(t, "transport-mobile", "dictionaries", "--code", "Finance.Type")
 	if len(dictionaries["data"].([]any)) != 1 || dictionaries["data"].([]any)[0].(map[string]any)["code"] != "Finance.Type" {
