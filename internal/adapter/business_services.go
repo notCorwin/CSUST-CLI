@@ -718,7 +718,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "departments":
 			add("--category-id", "--favorites")
 		case "services", "list":
-			add("--page", "--page-size", "--keyword", "--category-id", "--label-id", "--department-id", "--serve-type", "--sort", "--favorites")
+			add("--page", "--page-size", "--keyword", "--category", "--category-id", "--label-id", "--department", "--department-id", "--serve-type", "--sort", "--favorites")
 		case "login":
 			add("--auth", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
 		case "logout":

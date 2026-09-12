@@ -75,3 +75,40 @@ func TestServiceHallDictionariesUseSemanticFilters(t *testing.T) {
 		t.Fatalf("unexpected departments: %#v", departments)
 	}
 }
+
+func TestServiceHallServicesResolveSemanticNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			t.Fatalf("unexpected service hall method: %s", request.Method)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("invalid service hall body: %v", err)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/handleHall/getAppClassify":
+			_, _ = writer.Write([]byte(`{"result":1,"data":[{"id":117,"name":"教务教学"}]}`))
+		case "/handleHall/getAppDepart":
+			if body["classifyId"] != "117" {
+				t.Fatalf("department lookup used wrong category: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"result":1,"data":[{"departId":"dept-1","departName":"教务处"}]}`))
+		case "/handleHall/getApp":
+			if body["classifyId"] != "117" || body["departId"] != "dept-1" {
+				t.Fatalf("semantic names were not resolved: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"result":1,"data":{"current":1,"pages":1,"total":0,"records":[]}}`))
+		default:
+			t.Fatalf("unexpected service hall path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "service-hall-names.cookies"))
+
+	result := runIssueJSON(t, "service-hall", "services", "--category", "教务教学", "--department", "教务处")
+	if result["total"] != float64(0) || result["query"].(map[string]any)["category_id"] != "117" || result["query"].(map[string]any)["department_id"] != "dept-1" {
+		t.Fatalf("unexpected resolved service hall query: %#v", result)
+	}
+}

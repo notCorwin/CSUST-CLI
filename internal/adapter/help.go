@@ -98,7 +98,7 @@ func nativeUsage(args []string) []byte {
   transport-lab               实验室预约用户/教职工登录、注册、找回密码和会话
   continuing-platform         继续教育信息平台三类用户登录和会话
   ehall                       eHall 服务、身份、收藏、消息、邮箱、新闻、评价、服务项收藏、周期与详情
-  service-hall                融合服务大厅目录、分类/部门字典和筛选
+  service-hall                融合服务大厅目录、分类/部门字典和语义筛选
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心
   library-center              图书馆个人资料、信用记录、联系方式、密码、空间/座位资源和预约
