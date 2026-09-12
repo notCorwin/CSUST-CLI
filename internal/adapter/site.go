@@ -1032,7 +1032,7 @@ func jsonRequiresLogin(value any) bool {
 	return need
 }
 
-var successPattern = regexp.MustCompile(`^(?:邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|回复|修改|设置|上传|排序|预约|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
+var successPattern = regexp.MustCompile(`^(?:密码重置|重置密码|密码修改|重置|邮件发送|操作|提交|保存|更新|删除|发布|评价|报名|选课|缴费|撤销|订购|退订|选订|处理|发送|回复|修改|设置|上传|排序|预约|退出|注销|登出)?(?:成功|完成|已保存|已提交)[！!。.]?$`)
 var sideEffectSitePattern = regexp.MustCompile(`(?i)(?:/(?:logout|delete|remove|add|join|bind|ignore|favorite|collectService|collectServiceItem|recommend|subscribe|unsubscribe|cancel|submit|save|update|sort)(?:[/?._]|$)|[?&](?:action|op|ACTION|operation|act)=)`)
 var sensitiveSiteParam = regexp.MustCompile(`(?i)pass|password|pwd|encrypted|token|secret|sign|randomcode|ticket|cookie|session|csrf|nonce|execution|flowexecutionkey|(?:^|[_-])(?:state|lt)(?:$|[_-])`)
 var siteURLPattern = regexp.MustCompile(`https?://[^\s"']+`)
@@ -1048,7 +1048,7 @@ func failureMessage(value string) bool {
 	if text == "" || len(text) > 4096 || (strings.Contains(text, "<") && strings.Contains(text, ">")) {
 		return false
 	}
-	for _, signal := range []string{"失败", "错误", "拒绝", "无效", "异常", "未授权", "禁止", "failed", "failure", "error", "denied", "invalid", "unauthorized", "forbidden"} {
+	for _, signal := range []string{"不存在", "失败", "错误", "拒绝", "无效", "异常", "未授权", "禁止", "failed", "failure", "error", "denied", "invalid", "unauthorized", "forbidden"} {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(signal)) {
 			return true
 		}

@@ -110,6 +110,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust online-qa list --json
 ./csust online-qa ask --content "关于课程安排的问题" --yes --json
 ./csust retake-courses --json
+./csust graduate-admissions reset-password --document-number 证件号码 --name 姓名 --candidate-number 考生编号 --yes --json
 ```
 
 ## 常用命令
@@ -162,6 +163,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
 | `finance-query` | 智慧财务收费、奖助、减免、退费、缓交、收入和贷款查询 |
 | `undergraduate-admissions` | 本科招生计划、历年分数、录取进程和考生录取结果查询 |
+| `graduate-admissions` | 研究生招生系统登录、密码重置和会话退出；重置必须 `--yes` 并以服务端反馈确认 |
 | `union` | 智慧工会模块、角色登录、验证码和会话 |
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
 | `mail` | 企业邮箱登录节点、RSA 预登录、验证码和会话 |

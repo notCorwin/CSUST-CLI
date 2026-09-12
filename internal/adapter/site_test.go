@@ -131,6 +131,12 @@ func TestSiteBusinessStateAndBinaryResponse(t *testing.T) {
 	if state, known, _ := businessState([]byte("预约成功"), "text/plain"); !state || !known {
 		t.Fatalf("appointment success was not recognized: %v %v", state, known)
 	}
+	if state, known, _ := businessState([]byte(`<script>alert('密码重置成功!')</script>`), "text/html"); !state || !known {
+		t.Fatalf("password reset success was not recognized: %v %v", state, known)
+	}
+	if state, known, _ := businessState([]byte(`<script>alert('证件号码或考生编号不存在!')</script>`), "text/html"); state || !known {
+		t.Fatalf("password reset rejection was not recognized: %v %v", state, known)
+	}
 	if !isBinarySiteResponse(&http.Response{Header: http.Header{"Content-Type": []string{"application/pdf"}}}) {
 		t.Fatal("PDF should require --output")
 	}

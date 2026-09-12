@@ -88,7 +88,7 @@ var businessServices = []businessService{
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
 	{"archive-management", "综合档案管理", "archive-management", "档案", "high", "DAS login returned Vue archive collection/user/file API modules"},
 	{"virtual-lab", "公路交通虚拟仿真实验中心", "virtual-lab", "实验", "high", "official page link target returned HTTP 200 and titled virtual simulation center"},
-	{"graduate-admissions", "研究生招生旧系统", "graduate-admissions", "招生", "medium", "official graduate pages link zsgl/bswb and ksxt paths; root currently IIS default"},
+	{"graduate-admissions", "研究生招生旧系统", "graduate-admissions", "招生", "medium", "live ksxt login/pass ASP.NET forms expose login, password reset and session exit; root currently IIS default"},
 	{"legacy-mail", "旧邮件改密入口", "legacy-mail", "邮件", "low", "mail/changepass redirects to CAS but root returns 404"},
 	{"security-admin", "安全运维管理平台", "security-admin", "运维", "medium", "baolei host returned NSFOCUS OSMS page; administrative scope"},
 	{"cms-admin", "内容后台", "cms-admin", "后台", "medium", "official pages expose 10.255.196.62:8080/system/login.jsp"},
@@ -735,6 +735,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		if operation == "login" {
 			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		} else if operation == "reset-password" || operation == "reset" {
+			add("--document-number", "--name", "--candidate-number", "--yes")
 		}
 	case "security-admin":
 		common()
@@ -2689,10 +2691,12 @@ func (a NativeSite) executeGraduateAdmissions(ctx context.Context, args []string
 	switch args[0] {
 	case "login":
 		return a.graduateAdmissionsLogin(ctx, args[1:], cookie)
+	case "reset-password", "reset":
+		return a.graduateAdmissionsResetPassword(ctx, args[1:], cookie)
 	case "logout":
 		return a.graduateAdmissionsLogout(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: service + " 只支持 status、catalog、login、logout"}
+		return nil, &siteError{Code: "invalid_argument", Message: service + " 只支持 status、catalog、login、reset-password、logout"}
 	}
 }
 
@@ -2774,6 +2778,58 @@ func (a NativeSite) graduateAdmissionsLogout(ctx context.Context, args []string,
 	result["service"], result["operation"], result["logged_out"] = "graduate-admissions", "logout", true
 	result["submitted"], result["confirmed"], result["evidence"] = true, true, "login-form-returned"
 	return result, nil
+}
+
+func (a NativeSite) graduateAdmissionsResetPassword(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "研究生招生系统密码重置需要 --yes"}
+	}
+	documentNumber, requiredErr := businessRequired(args, "--document-number", "reset-password 必须提供 --document-number")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	name, requiredErr := businessRequired(args, "--name", "reset-password 必须提供 --name")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	candidateNumber, requiredErr := businessRequired(args, "--candidate-number", "reset-password 必须提供 --candidate-number")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	page, requestErr := a.businessGet(ctx, "graduate-admissions", "/ksxt/pass.aspx", nil, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	fields, formErr := hiddenFormFields(businessBody(page), "Form1")
+	if formErr != nil {
+		return nil, formErr
+	}
+	fields = append(fields,
+		pair{"txtzjhm", documentNumber},
+		pair{"txtxm", name},
+		pair{"txtksbh", candidateNumber},
+		pair{"btnSave", "重置"},
+	)
+	result, requestErr := businessRequest(ctx, "graduate-admissions", "POST", "/ksxt/pass.aspx", nil, fields, []pair{{"Referer", safeResponseURL(page)}}, businessRequestOptions{cookieFile: cookie, allowBusinessFailure: true}, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	body := businessBody(result)
+	state, known, _ := businessState([]byte(body), "text/html")
+	details := map[string]any{"submitted": true, "confirmed": false, "evidence": "reset-response"}
+	if known && state {
+		return map[string]any{
+			"ok": true, "submitted": true, "confirmed": true, "evidence": "pass.aspx-reset-success",
+			"service": "graduate-admissions", "operation": "reset-password",
+		}, nil
+	}
+	if strings.Contains(body, "证件号码或考生编号不存在") {
+		return nil, &siteError{Code: "mutation_rejected", Message: "研究生招生系统拒绝密码重置：证件号码或考生编号不存在", Details: details}
+	}
+	if known && !state {
+		return nil, &siteError{Code: "mutation_rejected", Message: "研究生招生系统拒绝密码重置", Details: details}
+	}
+	return nil, &siteError{Code: "mutation_unverified", Message: "密码重置请求已发送，但未取得成功反馈", Details: details}
 }
 
 func (a NativeSite) executeCMSAdmin(ctx context.Context, args []string, service, label string) (map[string]any, *siteError) {

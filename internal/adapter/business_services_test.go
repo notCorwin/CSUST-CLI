@@ -159,3 +159,26 @@ func TestStaffRecordUnitRequestUploadsAndMapsSemanticFields(t *testing.T) {
 		t.Fatalf("personal appointment fields were not mapped: %s", encoded)
 	}
 }
+
+func TestGraduateAdmissionsPasswordResetMapsFormAndSuccess(t *testing.T) {
+	var submitted bool
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if request.Method == http.MethodGet {
+			_, _ = fmt.Fprint(writer, `<form id="Form1" method="post"><input type="hidden" name="__VIEWSTATE" value="view"><input name="txtzjhm"><input name="txtxm"><input name="txtksbh"><input type="submit" name="btnSave" value="重置"></form>`)
+			return
+		}
+		if err := request.ParseForm(); err != nil {
+			t.Fatalf("parse reset form: %v", err)
+		}
+		submitted = request.Form.Get("__VIEWSTATE") == "view" && request.Form.Get("txtzjhm") == "证件号码" && request.Form.Get("txtxm") == "考生姓名" && request.Form.Get("txtksbh") == "考生编号" && request.Form.Get("btnSave") == "重置"
+		_, _ = fmt.Fprint(writer, `<script>alert('密码重置成功!')</script>`)
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+	result := runIssueJSON(t, "graduate-admissions", "reset-password", "--document-number", "证件号码", "--name", "考生姓名", "--candidate-number", "考生编号", "--yes")
+	if !submitted || result["service"] != "graduate-admissions" || result["operation"] != "reset-password" || result["confirmed"] != true {
+		t.Fatalf("graduate admissions reset was not mapped: submitted=%v result=%#v", submitted, result)
+	}
+}
