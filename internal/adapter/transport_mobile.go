@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const transportMobileService = "transport-mobile"
@@ -77,7 +78,9 @@ var transportMobileTables = map[string]transportMobileTable{
 
 func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
-		return businessCatalogNames(transportMobileService), nil
+		result := businessCatalogNames(transportMobileService)
+		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "kpis", "notices", "workflows", "vacations"}
+		return result, nil
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
 	if valueErr != nil {
@@ -102,6 +105,14 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["defenses"], "defenses")
 	case "notes":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["notes"], "notes")
+	case "note":
+		return a.transportMobileNoteDetail(ctx, args[1:], cookie)
+	case "note-create":
+		return a.transportMobileNoteCreate(ctx, args[1:], cookie)
+	case "note-reply":
+		return a.transportMobileNoteReply(ctx, args[1:], cookie)
+	case "note-delete":
+		return a.transportMobileNoteDelete(ctx, args[1:], cookie)
 	case "access-records":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["access-records"], "access-records")
 	case "achievements":
@@ -131,7 +142,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance-item-delete":
 		return a.transportMobileFinanceItemDelete(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、kpis、notices、workflows、vacations、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
 	}
 }
 
@@ -537,6 +548,272 @@ func transportMobileTableBody(args []string, spec transportMobileTable) (map[str
 		body["fuzzyFilter"] = fuzzy
 	}
 	return body, filters, nil
+}
+
+func transportMobileNoteBody(id string) map[string]any {
+	spec := transportMobileTables["notes"]
+	return map[string]any{
+		"paginator": map[string]any{"page": 1, "pageSize": 1, "needAll": false, "pages": 0},
+		"sorter":    map[string]any{spec.sortColumn: -1},
+		"filter":    map[string]any{"_id": strings.TrimSpace(id)},
+		"selector":  []string{},
+		"populator": spec.populator,
+	}
+}
+
+func (a NativeSite) transportMobileNoteRow(ctx context.Context, id, token, cookie string) (map[string]any, map[string]any, *siteError) {
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/note", transportMobileNoteBody(id), true, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, nil, &siteError{Code: "parse_error", Message: "留言详情响应缺少 data 对象"}
+	}
+	rows := transportMobileMaps(data["records"])
+	if len(rows) == 0 {
+		return nil, nil, &siteError{Code: "not_found", Message: "未找到该留言", Details: map[string]any{"id": strings.TrimSpace(id)}}
+	}
+	return rows[0], payload, nil
+}
+
+func (a NativeSite) transportMobileCurrentUserID(ctx context.Context, token, cookie string) (string, *siteError) {
+	payload, requestErr := a.transportMobileCall(ctx, "GET", "/api/user/getUserInfo", nil, false, token, cookie, true, true)
+	if requestErr != nil {
+		return "", requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return "", &siteError{Code: "parse_error", Message: "用户信息响应缺少 data 对象"}
+	}
+	userID := transportMobileText(data, "_id", "id", "ID")
+	if userID == "" {
+		return "", &siteError{Code: "protocol_unconfirmed", Message: "用户信息缺少用户编号"}
+	}
+	return userID, nil
+}
+
+func transportMobileNoteMessages(row map[string]any) []map[string]any {
+	return transportMobileMaps(row["detail"])
+}
+
+func transportMobileNoteMessageID(row map[string]any) string {
+	return transportMobileText(row, "_id", "id")
+}
+
+func transportMobileNoteSender(row map[string]any) string {
+	if sender := transportMobileText(row, "sender._id", "sender.id"); sender != "" {
+		return sender
+	}
+	return strings.TrimSpace(fmt.Sprint(row["sender"]))
+}
+
+func transportMobileNoteNextOrder(row map[string]any) int {
+	order := 0
+	if value, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(row["orderMax"]))); err == nil && value > order {
+		order = value
+	}
+	for _, message := range transportMobileNoteMessages(row) {
+		if value, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(message["order"]))); err == nil && value > order {
+			order = value
+		}
+	}
+	return order + 1
+}
+
+func transportMobileNoteHasMessage(row map[string]any, userID, content string, order int) bool {
+	for _, message := range transportMobileNoteMessages(row) {
+		if transportMobileNoteSender(message) == userID && fmt.Sprint(message["content"]) == content && fmt.Sprint(message["order"]) == strconv.Itoa(order) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a NativeSite) transportMobileNoteDetail(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	id, idErr := businessRequired(args, "--id", "note 必须提供 --id")
+	if idErr != nil {
+		return nil, idErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	row, payload, rowErr := a.transportMobileNoteRow(ctx, strings.TrimSpace(id), token, cookie)
+	if rowErr != nil {
+		return nil, rowErr
+	}
+	note := transportMobileNote(row)
+	note["messages"] = row["detail"]
+	result := transportMobileResult("note", "留言通过列表接口精确回读")
+	result["id"], result["data"], result["note"], result["raw"] = strings.TrimSpace(id), note, note, redactSiteJSON(payload)
+	return result, nil
+}
+
+func (a NativeSite) transportMobileNoteCreate(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "创建交通移动端留言会改变远端数据，请加 --yes"}
+	}
+	recipient, recipientErr := businessRequired(args, "--recipient-id", "note-create 必须提供 --recipient-id")
+	if recipientErr != nil {
+		return nil, recipientErr
+	}
+	content, contentErr := businessRequired(args, "--content", "note-create 必须提供 --content")
+	if contentErr != nil {
+		return nil, contentErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	userID, userErr := a.transportMobileCurrentUserID(ctx, token, cookie)
+	if userErr != nil {
+		return nil, userErr
+	}
+	now := time.Now().UTC()
+	entity := map[string]any{
+		"code": "__auto__note", "name": content, "creater": userID, "dateCreate": now, "dateModified": now,
+		"status": "进行中", "orderMax": 1,
+		"participants": []map[string]any{
+			{"user": userID, "dateJoin": now, "dateRead": now, "isActive": true},
+			{"user": strings.TrimSpace(recipient), "dateJoin": now, "dateRead": nil, "isActive": true},
+		},
+		"detail": []map[string]any{{"order": 1, "content": content, "sender": userID, "sendTime": now}},
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "POST", "/api/table/note", entity, true, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "mutation_unverified", Message: "留言创建成功反馈已返回，但缺少留言编号", Details: map[string]any{"submitted": true, "confirmed": false}}
+	}
+	id := transportMobileText(data, "_id", "id")
+	if id == "" {
+		return nil, &siteError{Code: "mutation_unverified", Message: "留言创建成功反馈已返回，但缺少留言编号", Details: map[string]any{"submitted": true, "confirmed": false}}
+	}
+	row, _, readbackErr := a.transportMobileNoteRow(ctx, id, token, cookie)
+	if readbackErr != nil || !transportMobileNoteHasMessage(row, userID, content, 1) {
+		cause := "content-mismatch"
+		if readbackErr != nil {
+			cause = readbackErr.Code
+		}
+		return nil, &siteError{Code: "mutation_unverified", Message: "留言创建成功反馈已返回，但回读内容不一致", Details: map[string]any{"submitted": true, "confirmed": false, "id": id, "cause": cause}}
+	}
+	result := transportMobileResult("note-create", "留言创建接口成功且内容回读一致")
+	result["submitted"], result["id"], result["recipient_id"], result["api_code"] = true, id, strings.TrimSpace(recipient), payload["code"]
+	return result, nil
+}
+
+func (a NativeSite) transportMobileNoteReply(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "回复交通移动端留言会改变远端数据，请加 --yes"}
+	}
+	id, idErr := businessRequired(args, "--id", "note-reply 必须提供 --id")
+	if idErr != nil {
+		return nil, idErr
+	}
+	content, contentErr := businessRequired(args, "--content", "note-reply 必须提供 --content")
+	if contentErr != nil {
+		return nil, contentErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	row, _, rowErr := a.transportMobileNoteRow(ctx, strings.TrimSpace(id), token, cookie)
+	if rowErr != nil {
+		return nil, rowErr
+	}
+	version := row["version"]
+	if version == nil || strings.TrimSpace(fmt.Sprint(version)) == "" {
+		return nil, &siteError{Code: "protocol_unconfirmed", Message: "留言缺少并发版本号，无法安全回复"}
+	}
+	userID, userErr := a.transportMobileCurrentUserID(ctx, token, cookie)
+	if userErr != nil {
+		return nil, userErr
+	}
+	order := transportMobileNoteNextOrder(row)
+	now := time.Now().UTC()
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/note/"+url.PathEscape(strings.TrimSpace(id)), map[string]any{
+		"$push":        map[string]any{"detail": map[string]any{"order": order, "content": content, "sender": userID, "sendTime": now}},
+		"dateModified": now, "orderMax": order, "version": version,
+	}, true, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	updated, _, readbackErr := a.transportMobileNoteRow(ctx, strings.TrimSpace(id), token, cookie)
+	if readbackErr != nil || !transportMobileNoteHasMessage(updated, userID, content, order) {
+		cause := "content-mismatch"
+		if readbackErr != nil {
+			cause = readbackErr.Code
+		}
+		return nil, &siteError{Code: "mutation_unverified", Message: "留言回复成功反馈已返回，但回读内容不一致", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(id), "cause": cause}}
+	}
+	result := transportMobileResult("note-reply", "留言回复接口成功且内容回读一致")
+	result["submitted"], result["id"], result["message_order"], result["api_code"] = true, strings.TrimSpace(id), order, payload["code"]
+	return result, nil
+}
+
+func (a NativeSite) transportMobileNoteDelete(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "删除交通移动端留言会改变远端数据，请加 --yes"}
+	}
+	id, idErr := businessRequired(args, "--id", "note-delete 必须提供 --id")
+	if idErr != nil {
+		return nil, idErr
+	}
+	messageID, messageErr := businessRequired(args, "--message-id", "note-delete 必须提供 --message-id")
+	if messageErr != nil {
+		return nil, messageErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	row, _, rowErr := a.transportMobileNoteRow(ctx, strings.TrimSpace(id), token, cookie)
+	if rowErr != nil {
+		return nil, rowErr
+	}
+	var target map[string]any
+	for _, message := range transportMobileNoteMessages(row) {
+		if transportMobileNoteMessageID(message) == strings.TrimSpace(messageID) {
+			target = message
+			break
+		}
+	}
+	if target == nil {
+		return nil, &siteError{Code: "not_found", Message: "未找到该留言消息", Details: map[string]any{"id": strings.TrimSpace(messageID)}}
+	}
+	userID, userErr := a.transportMobileCurrentUserID(ctx, token, cookie)
+	if userErr != nil {
+		return nil, userErr
+	}
+	if transportMobileNoteSender(target) != userID {
+		return nil, &siteError{Code: "permission_denied", Message: "只能删除自己发送的留言消息", Details: map[string]any{"submitted": false, "confirmed": false, "id": strings.TrimSpace(messageID)}}
+	}
+	version := row["version"]
+	if version == nil || strings.TrimSpace(fmt.Sprint(version)) == "" {
+		return nil, &siteError{Code: "protocol_unconfirmed", Message: "留言缺少并发版本号，无法安全删除"}
+	}
+	payload, requestErr := a.transportMobileCall(ctx, "PUT", "/api/table/note/"+url.PathEscape(strings.TrimSpace(id)), map[string]any{
+		"$pull": map[string]any{"detail": map[string]any{"_id": strings.TrimSpace(messageID)}}, "dateModified": time.Now().UTC(), "version": version,
+	}, true, token, cookie, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	updated, _, readbackErr := a.transportMobileNoteRow(ctx, strings.TrimSpace(id), token, cookie)
+	if readbackErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "留言删除成功反馈已返回，但回读失败", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(messageID), "cause": readbackErr.Code}}
+	}
+	for _, message := range transportMobileNoteMessages(updated) {
+		if transportMobileNoteMessageID(message) == strings.TrimSpace(messageID) {
+			return nil, &siteError{Code: "mutation_unverified", Message: "留言删除成功反馈已返回，但消息仍可回读", Details: map[string]any{"submitted": true, "confirmed": false, "id": strings.TrimSpace(messageID)}}
+		}
+	}
+	result := transportMobileResult("note-delete", "留言删除接口成功且消息回读为不存在")
+	result["submitted"], result["id"], result["message_id"], result["api_code"] = true, strings.TrimSpace(id), strings.TrimSpace(messageID), payload["code"]
+	return result, nil
 }
 
 func (a NativeSite) transportMobileDefenseDetail(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
@@ -1091,6 +1368,7 @@ func transportMobileFinanceItem(row map[string]any) map[string]any {
 func transportMobileNote(row map[string]any) map[string]any {
 	result := transportMobileRecord(row)
 	result["participants"] = row["participants"]
+	result["messages"] = row["detail"]
 	result["last_reply"] = transportMobileValue(row, "dateModified")
 	return result
 }

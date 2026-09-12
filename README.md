@@ -148,7 +148,7 @@ password=密码
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
-| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务、财务明细增删改、改密及学院业务查询 |
+| `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务、财务明细增删改、留言新建/详情/回复/删除、改密及学院业务查询 |
 | `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
 | `campus-network` | 校园网自助服务资料、账单、详单、缴费、套餐和设备 |
 | `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
@@ -158,6 +158,7 @@ password=密码
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
 | `mail` | 企业邮箱登录节点、RSA 预登录、验证码和会话 |
 | `transport-info` | 交通学院综合信息登录、验证码和会话 |
+| `employment` | 云就业公开信息、学生会话与登录（行为验证码需显式提供） |
 | `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |
 | `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
 | `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
@@ -304,6 +305,10 @@ password=密码
 ./csust transport-mobile finance-item-delete --id FINANCE_ITEM_ID --yes --json
 ./csust transport-mobile notices --keyword 评审 --json
 ./csust transport-mobile vacations --page-size 20 --json
+./csust transport-mobile note --id NOTE_ID --json
+./csust transport-mobile note-create --recipient-id USER_ID --content 消息内容 --yes --json
+./csust transport-mobile note-reply --id NOTE_ID --content 回复内容 --yes --json
+./csust transport-mobile note-delete --id NOTE_ID --message-id MESSAGE_ID --yes --json
 # 电子成绩单与在校证明：CAS 登录后查询类型、申请记录，并申请下载或发送到邮箱
 ./csust electronic-documents login --auth sso --password-stdin --json
 ./csust electronic-documents types --json

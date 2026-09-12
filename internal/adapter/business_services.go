@@ -66,7 +66,7 @@ var businessServices = []businessService{
 	{"library-catalog", "图书馆馆藏与读者服务", "library-catalog", "图书馆", "high", "live OPAC exposes catalogue APIs plus CAS-backed reader profile, loans, reservations, privileges, finance, shelf, pre-loan and loan-rule JSON endpoints"},
 	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
 	{"campus-map", "校园地图与公共点", "campus-map", "校园服务", "high", "live GIS APIs expose zones, public point types, points, point details, search and aerial/panorama resources"},
-	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data and exposes student/company modules"},
+	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data; student login uses vi_code, encode token and behavioral captcha"},
 	{"mail", "企业邮箱登录与会话", "mail", "邮件", "medium", "live page exposes 163 enterprise-mail provider, RSA prelogin, domainEntLogin and captcha protocol"},
 	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "linked external page returned title 统招生学籍查询_长沙理工大学档案馆 查询预约系统"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
@@ -311,6 +311,11 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		}
 	case "employment":
 		switch operation {
+		case "status":
+			common()
+		case "login":
+			common()
+			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-token")
 		case "home":
 			common()
 		case "list":
@@ -454,6 +459,14 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--keyword", "--page", "--page-size")
 		case "notes", "access-records", "achievements", "kpis", "notices", "workflows", "vacations":
 			add("--keyword", "--page", "--page-size")
+		case "note":
+			add("--id")
+		case "note-create":
+			add("--recipient-id", "--content", "--yes")
+		case "note-reply":
+			add("--id", "--content", "--yes")
+		case "note-delete":
+			add("--id", "--message-id", "--yes")
 		case "defense", "finance", "finance-item":
 			add("--id")
 		case "finances":
@@ -1352,9 +1365,23 @@ func safeResponseURL(result map[string]any) string {
 
 func (a NativeSite) executeEmployment(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
-		return businessCatalogFilter("employment"), nil
+		result := businessCatalogFilter("employment")
+		result["operations"] = []string{"status", "home", "list", "detail", "login"}
+		return result, nil
 	}
 	switch args[0] {
+	case "status":
+		cookie, _, err := businessValue(args[1:], "--cookie-file")
+		if err != nil {
+			return nil, err
+		}
+		return a.employmentStatus(ctx, cookie)
+	case "login":
+		cookie, _, err := businessValue(args[1:], "--cookie-file")
+		if err != nil {
+			return nil, err
+		}
+		return a.employmentLogin(ctx, args[1:], cookie)
 	case "home", "list":
 		cookie, _, err := businessValue(args[1:], "--cookie-file")
 		if err != nil {
@@ -1408,7 +1435,7 @@ func (a NativeSite) executeEmployment(ctx context.Context, args []string) (map[s
 		result["service"], result["operation"], result["kind"], result["id"] = "employment", "detail", kind, id
 		return result, nil
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "employment 只支持 home、list、detail、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "employment 只支持 status、home、list、detail、login、catalog"}
 	}
 }
 
