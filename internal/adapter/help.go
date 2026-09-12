@@ -26,6 +26,10 @@ func nativeUsage(args []string) []byte {
                               预选课程列表
   preselection select/drop --term 学期 --course-id 课程编号 --yes
                               预选/退选课程（操作后回读）
+  lab-booking [available] --term 学期
+                              实验预约课程查询
+  open-lab-booking available/selected --term 学期
+                              开放实验项目及已选项目查询
   special-course-query        特殊选课申请查询
   social-exam-registration    社会考试报名状态与可报名项目
   make-up-exam-registration   补考报名状态与可报名课程
