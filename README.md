@@ -302,8 +302,11 @@ password=密码
 # 图书馆空间/座位：先登录，再查资源、状态和个人预约；写操作显式确认并回读
 ./csust library-center login --auth sso --password-stdin --json
 ./csust library-center resources --json
+./csust library-center profile --json
+./csust library-center credit-history --status history --days 90 --json
 ./csust library-center availability --resource 座位 --room 阅览室一B205 --date 2026-09-15 --from 09:00 --to 10:00 --json
 ./csust library-center reservations --json
+./csust library-center update-contact --email user@example.com --notify false --yes --json
 ./csust library-center reserve --resource 座位 --room 阅览室一B205 --item B205-001 --date 2026-09-15 --from 09:00 --to 10:00 --yes --json
 ./csust library-center cancel --id RESERVATION_ID --yes --json
 # MOOC：本校课程、院系筛选和排序

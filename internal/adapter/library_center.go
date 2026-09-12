@@ -15,18 +15,24 @@ func (a NativeSite) executeLibraryCenter(ctx context.Context, args []string, coo
 	switch args[0] {
 	case "resources":
 		return a.libraryCenterResources(ctx, cookie)
+	case "profile":
+		return a.libraryCenterProfile(ctx, cookie)
+	case "credit-history":
+		return a.libraryCenterCreditHistory(ctx, args[1:], cookie)
 	case "availability":
 		return a.libraryCenterAvailability(ctx, args[1:], cookie)
 	case "reservations":
 		return a.libraryCenterReservations(ctx, cookie)
 	case "server-time":
 		return a.libraryCenterServerTime(ctx, cookie)
+	case "update-contact":
+		return a.libraryCenterUpdateContact(ctx, args[1:], cookie)
 	case "reserve":
 		return a.libraryCenterReserve(ctx, args[1:], cookie)
 	case "cancel":
 		return a.libraryCenterCancel(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "library-center 只支持 status、catalog、login、logout、resources、availability、reservations、server-time、reserve、cancel"}
+		return nil, &siteError{Code: "invalid_argument", Message: "library-center 只支持 status、catalog、login、logout、resources、profile、credit-history、availability、reservations、server-time、update-contact、reserve、cancel"}
 	}
 }
 
@@ -58,6 +64,106 @@ func (a NativeSite) libraryCenterResources(ctx context.Context, cookie string) (
 		"service":  libraryPersonalService, "operation": "resources",
 		"data": resources, "total": len(resources),
 	}, nil
+}
+
+func (a NativeSite) libraryCenterProfile(ctx context.Context, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessGet(ctx, libraryPersonalService, "/ClientWeb/pro/ajax/login.aspx", []pair{{"act", "init_acc"}}, businessRequestOptions{cookieFile: cookie, require: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := libraryCenterPayload(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	if fmt.Sprint(payload["ret"]) != "1" {
+		return nil, libraryCenterAPIError(payload, "图书馆账户资料查询失败")
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "图书馆账户资料响应结构无效"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "图书馆 login.aspx init_acc 返回",
+		"service":  libraryPersonalService, "operation": "profile",
+		"data": data, "raw": redactSiteJSON(payload),
+	}, nil
+}
+
+func (a NativeSite) libraryCenterCreditHistory(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	days, daysErr := businessInt(args, "--days", 90)
+	if daysErr != nil {
+		return nil, daysErr
+	}
+	status, _, statusErr := businessValue(args, "--status")
+	if statusErr != nil {
+		return nil, statusErr
+	}
+	statusValue, statusErr := libraryCenterHistoryStatus(status)
+	if statusErr != nil {
+		return nil, statusErr
+	}
+	result, requestErr := a.businessGet(ctx, libraryPersonalService, "/ClientWeb/pro/ajax/center.aspx", []pair{
+		{"act", "get_History_resv"}, {"strat", strconv.Itoa(days)}, {"StatFlag", statusValue},
+	}, businessRequestOptions{cookieFile: cookie, require: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := libraryCenterPayload(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	if fmt.Sprint(payload["ret"]) != "1" {
+		return nil, libraryCenterAPIError(payload, "图书馆信用记录查询失败")
+	}
+	html := strings.TrimSpace(fmt.Sprint(payload["msg"]))
+	rows := libraryCenterHistoryRows(html)
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "图书馆 center.aspx get_History_resv 返回",
+		"service":  libraryPersonalService, "operation": "credit-history",
+		"days": days, "status": statusValue, "data": rows, "total": len(rows),
+		"raw": redactSiteJSON(payload),
+	}, nil
+}
+
+func libraryCenterHistoryStatus(value string) (string, *siteError) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "new", "new-reservation", "新预约记录":
+		return "New", nil
+	case "over", "history", "historical", "历史", "历史记录":
+		return "OVER", nil
+	case "default", "违约", "违约记录":
+		return "DEFAULT", nil
+	case "cancel", "cancelled", "canceled", "取消", "取消记录":
+		return "CANCEL", nil
+	default:
+		return "", &siteError{Code: "invalid_argument", Message: "--status 只能是 new、history、default 或 cancel"}
+	}
+}
+
+func libraryCenterHistoryRows(source string) []map[string]any {
+	// The endpoint returns a <tbody> fragment, which HTML parsers may discard
+	// when it is parsed outside a table.
+	document, err := parsePage("<table>" + source + "</table>")
+	if err != nil {
+		return []map[string]any{}
+	}
+	rows := make([]map[string]any, 0)
+	for _, row := range document.findAll("tr") {
+		cells := make([]string, 0)
+		for _, cell := range row.findAll("td") {
+			cells = append(cells, strings.TrimSpace(pageDisplayText(cell)))
+		}
+		if len(cells) < 6 || strings.Contains(strings.Join(cells, " "), "没有数据") {
+			continue
+		}
+		rows = append(rows, map[string]any{
+			"date": cells[0], "location": cells[1], "type": cells[2],
+			"state": cells[3], "deduction": cells[4], "penalty": cells[5], "cells": cells,
+		})
+	}
+	return rows
 }
 
 func libraryCenterResourceRows(document *pageNode) []map[string]any {
@@ -254,6 +360,98 @@ func (a NativeSite) libraryCenterReservations(ctx context.Context, cookie string
 
 func (a NativeSite) libraryCenterServerTime(ctx context.Context, cookie string) (map[string]any, *siteError) {
 	return a.libraryCenterReservationRequest(ctx, "get_my_servertime", "server-time", cookie)
+}
+
+func (a NativeSite) libraryCenterUpdateContact(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "更新图书馆联系方式会修改远端数据，请加 --yes"}
+	}
+	phone, phoneFound, phoneErr := businessValue(args, "--phone")
+	if phoneErr != nil {
+		return nil, phoneErr
+	}
+	email, emailFound, emailErr := businessValue(args, "--email")
+	if emailErr != nil {
+		return nil, emailErr
+	}
+	notify, notifyFound, notifyErr := businessValue(args, "--notify")
+	if notifyErr != nil {
+		return nil, notifyErr
+	}
+	if !phoneFound && !emailFound && !notifyFound {
+		return nil, &siteError{Code: "invalid_argument", Message: "update-contact 至少需要 --phone、--email 或 --notify"}
+	}
+	profile, profileErr := a.libraryCenterProfile(ctx, cookie)
+	if profileErr != nil {
+		return nil, profileErr
+	}
+	current, ok := profile["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "图书馆账户资料结构无效"}
+	}
+	if !phoneFound {
+		phone = fmt.Sprint(current["phone"])
+	}
+	if !emailFound {
+		email = fmt.Sprint(current["email"])
+	}
+	if strings.TrimSpace(email) == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "图书馆账户邮箱不能为空，请提供 --email"}
+	}
+	params := []pair{{"act", "update_contact"}, {"phone", phone}, {"email", email}}
+	var notifyValue bool
+	if notifyFound {
+		var parseOK bool
+		notifyValue, parseOK = libraryCenterBool(notify)
+		if !parseOK {
+			return nil, &siteError{Code: "invalid_argument", Message: "--notify 只能是 true、false、on 或 off"}
+		}
+		params = append(params, pair{"note_alert", strconv.FormatBool(notifyValue)})
+	}
+	result, requestErr := businessRequest(ctx, libraryPersonalService, "GET", "/ClientWeb/pro/ajax/account.aspx", params, nil, nil, businessRequestOptions{cookieFile: cookie, require: true}, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := libraryCenterPayload(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	if fmt.Sprint(payload["ret"]) != "1" {
+		return nil, libraryCenterAPIError(payload, "图书馆联系方式更新失败")
+	}
+	after, afterErr := a.libraryCenterProfile(ctx, cookie)
+	if afterErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "联系方式更新返回成功，但账户资料回读失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "update_contact ret=1", "cause": afterErr.Code}}
+	}
+	afterData, ok := after["data"].(map[string]any)
+	if !ok || fmt.Sprint(afterData["phone"]) != phone || fmt.Sprint(afterData["email"]) != email || (notifyFound && libraryCenterBoolValue(afterData["receive"]) != notifyValue) {
+		return nil, &siteError{Code: "mutation_unverified", Message: "联系方式更新返回成功，但账户资料回读不匹配", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "update_contact ret=1 but init_acc readback mismatched"}}
+	}
+	return map[string]any{
+		"ok": true, "submitted": true, "confirmed": true,
+		"evidence": "update_contact ret=1 且 init_acc 回读匹配",
+		"service":  libraryPersonalService, "operation": "update-contact",
+		"data": afterData, "response": redactSiteJSON(payload),
+	}, nil
+}
+
+func libraryCenterBool(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "on", "yes":
+		return true, true
+	case "false", "0", "off", "no":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func libraryCenterBoolValue(value any) bool {
+	if typed, ok := value.(bool); ok {
+		return typed
+	}
+	parsed, _ := libraryCenterBool(fmt.Sprint(value))
+	return parsed
 }
 
 func (a NativeSite) libraryCenterReserve(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {

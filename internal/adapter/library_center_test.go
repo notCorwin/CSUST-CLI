@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 func TestLibraryCenterResourceAvailabilityAndPersonalQueries(t *testing.T) {
 	var deviceQuery, reserveAction string
 	reserved := false
+	contactPhone, contactEmail := "", "old@example.com"
+	contactNotify := true
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/clientweb/xcus/ic2/Default.aspx":
@@ -44,6 +47,30 @@ func TestLibraryCenterResourceAvailabilityAndPersonalQueries(t *testing.T) {
 			default:
 				http.NotFound(writer, request)
 			}
+		case "/ClientWeb/pro/ajax/login.aspx":
+			if request.URL.Query().Get("act") != "init_acc" {
+				http.NotFound(writer, request)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(writer, `{"ret":1,"act":"init_acc","msg":"ok","data":{"id":"account","accno":"accno","name":"测试用户","phone":%q,"email":%q,"dept":"院系设置","receive":%t,"credit":[["研修间","300","300",""]]},"ext":null}`, contactPhone, contactEmail, contactNotify)
+		case "/ClientWeb/pro/ajax/center.aspx":
+			if request.URL.Query().Get("act") != "get_History_resv" {
+				http.NotFound(writer, request)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"ret":1,"act":"get_History_resv","msg":"<tbody><tr><td>2026-09-11</td><td>研修间</td><td>取消</td><td>已处理</td><td>0</td><td>无</td></tr></tbody>","data":null,"ext":null}`))
+		case "/ClientWeb/pro/ajax/account.aspx":
+			if request.URL.Query().Get("act") != "update_contact" {
+				http.NotFound(writer, request)
+				return
+			}
+			contactPhone = request.URL.Query().Get("phone")
+			contactEmail = request.URL.Query().Get("email")
+			contactNotify = request.URL.Query().Get("note_alert") == "true"
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"ret":1,"act":"update_contact","msg":"ok","data":null,"ext":null}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -67,6 +94,21 @@ func TestLibraryCenterResourceAvailabilityAndPersonalQueries(t *testing.T) {
 	row := availability["data"].([]any)[0].(map[string]any)
 	if row["name"] != "测试座位" || row["free_minutes"] != float64(180) || row["occupied"] != false {
 		t.Fatalf("availability row model failed: %#v", row)
+	}
+	profile := runIssueJSON(t, "library-center", "profile")
+	profileData := profile["data"].(map[string]any)
+	if profileData["id"] != "account" || profileData["email"] != "old@example.com" || profileData["receive"] != true {
+		t.Fatalf("profile query failed: %#v", profile)
+	}
+	history := runIssueJSON(t, "library-center", "credit-history", "--status", "history", "--days", "30")
+	historyRows := history["data"].([]any)
+	if history["status"] != "OVER" || history["days"] != float64(30) || len(historyRows) != 1 || historyRows[0].(map[string]any)["location"] != "研修间" {
+		t.Fatalf("credit history query failed: %#v", history)
+	}
+	updated := runIssueJSON(t, "library-center", "update-contact", "--phone", "13800000000", "--email", "new@example.com", "--notify", "false", "--yes")
+	updatedData := updated["data"].(map[string]any)
+	if updated["submitted"] != true || updated["confirmed"] != true || updatedData["phone"] != "13800000000" || updatedData["email"] != "new@example.com" || updatedData["receive"] != false {
+		t.Fatalf("contact update/readback failed: %#v", updated)
 	}
 
 	reservations := runIssueJSON(t, "library-center", "reservations")

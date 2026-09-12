@@ -559,9 +559,14 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		if service == "library-center" {
 			switch operation {
+			case "profile":
+			case "credit-history":
+				add("--days", "--status")
 			case "availability":
 				add("--resource", "--room", "--date", "--from", "--to")
 			case "resources", "reservations", "server-time":
+			case "update-contact":
+				add("--phone", "--email", "--notify", "--yes")
 			case "reserve":
 				add("--resource", "--room", "--item", "--date", "--from", "--to", "--theme", "--memo", "--member", "--group-id", "--yes")
 			case "cancel":
@@ -3389,7 +3394,7 @@ func (a NativeSite) executeSSOServiceCommand(ctx context.Context, args []string,
 	}
 	if service == libraryPersonalService {
 		switch args[0] {
-		case "resources", "availability", "reservations", "server-time", "reserve", "cancel":
+		case "resources", "profile", "credit-history", "availability", "reservations", "server-time", "update-contact", "reserve", "cancel":
 			return a.executeLibraryCenter(ctx, args, cookie)
 		}
 	}
