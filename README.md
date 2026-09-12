@@ -13,7 +13,7 @@
 - 公告：已收公告列表及详情入口。
 - 考试报名：重修报名可报课程及资格状态。
 - VPN：登录、状态、退出、工作台应用/分组、消息、审批、设备和文件业务。
-- 网络教学与教学质量保障：课程、课程详情、课程顺序、教学评价和毕业设计入口。
+- 网络教学与教学质量保障：课程、课程详情、课程顺序、公开密保问题、密码找回、教学评价和毕业设计入口。
 - eHall：当前账号可用服务目录、服务详情、权限、消息、企业邮箱状态、新闻和服务周期提醒。
 - 融合服务大厅：当前账号可用的办事服务目录、分类/部门字典、分页/筛选、服务指南、收藏和评价；服务跳转继续由对应业务 Adapter 负责。
 - 其他业务服务：录取通知书、期刊、云就业、企业邮箱登录、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、实验室仪器、人才招聘、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
@@ -193,7 +193,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `vpn` | VPN 登录、状态、退出、工作台/分组、申请、设备、会话、消息和文件 |
-| `teaching` | 网络教学平台课程、公开通知、课程详情和课程顺序 |
+| `teaching` | 网络教学平台课程、公开通知、课程详情、课程顺序和密码找回 |
 | `quality` | 教学质量保障系统登录、状态、评价和毕业设计入口 |
 | `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价、服务项收藏和周期提醒 |
 | `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选、服务指南、收藏、评价和网络报修表单结构 |
@@ -248,6 +248,12 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust teaching courses --json
 ./csust teaching public-notices --keyword 教学 --match fuzzy --json
 ./csust teaching public-notice --id NOTICE_ID --json
+./csust teaching password-questions --json
+# 邮箱方式：先发送邮件；邮件中的 code 只作为参数传入，不会被 CLI 输出
+./csust teaching password-reset --method email --username 用户名 --email user@example.com --captcha CODE --yes --json
+printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --method email --code MAIL_CODE --password-stdin --yes --json
+# 密保方式一次完成验证与重置；--password-stdin 读取两行新密码和确认密码
+printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --method question --username 用户名 --question-one '你高中班主任的名字' --answer-one 答案1 --question-two '你最喜欢的品牌名字' --answer-two 答案2 --question-three '你最喜欢的一门课程' --answer-three 答案3 --captcha CODE --password-stdin --yes --json
 ./csust quality status --json
 
 ./csust ehall services --json

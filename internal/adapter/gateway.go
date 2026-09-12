@@ -107,6 +107,10 @@ func (a NativeSite) executeGatewayCommand(ctx context.Context, service string, a
 			return a.teachingPublicNotices(ctx, args[1:])
 		case "public-notice":
 			return a.teachingPublicNotice(ctx, args[1:])
+		case "password-reset", "reset-password":
+			return a.teachingPasswordReset(ctx, args[1:])
+		case "password-questions", "reset-questions":
+			return a.teachingPasswordQuestions(ctx, args[1:])
 		}
 	}
 	if service == qualityServiceName && child == "status" {
@@ -142,6 +146,8 @@ func gatewayCatalog(service string) map[string]any {
 			{"name": "public-departments", "description": "公开院系目录"},
 			{"name": "public-notices", "description": "公开通知列表和关键词筛选"},
 			{"name": "public-notice", "description": "公开通知详情"},
+			{"name": "password-questions", "description": "找回密码可用的密保问题"},
+			{"name": "password-reset", "description": "找回或重置网络教学平台密码", "mutating": true},
 		}
 	} else {
 		system = "教学质量保障系统"

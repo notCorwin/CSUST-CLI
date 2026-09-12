@@ -68,7 +68,7 @@ func nativeUsage(args []string) []byte {
   textbooks                   教材操作
   evaluation                  学生评价
   vpn                         VPN 登录、状态、退出、工作台、消息、审批、设备和文件业务
-  teaching                    网络教学平台课程、公开通知与课程顺序
+  teaching                    网络教学平台课程、公开通知、课程顺序和找回密码
   quality                     教学质量保障系统登录、状态、评价和毕业设计入口
   services                    已映射业务服务目录
   official                    官网公开全文检索和文章详情
