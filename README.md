@@ -153,6 +153,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
 | `equipment` | 实验室仪器列表、筛选字典、列定义、详情、预约日历和收藏 |
+| `highway-experiment` | 公路工程实验中心公开网站状态；设备预约以公开页面/须知为主 |
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |

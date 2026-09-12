@@ -84,6 +84,7 @@ func nativeUsage(args []string) []byte {
   staff-record                教工人事档案预约
   sunshine                    教育阳光服务诉求提交/查询与短信验证
   equipment                   实验室仪器列表、筛选、详情、预约日历和收藏
+  highway-experiment          公路工程实验中心公开网站状态
   recruitment                 人才招聘频道、公告、岗位筛选和详情
   mail                        企业邮箱登录、验证码和会话
   professional-learning       专业技术人员继续教育课程、分类、通知和详情

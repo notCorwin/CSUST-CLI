@@ -158,6 +158,7 @@ var knownSites = map[string]serviceInfo{
 	"campus-network":           {host: "bw.csust.edu.cn", scheme: "http", path: "/Self/idstarlogin.action"},
 	"student-digital-archive":  {host: "pdp.csust.edu.cn:8900", scheme: "https", path: "/stu/home/"},
 	"equipment":                {host: "cslgdygx.csust.edu.cn", scheme: "https", path: "/"},
+	"highway-experiment":       {host: "highwayexperiment.csust.edu.cn", scheme: "http", path: "/"},
 	"highway":                  {host: "highwayexperiment.csust.edu.cn", scheme: "https", path: "/"},
 	"training":                 {host: "gcxljxgl.csust.edu.cn", scheme: "http", path: "/"},
 	"journal-highway":          {host: "zwgl.csust.edu.cn", scheme: "https", path: "/zwgl/home"},
