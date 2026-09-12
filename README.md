@@ -235,6 +235,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust service-hall categories --json
 ./csust service-hall departments --category-id 117 --json
 ./csust service-hall services --page 1 --page-size 12 --keyword 教务 --category 教务教学 --department 教务处 --json
+./csust service-hall network-repair schema --json
 ./csust service-hall login --auth sso --password-stdin --json
 
 ./csust ehall me --json

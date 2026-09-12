@@ -1162,6 +1162,16 @@ func safeSiteSSORedirect(base, previous, next *url.URL) bool {
 			strings.EqualFold(next.Scheme, "https") {
 			return true
 		}
+		if strings.EqualFold(previous.Host, "v1.chaoxing.com") && strings.EqualFold(previous.Path, "/appInter/openPcApp") &&
+			strings.EqualFold(next.Host, "auth.chaoxing.com") && strings.EqualFold(next.Path, "/connect/oauth2/authorize") &&
+			strings.EqualFold(previous.Scheme, "https") && strings.EqualFold(next.Scheme, "https") {
+			return true
+		}
+		if strings.EqualFold(previous.Host, "auth.chaoxing.com") && strings.EqualFold(previous.Path, "/connect/oauth2/authorize") &&
+			strings.EqualFold(next.Host, "office.csust.edu.cn") && strings.EqualFold(next.Path, "/front/web/approve/apps/forms/fore/apply") &&
+			strings.EqualFold(previous.Scheme, "https") && strings.EqualFold(next.Scheme, "https") {
+			return true
+		}
 	}
 	if strings.EqualFold(previous.Host, base.Host) && strings.EqualFold(next.Host, "authserver.csust.edu.cn") {
 		return strings.EqualFold(next.Scheme, "https")

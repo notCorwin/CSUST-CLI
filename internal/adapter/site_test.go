@@ -81,6 +81,15 @@ func TestSiteRedirectPolicy(t *testing.T) {
 	if safeSiteSSORedirect(mservice, mservice, httpTransfer) {
 		t.Fatal("unexpected HTTPS downgrade through transfer bridge")
 	}
+	v1, _ := url.Parse("https://v1.chaoxing.com/appInter/openPcApp?mappId=19933721")
+	chaoxingAuth, _ := url.Parse("https://auth.chaoxing.com/connect/oauth2/authorize?code=redacted")
+	office, _ := url.Parse("https://office.csust.edu.cn/front/web/approve/apps/forms/fore/apply?id=266714")
+	if !safeSiteSSORedirect(mservice, v1, chaoxingAuth) || !safeSiteSSORedirect(mservice, chaoxingAuth, office) {
+		t.Fatal("service-hall form handoff redirect was rejected")
+	}
+	if safeSiteSSORedirect(mservice, v1, office) || safeSiteSSORedirect(mservice, chaoxingAuth, otherTransfer) {
+		t.Fatal("unexpected service-hall form handoff redirect accepted")
+	}
 }
 
 func TestEHallSSOUsesCurrentPortalCallback(t *testing.T) {
