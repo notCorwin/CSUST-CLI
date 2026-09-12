@@ -76,6 +76,7 @@ var businessServices = []businessService{
 	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "live form supports appointment/upload and linked script calls arctrace queryExpressCode for express tracking"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
 	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
+	{"visit-reservation", "三全育人教育基地入馆预约", "sqyrjd", "预约", "medium", "live appointment guide documents mini-program, WeChat public-account and offline booking; no direct web form was found"},
 	{"equipment", "实验室仪器", "equipment", "实验", "high", "live encrypted APIs expose instrument list, filters, detail, availability, user profile, reservations, favorites and cancellation"},
 	{"highway-experiment", "公路工程实验中心网站", "highway-experiment", "实验", "medium", "live public site exposes the equipment catalogue /pclass, detail pages /pro and booking guidance; no independent booking API observed"},
 	{"recruitment", "人才招聘", "recruitment", "招聘", "high", "live rczpw public SM2 ajaxService exposes channels, notices, organizations, positions and position detail"},
@@ -107,7 +108,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "official", "training-platform", "peixun", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "official", "training-platform", "peixun", "ehall", "service-hall", "mservice", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "mail", "fcmg", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "visit-reservation", "sqyrjd", "equipment", "highway-experiment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "campus-card", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -176,6 +177,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeStaffRecord(ctx, args[1:])
 	case "sunshine":
 		return a.executeSunshine(ctx, args[1:])
+	case "visit-reservation", "sqyrjd":
+		return a.executeVisitReservation(ctx, args[1:])
 	case "equipment":
 		return a.executeEquipment(ctx, args[1:])
 	case "highway-experiment":
@@ -462,6 +465,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "send-code":
 			add("--phone", "--yes")
 		}
+	case "visit-reservation", "sqyrjd":
+		common()
 	case "equipment":
 		common()
 		switch operation {

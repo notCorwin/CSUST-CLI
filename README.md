@@ -152,6 +152,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `textbooks` | 教材列表、账目和选订/退订 |
 | `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
 | `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
+| `visit-reservation` | 三全育人教育基地入馆预约渠道与说明；线上通过小程序/公众号，线下联系现场工作人员，未发现直接网页提交表单 |
 | `equipment` | 实验室仪器列表、筛选字典、列定义、详情、预约日历、个人资料、我的预约、收藏和取消预约 |
 | `highway-experiment` | 公路工程实验中心设备目录、设备详情和预约须知；未发现独立预约 API |
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |

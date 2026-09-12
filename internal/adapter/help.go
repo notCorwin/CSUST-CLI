@@ -85,6 +85,7 @@ func nativeUsage(args []string) []byte {
   student-record              学籍档案去向查询、预约和材料上传
   staff-record                教工人事档案预约
   sunshine                    教育阳光服务诉求提交/查询与短信验证
+  visit-reservation           三全育人教育基地入馆预约渠道与说明
   equipment                   实验室仪器、预约日历、个人资料、我的预约和收藏
   highway-experiment          公路工程实验中心设备目录、详情和预约须知
   recruitment                 人才招聘频道、公告、岗位筛选和详情
