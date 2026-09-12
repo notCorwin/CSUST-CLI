@@ -14,6 +14,8 @@ func TestLibraryCenterResourceAvailabilityAndPersonalQueries(t *testing.T) {
 	reserved := false
 	contactPhone, contactEmail := "", "old@example.com"
 	contactNotify := true
+	password := "old-password"
+	loggedIn := false
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/clientweb/xcus/ic2/Default.aspx":
@@ -48,7 +50,19 @@ func TestLibraryCenterResourceAvailabilityAndPersonalQueries(t *testing.T) {
 				http.NotFound(writer, request)
 			}
 		case "/ClientWeb/pro/ajax/login.aspx":
-			if request.URL.Query().Get("act") != "init_acc" {
+			switch request.URL.Query().Get("act") {
+			case "login":
+				if request.URL.Query().Get("id") != "account" || request.URL.Query().Get("pwd") != password {
+					writer.Header().Set("Content-Type", "application/json")
+					_, _ = writer.Write([]byte(`{"ret":0,"act":"login","msg":"密码错误","data":null,"ext":null}`))
+					return
+				}
+				loggedIn = true
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"ret":1,"act":"login","msg":"ok","data":null,"ext":null}`))
+				return
+			case "init_acc":
+			default:
 				http.NotFound(writer, request)
 				return
 			}
@@ -62,15 +76,23 @@ func TestLibraryCenterResourceAvailabilityAndPersonalQueries(t *testing.T) {
 			writer.Header().Set("Content-Type", "application/json")
 			_, _ = writer.Write([]byte(`{"ret":1,"act":"get_History_resv","msg":"<tbody><tr><td>2026-09-11</td><td>研修间</td><td>取消</td><td>已处理</td><td>0</td><td>无</td></tr></tbody>","data":null,"ext":null}`))
 		case "/ClientWeb/pro/ajax/account.aspx":
-			if request.URL.Query().Get("act") != "update_contact" {
-				http.NotFound(writer, request)
-				return
-			}
-			contactPhone = request.URL.Query().Get("phone")
-			contactEmail = request.URL.Query().Get("email")
-			contactNotify = request.URL.Query().Get("note_alert") == "true"
 			writer.Header().Set("Content-Type", "application/json")
-			_, _ = writer.Write([]byte(`{"ret":1,"act":"update_contact","msg":"ok","data":null,"ext":null}`))
+			switch request.URL.Query().Get("act") {
+			case "update_contact":
+				contactPhone = request.URL.Query().Get("phone")
+				contactEmail = request.URL.Query().Get("email")
+				contactNotify = request.URL.Query().Get("note_alert") == "true"
+				_, _ = writer.Write([]byte(`{"ret":1,"act":"update_contact","msg":"ok","data":null,"ext":null}`))
+			case "update_pwd":
+				if !loggedIn {
+					_, _ = writer.Write([]byte(`{"ret":0,"act":"update_pwd","msg":"未登录","data":null,"ext":null}`))
+					return
+				}
+				password = request.URL.Query().Get("pwd")
+				_, _ = writer.Write([]byte(`{"ret":1,"act":"update_pwd","msg":"ok","data":null,"ext":null}`))
+			default:
+				http.NotFound(writer, request)
+			}
 		default:
 			http.NotFound(writer, request)
 		}
@@ -109,6 +131,10 @@ func TestLibraryCenterResourceAvailabilityAndPersonalQueries(t *testing.T) {
 	updatedData := updated["data"].(map[string]any)
 	if updated["submitted"] != true || updated["confirmed"] != true || updatedData["phone"] != "13800000000" || updatedData["email"] != "new@example.com" || updatedData["receive"] != false {
 		t.Fatalf("contact update/readback failed: %#v", updated)
+	}
+	changed := runIssueJSON(t, "library-center", "change-password", "--current-password", "old-password", "--new-password", "new-password", "--yes")
+	if changed["submitted"] != true || changed["confirmed"] != true || password != "new-password" {
+		t.Fatalf("password change/readback failed: %#v password=%q", changed, password)
 	}
 
 	reservations := runIssueJSON(t, "library-center", "reservations")

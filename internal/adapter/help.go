@@ -81,7 +81,7 @@ func nativeUsage(args []string) []byte {
   ehall                       eHall 服务、身份、收藏、消息、邮箱、新闻、评价、服务项收藏、周期与详情
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心
-  library-center              图书馆个人资料、信用记录、空间/座位资源和预约
+  library-center              图书馆个人资料、信用记录、联系方式、密码、空间/座位资源和预约
   library                     图书馆馆藏检索、书目详情和馆藏状态
   library-remote              图书馆远程数据库导航、筛选和资源详情
   campus-map                  校园地图、校区、公共点、地点搜索和全景漫游

@@ -27,12 +27,14 @@ func (a NativeSite) executeLibraryCenter(ctx context.Context, args []string, coo
 		return a.libraryCenterServerTime(ctx, cookie)
 	case "update-contact":
 		return a.libraryCenterUpdateContact(ctx, args[1:], cookie)
+	case "change-password":
+		return a.libraryCenterChangePassword(ctx, args[1:], cookie)
 	case "reserve":
 		return a.libraryCenterReserve(ctx, args[1:], cookie)
 	case "cancel":
 		return a.libraryCenterCancel(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "library-center 只支持 status、catalog、login、logout、resources、profile、credit-history、availability、reservations、server-time、update-contact、reserve、cancel"}
+		return nil, &siteError{Code: "invalid_argument", Message: "library-center 只支持 status、catalog、login、logout、resources、profile、credit-history、availability、reservations、server-time、update-contact、change-password、reserve、cancel"}
 	}
 }
 
@@ -432,6 +434,76 @@ func (a NativeSite) libraryCenterUpdateContact(ctx context.Context, args []strin
 		"evidence": "update_contact ret=1 且 init_acc 回读匹配",
 		"service":  libraryPersonalService, "operation": "update-contact",
 		"data": afterData, "response": redactSiteJSON(payload),
+	}, nil
+}
+
+func (a NativeSite) libraryCenterChangePassword(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "修改图书馆密码会修改远端数据，请加 --yes"}
+	}
+	oldPassword, oldErr := businessSecret(args, "--current-password", "CSUST_LIBRARY_CURRENT_PASSWORD")
+	if oldErr != nil {
+		return nil, oldErr
+	}
+	newPassword, newErr := businessSecret(args, "--new-password", "CSUST_LIBRARY_NEW_PASSWORD")
+	if newErr != nil {
+		return nil, newErr
+	}
+	if strings.TrimSpace(oldPassword) == "" || strings.TrimSpace(newPassword) == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "当前密码和新密码不能为空"}
+	}
+	if oldPassword == newPassword {
+		return nil, &siteError{Code: "invalid_argument", Message: "新密码不能与当前密码相同"}
+	}
+	profile, profileErr := a.libraryCenterProfile(ctx, cookie)
+	if profileErr != nil {
+		return nil, profileErr
+	}
+	data, ok := profile["data"].(map[string]any)
+	if !ok || strings.TrimSpace(fmt.Sprint(data["id"])) == "" {
+		return nil, &siteError{Code: "parse_error", Message: "图书馆账户资料缺少登录名"}
+	}
+	id := strings.TrimSpace(fmt.Sprint(data["id"]))
+	login := func(password string) (map[string]any, *siteError) {
+		result, requestErr := businessRequest(ctx, libraryPersonalService, "GET", "/ClientWeb/pro/ajax/login.aspx", []pair{
+			{"act", "login"}, {"id", id}, {"pwd", password}, {"role", ""},
+		}, nil, nil, businessRequestOptions{cookieFile: cookie, require: true}, true, true)
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		payload, payloadErr := libraryCenterPayload(result)
+		if payloadErr != nil {
+			return nil, payloadErr
+		}
+		if fmt.Sprint(payload["ret"]) != "1" {
+			return nil, libraryCenterAPIError(payload, "图书馆账户登录失败")
+		}
+		return payload, nil
+	}
+	if _, loginErr := login(oldPassword); loginErr != nil {
+		return nil, loginErr
+	}
+	result, requestErr := businessRequest(ctx, libraryPersonalService, "GET", "/ClientWeb/pro/ajax/account.aspx", []pair{
+		{"act", "update_pwd"}, {"pwd", newPassword},
+	}, nil, nil, businessRequestOptions{cookieFile: cookie, require: true}, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := libraryCenterPayload(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	if fmt.Sprint(payload["ret"]) != "1" {
+		return nil, libraryCenterAPIError(payload, "图书馆密码修改失败")
+	}
+	if _, verifyErr := login(newPassword); verifyErr != nil {
+		return nil, &siteError{Code: "mutation_unverified", Message: "密码修改返回成功，但使用新密码重新登录验证失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "update_pwd ret=1", "cause": verifyErr.Code}}
+	}
+	return map[string]any{
+		"ok": true, "submitted": true, "confirmed": true,
+		"evidence": "update_pwd ret=1 且新密码重新登录成功",
+		"service":  libraryPersonalService, "operation": "change-password",
+		"account": id, "response": redactSiteJSON(payload),
 	}, nil
 }
 

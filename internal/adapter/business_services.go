@@ -62,7 +62,7 @@ var businessServices = []businessService{
 	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines /api/problem, /api/contest, /api/submissions and /api/submission"},
 	{"mooc", "本校网络课程目录", "mooc", "教学", "high", "live courseNetwork page exposes keyword, department, pagination and sort parameters with course rows"},
 	{"quality-system", "教学质量保障系统", "quality-system", "教学质量", "high", "live zbxt config/login plus bearer-protected home, dictionaries and teaching-quality APIs"},
-	{"library-personal", "图书馆个人中心、空间和座位预约查询", "library-personal", "图书馆", "high", "CAS login reaches ClientWeb IC center; device.aspx and reserve.aspx expose resource, availability, personal-reservation and server-time APIs"},
+	{"library-personal", "图书馆个人中心、空间和座位预约查询", "library-personal", "图书馆", "high", "CAS login reaches ClientWeb IC center; init_acc, center.aspx, account.aspx, device.aspx and reserve.aspx expose profile, credit, contact/password, resource, availability and personal-reservation APIs"},
 	{"library-catalog", "图书馆馆藏书目", "library-catalog", "图书馆", "high", "live OPAC exposes server-side catalogue search, book detail and /api/holding availability data"},
 	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
 	{"campus-map", "校园地图与公共点", "campus-map", "校园服务", "high", "live GIS APIs expose zones, public point types, points, point details, search and aerial/panorama resources"},
@@ -567,6 +567,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			case "resources", "reservations", "server-time":
 			case "update-contact":
 				add("--phone", "--email", "--notify", "--yes")
+			case "change-password":
+				add("--current-password", "--current-password-stdin", "--new-password", "--new-password-stdin", "--yes")
 			case "reserve":
 				add("--resource", "--room", "--item", "--date", "--from", "--to", "--theme", "--memo", "--member", "--group-id", "--yes")
 			case "cancel":
@@ -3394,7 +3396,7 @@ func (a NativeSite) executeSSOServiceCommand(ctx context.Context, args []string,
 	}
 	if service == libraryPersonalService {
 		switch args[0] {
-		case "resources", "profile", "credit-history", "availability", "reservations", "server-time", "update-contact", "reserve", "cancel":
+		case "resources", "profile", "credit-history", "availability", "reservations", "server-time", "update-contact", "change-password", "reserve", "cancel":
 			return a.executeLibraryCenter(ctx, args, cookie)
 		}
 	}
