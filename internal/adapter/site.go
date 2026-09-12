@@ -785,7 +785,8 @@ func businessState(content []byte, contentType string) (bool, bool, any) {
 
 func businessStateForRequest(content []byte, contentType string, mutating bool) (bool, bool, any) {
 	trimmed := bytes.TrimSpace(content)
-	if !mutating && (strings.Contains(strings.ToLower(contentType), "html") || bytes.HasPrefix(trimmed, []byte("<"))) {
+	if !mutating && (strings.Contains(strings.ToLower(contentType), "html") || bytes.HasPrefix(trimmed, []byte("<"))) &&
+		!bytes.HasPrefix(trimmed, []byte("{")) && !bytes.HasPrefix(trimmed, []byte("[")) {
 		return false, false, nil
 	}
 	return businessState(content, contentType)

@@ -169,6 +169,9 @@ func TestSiteBusinessStateAndBinaryResponse(t *testing.T) {
 	if state, known, _ := businessState([]byte(`<script>alert('证件号码或考生编号不存在!')</script>`), "text/html"); state || !known {
 		t.Fatalf("password reset rejection was not recognized: %v %v", state, known)
 	}
+	if state, known, decoded := businessStateForRequest([]byte(`{"state":"error","data":"1004"}`), "text/html; charset=utf-8", false); state || !known || decoded == nil {
+		t.Fatalf("JSON body mislabeled as HTML was not decoded: %v %v %#v", state, known, decoded)
+	}
 	if !isBinarySiteResponse(&http.Response{Header: http.Header{"Content-Type": []string{"application/pdf"}}}) {
 		t.Fatal("PDF should require --output")
 	}

@@ -70,7 +70,8 @@ func TestTransportInfoLoginProtocol(t *testing.T) {
 				t.Fatalf("transport-info login fields were not mapped: %v", request.Form)
 			}
 			loggedIn = true
-			writer.Header().Set("Content-Type", "application/json")
+			// The live endpoint returns JSON with an HTML content type.
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = fmt.Fprint(writer, `{"state":"success"}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/Home/Index":
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
