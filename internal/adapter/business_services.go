@@ -6,6 +6,7 @@ import (
 	cryptorand "crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -378,6 +379,12 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--username", "--password", "--password-stdin", "--check-key", "--captcha", "--captcha-image", "--remember")
 		case "report":
 			add("--report-code", "--page", "--page-size", "--filter", "--sort")
+		case "person-archive":
+			add("--person-id", "--category-code")
+		case "attachments":
+			add("--volume-id", "--format")
+		case "download":
+			add("--file-id", "--output")
 		}
 	case "student-record":
 		common()
@@ -2378,8 +2385,8 @@ func (a NativeSite) executePartyExam(ctx context.Context, args []string) (map[st
 func (a NativeSite) executeArchive(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "frontend bundles and live login pages", "service": "archive", "systems": []map[string]any{
-			{"name": "student", "service": "student-archive", "label": "学生档案管理", "capabilities": []string{"status", "login", "logout", "report"}},
-			{"name": "management", "service": "archive-management", "label": "综合档案管理", "capabilities": []string{"status", "login", "logout", "report"}},
+			{"name": "student", "service": "student-archive", "label": "学生档案管理", "capabilities": []string{"status", "login", "logout", "report", "person-archive", "attachments", "download"}},
+			{"name": "management", "service": "archive-management", "label": "综合档案管理", "capabilities": []string{"status", "login", "logout", "report", "person-archive", "attachments", "download"}},
 		}}, nil
 	}
 	system, err := businessRequired(args[1:], "--system", "archive 必须提供 --system student 或 management")
@@ -2403,12 +2410,18 @@ func (a NativeSite) executeArchive(ctx context.Context, args []string) (map[stri
 		return a.archiveLogout(ctx, args[1:], service, system)
 	case "report":
 		return a.archiveReport(ctx, args[1:], service, system)
+	case "person-archive":
+		return a.archivePersonArchive(ctx, args[1:], service, system)
+	case "attachments":
+		return a.archiveAttachments(ctx, args[1:], service, system)
+	case "download":
+		return a.archiveDownload(ctx, args[1:], service, system)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "archive 只支持 status、login、logout、report、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "archive 只支持 status、login、logout、report、person-archive、attachments、download、catalog"}
 	}
 }
 
-const archiveAPIBase = "/archive"
+const archiveAPIBase = "/jeecg-boot"
 
 func archiveRequestOptions(args []string, service string, require bool) (businessRequestOptions, *siteError) {
 	cookie, _, err := businessValue(args, "--cookie-file")
@@ -2477,8 +2490,12 @@ func (a NativeSite) archiveLogin(ctx context.Context, args []string, service, sy
 			imagePath = filepath.Join(filepath.Dir(cookiePath), cookieHost(mustParseURL(knownSites[service].scheme+"://"+knownSites[service].host))+"-archive-captcha.png")
 		}
 		imagePath = expandUserPath(imagePath)
-		if _, imageErr := a.execute(ctx, siteRequest{Service: service, Path: archiveServicePath("sys/randomImage/" + url.PathEscape(checkKey)), Method: "GET", CookieFile: cookie, Output: imagePath, ReadOnly: true, Yes: true}); imageErr != nil {
+		captchaResult, imageErr := a.businessGet(ctx, service, archiveServicePath("sys/randomImage/"+url.PathEscape(checkKey)), nil, businessRequestOptions{cookieFile: cookie})
+		if imageErr != nil {
 			return nil, imageErr
+		}
+		if writeErr := writeArchiveCaptcha(captchaResult, imagePath); writeErr != nil {
+			return nil, writeErr
 		}
 		return nil, &siteError{Code: "captcha_required", Message: "档案系统登录需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": imagePath, "check_key": checkKey}}
 	}
@@ -2510,6 +2527,24 @@ func (a NativeSite) archiveLogin(ctx context.Context, args []string, service, sy
 		return nil, &siteError{Code: "session_error", Message: "登录成功但令牌保存失败: " + writeErr.Error(), Details: map[string]any{"submitted": false, "confirmed": true, "evidence": "remote-login-code"}}
 	}
 	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "remote-login-code-and-token-saved", "service": service, "operation": "login", "system": system, "username": account, "cookie_file": cookiePath, "token_file": tokenPath}, nil
+}
+
+func writeArchiveCaptcha(result map[string]any, path string) *siteError {
+	value := findString(businessPayload(result), "result", "data")
+	if value == "" {
+		return &siteError{Code: "parse_error", Message: "档案系统验证码响应缺少图片数据"}
+	}
+	if comma := strings.IndexByte(value, ','); comma >= 0 {
+		value = value[comma+1:]
+	}
+	content, decodeErr := base64.StdEncoding.DecodeString(value)
+	if decodeErr != nil {
+		return &siteError{Code: "parse_error", Message: "档案系统验证码图片解码失败: " + decodeErr.Error()}
+	}
+	if writeErr := atomicWrite(path, content); writeErr != nil {
+		return &siteError{Code: "cookie_write_failed", Message: "验证码图片保存失败: " + writeErr.Error()}
+	}
+	return nil
 }
 
 func findString(value any, keys ...string) string {
@@ -2635,6 +2670,111 @@ func (a NativeSite) archiveReport(ctx context.Context, args []string, service, s
 		"service": service, "operation": "report", "system": system, "report_code": code,
 		"page": page, "page_size": pageSize, "columns": businessPayload(columns), "query": businessPayload(queryInfo), "data": businessPayload(data),
 	}, nil
+}
+
+func (a NativeSite) archivePersonArchive(ctx context.Context, args []string, service, system string) (map[string]any, *siteError) {
+	options, optionsErr := archiveRequestOptions(args, service, true)
+	if optionsErr != nil {
+		return nil, optionsErr
+	}
+	personID, requiredErr := businessRequired(args, "--person-id", "person-archive 必须提供 --person-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	codeResult, requestErr := a.businessGet(ctx, service, archiveServicePath("das.archive/dasInfoVolumes/personArchiveCode"), []pair{{"personId", personID}}, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result := map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "archive-person-api-response",
+		"service": service, "operation": "person-archive", "system": system, "person_id": personID,
+		"category_codes": businessPayload(codeResult),
+	}
+	categoryCode := flagValue(args, "--category-code")
+	if categoryCode == "" {
+		return result, nil
+	}
+	treeResult, requestErr := a.businessGet(ctx, service, archiveServicePath("das.archive/dasInfoVolumes/getTreeList"), []pair{{"archiveCtgNoCode", categoryCode}}, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	personPath := "das.archive/dasInfoVolumes/personArchive"
+	if categoryCode == "ZZ" {
+		personPath += "ZZ"
+	}
+	directoryResult, requestErr := a.businessGet(ctx, service, archiveServicePath(personPath), []pair{{"archiveCtgNoCode", categoryCode}, {"personId", personID}}, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result["category_code"] = categoryCode
+	result["category_tree"] = businessPayload(treeResult)
+	result["directories"] = businessPayload(directoryResult)
+	return result, nil
+}
+
+func (a NativeSite) archiveAttachments(ctx context.Context, args []string, service, system string) (map[string]any, *siteError) {
+	options, optionsErr := archiveRequestOptions(args, service, true)
+	if optionsErr != nil {
+		return nil, optionsErr
+	}
+	volumeID, requiredErr := businessRequired(args, "--volume-id", "attachments 必须提供 --volume-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	format := flagValue(args, "--format")
+	selectedOption := map[string]string{"image": "1", "pdf": "2", "signature": "3"}[strings.ToLower(format)]
+	if format != "" && selectedOption == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "--format 只能是 image、pdf 或 signature"}
+	}
+	if selectedOption == "" {
+		selectedOption = "2"
+	}
+	result, requestErr := a.businessGet(ctx, service, archiveServicePath("das.archive/dasInfoVolumes/listDasInfoAttachmentByVolumeId"), []pair{{"volumeId", volumeID}, {"selectedOption", selectedOption}}, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "archive-attachment-api-response",
+		"service": service, "operation": "attachments", "system": system, "volume_id": volumeID,
+		"format": formatName(selectedOption), "data": businessPayload(result),
+	}, nil
+}
+
+func (a NativeSite) archiveDownload(ctx context.Context, args []string, service, system string) (map[string]any, *siteError) {
+	options, optionsErr := archiveRequestOptions(args, service, true)
+	if optionsErr != nil {
+		return nil, optionsErr
+	}
+	fileID, requiredErr := businessRequired(args, "--file-id", "download 必须提供 --file-id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	output, requiredErr := businessRequired(args, "--output", "download 必须提供 --output")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	dateResult, requestErr := a.businessGet(ctx, service, archiveServicePath("das.archive/dasInfoVolumes/getDateTimeToString"), nil, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	cacheBust := findString(businessPayload(dateResult), "result", "data")
+	if cacheBust == "" {
+		cacheBust = strconv.FormatInt(time.Now().UnixMilli(), 10)
+	}
+	result, requestErr := a.execute(ctx, siteRequest{
+		Service: service, Method: "GET", Path: archiveServicePath("das.archive/dasInfoVolumes/download/" + url.PathEscape(fileID)),
+		Params: []pair{{"_t", cacheBust}}, Headers: options.headers, CookieFile: options.cookieFile,
+		RequireLogin: true, Output: expandUserPath(output), ReadOnly: true, Yes: true,
+	})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result["service"], result["operation"], result["system"], result["file_id"] = service, "download", system, fileID
+	return result, nil
+}
+
+func formatName(value string) string {
+	return map[string]string{"1": "image", "2": "pdf", "3": "signature"}[value]
 }
 
 func businessPayload(result map[string]any) any {

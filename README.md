@@ -348,6 +348,10 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust student-digital-archive grades --json
 ./csust student-digital-archive schedule --term 2025-2026-1 --json
 ./csust student-digital-archive notes --json
+# 学生/综合档案：登录后读取个人档案目录、卷内附件并下载文件
+./csust archive person-archive --system student --person-id PERSON_ID --json
+./csust archive attachments --system student --volume-id VOLUME_ID --format pdf --json
+./csust archive download --system student --file-id FILE_ID --output ./archive.pdf --json
 # 智慧财务：收费、奖助、退费和工资/收入等查询
 ./csust finance-query overview --json
 ./csust finance-query fees --status unpaid --json

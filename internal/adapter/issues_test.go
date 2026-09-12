@@ -403,10 +403,63 @@ func TestArchiveCatalogOnlyAdvertisesImplementedCapabilities(t *testing.T) {
 	systems := result["systems"].([]map[string]any)
 	for _, system := range systems {
 		capabilities := fmt.Sprint(system["capabilities"])
-		for _, advertised := range []string{"record-query", "person-archive", "collection", "user-management", "import-export"} {
+		for _, advertised := range []string{"record-query", "collection", "user-management", "import-export"} {
 			if strings.Contains(capabilities, advertised) {
 				t.Fatalf("unimplemented archive capability remains advertised: %#v", system)
 			}
+		}
+	}
+}
+
+func TestArchiveUsesJeecgBootPersonAndDownloadAPIs(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/jeecg-boot/das.archive/dasInfoVolumes/personArchiveCode":
+			_, _ = writer.Write([]byte(`{"success":true,"code":0,"result":"BD"}`))
+		case "/jeecg-boot/das.archive/dasInfoVolumes/getTreeList":
+			_, _ = writer.Write([]byte(`{"success":true,"code":0,"result":[]}`))
+		case "/jeecg-boot/das.archive/dasInfoVolumes/personArchive":
+			_, _ = writer.Write([]byte(`{"success":true,"code":0,"result":[{"id":"volume-1"}]}`))
+		case "/jeecg-boot/das.archive/dasInfoVolumes/listDasInfoAttachmentByVolumeId":
+			_, _ = writer.Write([]byte(`{"success":true,"code":0,"result":[{"id":"file-1","format":"pdf"}]}`))
+		case "/jeecg-boot/das.archive/dasInfoVolumes/getDateTimeToString":
+			_, _ = writer.Write([]byte(`{"success":true,"code":0,"result":"123"}`))
+		case "/jeecg-boot/sys/randomImage/check-key":
+			_, _ = writer.Write([]byte(`{"success":true,"code":0,"result":"data:image/png;base64,UE5H"}`))
+		case "/jeecg-boot/das.archive/dasInfoVolumes/download/file-1":
+			writer.Header().Set("Content-Type", "application/pdf")
+			_, _ = writer.Write([]byte("%PDF-1.4 test"))
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	_ = runIssueJSON(t, "archive", "person-archive", "--system", "student", "--person-id", "person-1", "--category-code", "BD", "--access-token", "token")
+	_ = runIssueJSON(t, "archive", "attachments", "--system", "student", "--volume-id", "volume-1", "--format", "pdf", "--access-token", "token")
+	output := filepath.Join(t.TempDir(), "archive.pdf")
+	_ = runIssueJSON(t, "archive", "download", "--system", "student", "--file-id", "file-1", "--output", output, "--access-token", "token")
+	content, err := os.ReadFile(output)
+	if err != nil || !strings.HasPrefix(string(content), "%PDF-") {
+		t.Fatalf("archive download was not saved as PDF: err=%v content=%q", err, content)
+	}
+	captchaPath := filepath.Join(t.TempDir(), "captcha.png")
+	handled, stdout, _, code, runErr := (NativeSite{}).Run(context.Background(), []string{"archive", "login", "--system", "student", "--username", "u", "--password", "p", "--check-key", "check-key", "--captcha-image", captchaPath, "--json"}, true)
+	if runErr != nil || !handled || code != 2 {
+		t.Fatalf("captcha challenge did not stop for input: handled=%v code=%d err=%v stdout=%s", handled, code, runErr, stdout)
+	}
+	captcha, err := os.ReadFile(captchaPath)
+	if err != nil || string(captcha) != "PNG" {
+		t.Fatalf("captcha data URL was not decoded: err=%v content=%q", err, captcha)
+	}
+	for _, path := range paths {
+		if !strings.HasPrefix(path, "/jeecg-boot/") {
+			t.Fatalf("archive API used wrong base path: %q", path)
 		}
 	}
 }

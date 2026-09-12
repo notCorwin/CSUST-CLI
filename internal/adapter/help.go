@@ -80,7 +80,7 @@ func nativeUsage(args []string) []byte {
   mooc                        本校网络课程目录、院系筛选和分页查询
   quality-system              教学质量保障系统配置、登录、听评课和教学质量汇总查询
   party-exam                  党校课程与成绩
-  archive                     学生/综合档案系统
+  archive                     学生/综合档案系统；person-archive、attachments、download 使用真实档案 API
   student-record              学籍档案预约
   staff-record                教工人事档案预约
   sunshine                    教育阳光服务诉求提交/查询与短信验证
