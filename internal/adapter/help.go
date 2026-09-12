@@ -77,6 +77,7 @@ func nativeUsage(args []string) []byte {
   electronic-documents         电子成绩单与在校证明登录、文件类型、申请记录和申请/下载
   campus-network              校园网自助服务资料、账单、详单、缴费、套餐和设备
   student-digital-archive     学生数字档案个人资料、学业、借阅、消费、上网和随手记
+  finance-query/finance       智慧财务收费、奖助、减免、退费、缓交、收入和贷款查询
   research                    科研管理系统角色登录、验证码和会话
   transport-info              交通学院综合信息服务登录、验证码和会话
   transport-lab               实验室预约用户/教职工登录、注册、找回密码和会话

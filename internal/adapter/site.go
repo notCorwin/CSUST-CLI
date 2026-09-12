@@ -102,7 +102,7 @@ var knownSites = map[string]serviceInfo{
 	"journal-science":          {host: "cslgxbzk.csust.edu.cn", scheme: "https", path: "/"},
 	"journal-experiment":       {host: "syjx.csust.edu.cn", scheme: "https", path: "/"},
 	"admissions":               {host: "zslq.csust.edu.cn", scheme: "https", path: "/"},
-	"finance-query":            {host: "cwcx.csust.edu.cn", scheme: "https", path: "/"},
+	"finance-query":            {host: "cwcx.csust.edu.cn", scheme: "http", path: "/AC/sso/index"},
 	"union":                    {host: "gonghui.csust.edu.cn", scheme: "https", path: "/front/page.do?dispatch=proindex"},
 	"transport-lab":            {host: "jtsysyy.csust.edu.cn", scheme: "http", path: "/Login/Index"},
 	"continuing-platform":      {host: "xwwy.csust.edu.cn", scheme: "https", path: "/"},

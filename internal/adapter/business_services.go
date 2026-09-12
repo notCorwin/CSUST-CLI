@@ -78,6 +78,7 @@ var businessServices = []businessService{
 	{"electronic-documents", "电子成绩单与在校证明", "electronic-documents", "学生服务", "high", "eHall service link reaches kxpz CAS; live SPA exposes file types, application records, previews, PDF download and email delivery APIs"},
 	{"campus-network", "校园网自助服务", "campus-network", "校园网络", "high", "eHall 上网信息管理入口的服务器端表单和 JSON 端点提供资料、账单、详单、缴费、在线设备、套餐及设备绑定业务"},
 	{"student-digital-archive", "学生数字档案", "student-digital-archive", "学生服务", "high", "eHall service link reaches pdp CAS; live SPA exposes structured profile, study, library, card, online, attendance, label, timeline and note APIs"},
+	{"finance-query", "智慧财务查询", "finance-query", "财务", "high", "eHall 进入智慧财务工作台；live CWCX_V2 exposes fees, aid, exemption, refund, deferred-payment, income, student-loan and public financial query APIs"},
 	{"research", "科研管理系统", "research", "科研", "medium", "live login page exposes researcher/management roles and Login.aspx plus EncryptString.ashx protocol"},
 	{"transport-info", "交通学院综合信息服务", "transport-info", "学院管理", "medium", "live login.js exposes /Login/CheckLogin, captcha and protected /Home/Index"},
 	{"continuing-platform", "继续教育信息服务平台", "continuing-platform", "继续教育", "high", "live xwwy ASP.NET form exposes authority, student and station login roles plus public pre-enrollment query"},
@@ -98,7 +99,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "student-digital-archive", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "campus-network", "student-digital-archive", "finance", "finance-query", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -171,6 +172,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeCampusNetwork(ctx, args[1:])
 	case "student-digital-archive":
 		return a.executeStudentDigitalArchive(ctx, args[1:])
+	case "finance", "finance-query":
+		return a.executeFinanceQuery(ctx, args[1:])
 	case "research":
 		return a.executeResearch(ctx, args[1:])
 	case "transport-info":
@@ -515,6 +518,24 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--year", "--title", "--from", "--to", "--page", "--page-size")
 		case "note":
 			add("--id")
+		}
+	case "finance", "finance-query":
+		common()
+		switch operation {
+		case "login":
+			add("--auth", "--username", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			add("--yes")
+		case "fees", "fee-status":
+			add("--year", "--status", "--page", "--page-size")
+		case "fee-details", "payments", "aid", "awards", "exemptions", "refunds", "deferred", "deferred-payments":
+			add("--page", "--page-size")
+		case "income", "salary":
+			add("--year", "--page", "--page-size")
+		case "incoming":
+			add("--year", "--keyword", "--page", "--page-size")
+		case "bank-refunds", "unconfirmed-loans", "student-loans":
+			add("--keyword", "--page", "--page-size")
 		}
 	case "research":
 		common()
