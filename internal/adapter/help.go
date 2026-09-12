@@ -82,7 +82,7 @@ func nativeUsage(args []string) []byte {
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心
   library-center              图书馆个人资料、信用记录、联系方式、密码、空间/座位资源和预约
-  library                     图书馆馆藏检索、书目详情和馆藏状态
+  library                     图书馆馆藏/书目、读者资料、借阅、预约、权限和规则
   library-remote              图书馆远程数据库导航、筛选和资源详情
   campus-map                  校园地图、校区、公共点、地点搜索和全景漫游
   graduate-admissions         研究生招生旧系统

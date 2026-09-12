@@ -30,15 +30,286 @@ func (a NativeSite) executeLibraryCatalog(ctx context.Context, args []string) (m
 		return nil, valueErr
 	}
 	switch args[0] {
+	case "status":
+		result, statusErr := a.libraryCatalogProfile(ctx, nil, cookie)
+		if result != nil {
+			result["operation"], result["logged_in"] = "status", true
+		}
+		return result, statusErr
+	case "login":
+		return a.libraryCatalogLogin(ctx, args[1:], cookie)
+	case "logout":
+		return a.libraryCatalogLogout(cookie)
 	case "search", "list":
 		return a.libraryCatalogSearch(ctx, args[1:], cookie)
 	case "book", "detail":
 		return a.libraryCatalogBook(ctx, args[1:], cookie)
 	case "holdings", "holding":
 		return a.libraryCatalogHoldings(ctx, args[1:], cookie)
+	case "profile", "reader-profile":
+		return a.libraryCatalogProfile(ctx, args[1:], cookie)
+	case "loans", "current-loans":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "loans", "/loan/currentLoanList")
+	case "special-loans":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "special-loans", "/loan/currentSpecLoanList")
+	case "loan-history", "history-loans":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "loan-history", "/loan/historyLoanList")
+	case "reservations", "current-reservations":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "reservations", "/reservation/currentReservationList")
+	case "reservation-history":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "reservation-history", "/reservation/historyReservationList")
+	case "privileges", "reader-privileges":
+		return a.libraryCatalogPrivileges(ctx, args[1:], cookie)
+	case "finance", "fees":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "finance", "/finance/financeList")
+	case "shelf", "book-shelf":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "shelf", "/privateCollection/privateCollectionList")
+	case "preloans", "pre-loans":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "preloans", "/prelend/currentPrelendList")
+	case "tags":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "tags", "/tag/privateTagList")
+	case "booklists", "book-lists":
+		return a.libraryCatalogReaderPage(ctx, args[1:], cookie, "booklists", "/booklist/list")
+	case "loan-rule", "rule":
+		return a.libraryCatalogLoanRule(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "library 只支持 search、book、holdings、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "library 只支持 login、logout、status、search、book、holdings、profile、loans、special-loans、loan-history、reservations、reservation-history、privileges、finance、shelf、preloans、tags、booklists、loan-rule、catalog"}
 	}
+}
+
+func libraryCatalogReaderTarget(target *url.URL) *url.URL {
+	copy := *target
+	copy.Scheme, copy.Path, copy.RawQuery, copy.Fragment = "http", "/special/toOpac", "", ""
+	return &copy
+}
+
+func (a NativeSite) libraryCatalogLogin(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	loginArgs := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		if args[index] == "--cookie-file" {
+			index++
+			continue
+		}
+		loginArgs = append(loginArgs, args[index])
+	}
+	options, parseErr := parseLoginOptions(loginArgs)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if options.auth == "local" {
+		return nil, &siteError{Code: "invalid_argument", Message: "library-catalog 只支持 --auth sso"}
+	}
+	target, cookiePath, resolveErr := resolveSite(siteRequest{Service: libraryCatalogService, CookieFile: cookie})
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	return a.loginSSOService(ctx, libraryCatalogReaderTarget(target), cookiePath, options)
+}
+
+func (a NativeSite) libraryCatalogLogout(cookie string) (map[string]any, *siteError) {
+	target, cookiePath, resolveErr := resolveSite(siteRequest{Service: libraryCatalogService, CookieFile: cookie})
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	if removeErr := removeCookieFile(cookiePath); removeErr != nil {
+		return nil, &siteError{Code: "cookie_write_failed", Message: removeErr.Error()}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "local-cookie-removed",
+		"service": libraryCatalogService, "operation": "logout", "logged_out": true,
+		"cookie_file": cookiePath, "target": safeSiteURL(libraryCatalogReaderTarget(target)),
+	}, nil
+}
+
+func (a NativeSite) libraryCatalogProfile(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.businessGet(ctx, libraryCatalogService, "/reader/getReaderInfo", []pair{{"return_fmt", "json"}}, businessRequestOptions{cookieFile: cookie, require: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := businessJSONMap(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	reader, ok := payload["reader"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "图书馆读者资料响应缺少 reader"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "OPAC /reader/getReaderInfo?return_fmt=json 返回",
+		"service":  libraryCatalogService, "operation": "profile", "data": redactSiteJSON(reader),
+		"reader": redactSiteJSON(reader), "raw": redactSiteJSON(payload),
+	}, nil
+}
+
+func (a NativeSite) libraryCatalogReaderPage(ctx context.Context, args []string, cookie, operation, path string) (map[string]any, *siteError) {
+	params, page, pageSize, paramsErr := libraryCatalogReaderParams(args, operation)
+	if paramsErr != nil {
+		return nil, paramsErr
+	}
+	result, requestErr := a.businessGet(ctx, libraryCatalogService, path, params, businessRequestOptions{cookieFile: cookie, require: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := businessJSONMap(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	paginator, _ := payload["paginator"].(map[string]any)
+	data, _ := paginator["currentPages"].([]any)
+	if data == nil {
+		data = []any{}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "OPAC " + path + "?return_fmt=json 返回",
+		"service":  libraryCatalogService, "operation": operation,
+		"page": page, "page_size": pageSize, "data": redactSiteJSON(data),
+		"total": paginator["totalRows"], "pagination": redactSiteJSON(paginator),
+		"raw": redactSiteJSON(payload),
+	}, nil
+}
+
+func libraryCatalogReaderParams(args []string, operation string) ([]pair, int, int, *siteError) {
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, 0, 0, pageErr
+	}
+	pageSize, pageSizeErr := businessInt(args, "--page-size", 10)
+	if pageSizeErr != nil {
+		return nil, 0, 0, pageSizeErr
+	}
+	params := []pair{{"return_fmt", "json"}, {"page", strconv.Itoa(page)}, {"rows", strconv.Itoa(pageSize)}}
+	if operation == "loans" || operation == "special-loans" || operation == "loan-history" || operation == "reservations" || operation == "reservation-history" || operation == "privileges" {
+		query, found, valueErr := businessValue(args, "--query")
+		if valueErr != nil {
+			return nil, 0, 0, valueErr
+		}
+		if !found {
+			query, _, valueErr = businessValue(args, "--keyword")
+			if valueErr != nil {
+				return nil, 0, 0, valueErr
+			}
+		}
+		field, _, valueErr := businessValue(args, "--field")
+		if valueErr != nil {
+			return nil, 0, 0, valueErr
+		}
+		field, fieldErr := libraryCatalogReaderField(field)
+		if fieldErr != nil {
+			return nil, 0, 0, fieldErr
+		}
+		params = append(params, pair{"searchType", field}, pair{"searchValue", strings.TrimSpace(query)})
+	}
+	if operation == "loan-history" {
+		from, _, valueErr := businessValue(args, "--from")
+		if valueErr != nil {
+			return nil, 0, 0, valueErr
+		}
+		to, _, valueErr := businessValue(args, "--to")
+		if valueErr != nil {
+			return nil, 0, 0, valueErr
+		}
+		logType, _, valueErr := businessValue(args, "--operation")
+		if valueErr != nil {
+			return nil, 0, 0, valueErr
+		}
+		logType, logTypeErr := libraryCatalogLogType(logType)
+		if logTypeErr != nil {
+			return nil, 0, 0, logTypeErr
+		}
+		params = append(params, pair{"starttime", strings.TrimSpace(from)}, pair{"endtime", strings.TrimSpace(to)}, pair{"logType", logType})
+	}
+	return params, page, pageSize, nil
+}
+
+func libraryCatalogReaderField(value string) (string, *siteError) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "any", "all", "任意词":
+		return "", nil
+	case "title", "题名":
+		return "title", nil
+	case "barcode", "条码号":
+		return "barcode", nil
+	case "author", "作者":
+		return "author", nil
+	case "call-number", "callno", "索书号":
+		return "callNo", nil
+	case "isbn":
+		return "isbn", nil
+	case "location", "localcode", "馆藏地点":
+		return "localcode", nil
+	case "circulation-type", "cirtype", "图书流通类型":
+		return "cirtype", nil
+	default:
+		return "", &siteError{Code: "invalid_argument", Message: "--field 只能是 any、title、barcode、author、call-number、isbn、location 或 circulation-type"}
+	}
+}
+
+func libraryCatalogLogType(value string) (string, *siteError) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "all", "全部":
+		return "", nil
+	case "borrow", "loan", "借阅", "30001":
+		return "30001", nil
+	case "return", "归还", "30002":
+		return "30002", nil
+	default:
+		return "", &siteError{Code: "invalid_argument", Message: "--operation 只能是 all、borrow 或 return"}
+	}
+}
+
+func (a NativeSite) libraryCatalogPrivileges(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	params, _, _, paramsErr := libraryCatalogReaderParams(args, "privileges")
+	if paramsErr != nil {
+		return nil, paramsErr
+	}
+	result, requestErr := a.businessGet(ctx, libraryCatalogService, "/reader/readerPrivilegeList", params, businessRequestOptions{cookieFile: cookie, require: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := businessJSONMap(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	data := payload["readerPrivilegeList"]
+	if data == nil {
+		data = []any{}
+	}
+	paginator, _ := payload["paginator"].(map[string]any)
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "OPAC /reader/readerPrivilegeList?return_fmt=json 返回",
+		"service":  libraryCatalogService, "operation": "privileges",
+		"data": redactSiteJSON(data), "policy": redactSiteJSON(payload["prcType"]),
+		"total": paginator["totalRows"], "pagination": redactSiteJSON(paginator), "raw": redactSiteJSON(payload),
+	}, nil
+}
+
+func (a NativeSite) libraryCatalogLoanRule(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	id, requiredErr := businessRequired(args, "--id", "loan-rule 必须提供 --id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	id = strings.TrimSpace(id)
+	result, requestErr := a.businessGet(ctx, libraryCatalogService, "/reader/getLoanRule/"+url.PathEscape(id), []pair{{"ruleNo", id}, {"return_fmt", "json"}}, businessRequestOptions{cookieFile: cookie, require: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, payloadErr := businessJSONMap(result)
+	if payloadErr != nil {
+		return nil, payloadErr
+	}
+	rule, ok := payload["loanRule"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "parse_error", Message: "图书馆借阅规则响应缺少 loanRule"}
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "OPAC /reader/getLoanRule?return_fmt=json 返回",
+		"service":  libraryCatalogService, "operation": "loan-rule", "id": id,
+		"data": redactSiteJSON(rule), "rule": redactSiteJSON(rule), "raw": redactSiteJSON(payload),
+	}, nil
 }
 
 func (a NativeSite) libraryCatalogSearch(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {

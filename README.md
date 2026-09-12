@@ -159,7 +159,7 @@ password=密码
 | `mooc` | 本校网络课程目录、院系筛选和分页查询 |
 | `quality-system` | 教学质量保障系统配置、登录、听评课和教学质量汇总查询 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
-| `library` | 图书馆馆藏检索、书目详情和馆藏状态 |
+| `library` | 图书馆馆藏检索、书目详情、馆藏状态、读者资料、借阅/预约/权限及规则查询 |
 | `library-center` | 图书馆个人资料、信用记录、联系方式/密码、空间/座位资源、可用状态、个人预约查询以及预约/取消 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
@@ -299,6 +299,14 @@ password=密码
 ./csust library search --query 人工智能 --field title --in-library --json
 ./csust library book --id 91103 --json
 ./csust library holdings --id 91103 --json
+# 图书馆 OPAC 个人业务：CAS 登录后复用会话查询读者资料、借阅、预约、权限和规则
+./csust library-catalog login --auth sso --password-stdin --json
+./csust library-catalog profile --json
+./csust library-catalog loans --json
+./csust library-catalog loan-history --from 2026-01-01 --to 2026-09-12 --json
+./csust library-catalog reservations --json
+./csust library-catalog privileges --json
+./csust library-catalog loan-rule --id 15C150 --json
 # 图书馆空间/座位：先登录，再查资源、状态和个人预约；写操作显式确认并回读
 ./csust library-center login --auth sso --password-stdin --json
 ./csust library-center resources --json

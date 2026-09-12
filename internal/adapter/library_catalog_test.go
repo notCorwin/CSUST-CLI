@@ -56,6 +56,59 @@ func TestLibraryCatalogSearchAndBook(t *testing.T) {
 	}
 }
 
+func TestLibraryCatalogReaderJSONOperations(t *testing.T) {
+	var queries = make(map[string]string)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		queries[request.URL.Path] = request.URL.RawQuery
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/reader/getReaderInfo":
+			_, _ = fmt.Fprint(writer, `{"flag":true,"reader":{"rdid":"reader-1","rdName":"测试读者","rdUnit":"交通学院","rdPasswd":"hidden"}}`)
+		case "/loan/currentLoanList":
+			_, _ = fmt.Fprint(writer, `{"paginator":{"page":1,"rows":20,"totalRows":1,"currentPages":[{"title":"当前借阅","barcode":"B1"}]}}`)
+		case "/loan/historyLoanList":
+			_, _ = fmt.Fprint(writer, `{"paginator":{"page":1,"rows":10,"totalRows":2,"currentPages":[{"title":"历史借阅","logType":"30001"}]},"starttime":"2026-01-01","endtime":"2026-09-12","logType":"30001"}`)
+		case "/reader/readerPrivilegeList":
+			_, _ = fmt.Fprint(writer, `{"prcType":{"borrowNum":15,"maxResNum":15},"readerPrivilegeList":[{"localCode":"0547","ruleNo":"15C150"}],"paginator":{"totalRows":1,"currentPages":[1]}}`)
+		case "/reservation/currentReservationList":
+			_, _ = fmt.Fprint(writer, `{"paginator":{"totalRows":0,"currentPages":[]},"message":"没有相关记录!"}`)
+		case "/reader/getLoanRule/15C150":
+			_, _ = fmt.Fprint(writer, `{"loanRule":{"ruleNo":"15C150","loanNum":15,"renewNum":1,"renewDate":31}}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "library.cookies"))
+
+	profile := runIssueJSON(t, "library-catalog", "profile")
+	reader := profile["reader"].(map[string]any)
+	if reader["rdName"] != "测试读者" || reader["rdPasswd"] != "<redacted>" {
+		t.Fatalf("reader profile was not redacted/mapped: %#v", profile)
+	}
+	loans := runIssueJSON(t, "library-catalog", "loans", "--page-size", "20")
+	if loans["total"] != float64(1) || loans["data"].([]any)[0].(map[string]any)["barcode"] != "B1" {
+		t.Fatalf("current loans were not mapped: %#v", loans)
+	}
+	history := runIssueJSON(t, "library-catalog", "loan-history", "--from", "2026-01-01", "--to", "2026-09-12", "--operation", "borrow")
+	if history["total"] != float64(2) || history["data"].([]any)[0].(map[string]any)["title"] != "历史借阅" {
+		t.Fatalf("loan history was not mapped: %#v", history)
+	}
+	privileges := runIssueJSON(t, "library-catalog", "privileges")
+	if privileges["policy"].(map[string]any)["borrowNum"] != float64(15) || len(privileges["data"].([]any)) != 1 {
+		t.Fatalf("reader privileges were not mapped: %#v", privileges)
+	}
+	reservations := runIssueJSON(t, "library-catalog", "reservations")
+	if reservations["total"] != float64(0) || len(reservations["data"].([]any)) != 0 {
+		t.Fatalf("reservations were not mapped: %#v", reservations)
+	}
+	rule := runIssueJSON(t, "library-catalog", "loan-rule", "--id", "15C150")
+	if rule["rule"].(map[string]any)["renewDate"] != float64(31) || queries["/reader/getLoanRule/15C150"] == "" {
+		t.Fatalf("loan rule was not mapped: %#v queries=%#v", rule, queries)
+	}
+}
+
 func containsAll(value string, parts ...string) bool {
 	for _, part := range parts {
 		if !strings.Contains(value, part) {

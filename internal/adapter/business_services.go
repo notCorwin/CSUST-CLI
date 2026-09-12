@@ -63,7 +63,7 @@ var businessServices = []businessService{
 	{"mooc", "本校网络课程目录", "mooc", "教学", "high", "live courseNetwork page exposes keyword, department, pagination and sort parameters with course rows"},
 	{"quality-system", "教学质量保障系统", "quality-system", "教学质量", "high", "live zbxt config/login plus bearer-protected home, dictionaries and teaching-quality APIs"},
 	{"library-personal", "图书馆个人中心、空间和座位预约查询", "library-personal", "图书馆", "high", "CAS login reaches ClientWeb IC center; init_acc, center.aspx, account.aspx, device.aspx and reserve.aspx expose profile, credit, contact/password, resource, availability and personal-reservation APIs"},
-	{"library-catalog", "图书馆馆藏书目", "library-catalog", "图书馆", "high", "live OPAC exposes server-side catalogue search, book detail and /api/holding availability data"},
+	{"library-catalog", "图书馆馆藏与读者服务", "library-catalog", "图书馆", "high", "live OPAC exposes catalogue APIs plus CAS-backed reader profile, loans, reservations, privileges, finance, shelf, pre-loan and loan-rule JSON endpoints"},
 	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
 	{"campus-map", "校园地图与公共点", "campus-map", "校园服务", "high", "live GIS APIs expose zones, public point types, points, point details, search and aerial/panorama resources"},
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data and exposes student/company modules"},
@@ -492,6 +492,19 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 	case "library", "library-catalog":
 		common()
 		switch operation {
+		case "login":
+			add("--auth", "--username", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout", "status", "profile", "reader-profile":
+		case "loans", "current-loans", "special-loans", "reservations", "current-reservations", "reservation-history":
+			add("--query", "--keyword", "--field", "--page", "--page-size")
+		case "loan-history", "history-loans":
+			add("--query", "--keyword", "--field", "--page", "--page-size", "--from", "--to", "--operation")
+		case "privileges", "reader-privileges":
+			add("--query", "--keyword", "--field", "--page", "--page-size")
+		case "preloans", "pre-loans", "shelf", "book-shelf", "tags", "booklists", "book-lists", "finance", "fees":
+			add("--page", "--page-size")
+		case "loan-rule", "rule":
+			add("--id")
 		case "search", "list":
 			add("--query", "--keyword", "--field", "--page", "--page-size", "--sort", "--order", "--in-library")
 		case "book", "detail", "holdings", "holding":
