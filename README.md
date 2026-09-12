@@ -163,6 +163,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `visit-reservation` | 三全育人教育基地入馆预约渠道与说明；线上通过小程序/公众号，线下联系现场工作人员，未发现直接网页提交表单 |
 | `equipment` | 实验室仪器列表、筛选字典、列定义、详情、预约日历、个人资料、我的预约、收藏和取消预约 |
 | `highway-experiment` | 公路工程实验中心设备目录、设备详情和预约须知；未发现独立预约 API |
+| `virtual-lab` | 公路交通虚拟仿真实验中心资源目录、登录后预约入口、在线留言查询/发布、注册、密码找回和证照上传 |
 | `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |

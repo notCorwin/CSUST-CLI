@@ -284,6 +284,29 @@ func TestVirtualLabLoginUsesRawBusinessState(t *testing.T) {
 	}
 }
 
+func TestVirtualLabMessageCreateMapsPublicEndpoint(t *testing.T) {
+	var fields url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/Home/LyglData" {
+			t.Fatalf("unexpected virtual lab message request: %s %s", request.Method, request.URL.Path)
+		}
+		_ = request.ParseForm()
+		fields = request.Form
+		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = fmt.Fprint(writer, "1")
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+	result := runIssueJSON(t, "virtual-lab", "message-create", "--anonymous", "--content", "请补充实验说明", "--captcha", "1234", "--yes")
+	if fields.Get("PostUser") != "" || fields.Get("Phone") != "" || fields.Get("Contents") != "请补充实验说明" || fields.Get("Code") != "1234" {
+		t.Fatalf("virtual lab message fields were not mapped: %#v", fields)
+	}
+	if result["confirmed"] != true || result["anonymous"] != true || result["evidence"] != "LyglData-response-1" {
+		t.Fatalf("unexpected virtual lab message result: %#v", result)
+	}
+}
+
 func TestRequestBodyStreamsFilesAndRejectsOversize(t *testing.T) {
 	root := t.TempDir()
 	smallPath := filepath.Join(root, "small.txt")

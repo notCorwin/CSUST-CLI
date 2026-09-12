@@ -96,7 +96,7 @@ var businessServices = []businessService{
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
 	{"archive-management", "综合档案管理", "archive-management", "档案", "high", "DAS login returned Vue archive collection/user/file API modules"},
-	{"virtual-lab", "公路交通虚拟仿真实验中心", "virtual-lab", "实验", "high", "official page link target returned HTTP 200 and titled virtual simulation center"},
+	{"virtual-lab", "公路交通虚拟仿真实验中心", "virtual-lab", "实验", "high", "live center exposes discipline resource pages, authenticated appointment page, public message list/create, login/register/password reset and photo upload endpoints"},
 	{"graduate-admissions", "研究生招生旧系统", "graduate-admissions", "招生", "medium", "live ksxt login/pass ASP.NET forms expose login, password reset and session exit; root currently IIS default"},
 	{"legacy-mail", "旧邮件改密入口", "legacy-mail", "邮件", "low", "mail/changepass redirects to CAS but root returns 404"},
 	{"security-admin", "安全运维管理平台", "security-admin", "运维", "medium", "baolei host returned NSFOCUS OSMS page; administrative scope"},
@@ -824,6 +824,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--discipline")
 		case "messages":
 			add("--keyword")
+		case "message-create":
+			add("--yes", "--anonymous", "--username", "--phone", "--content", "--captcha", "--captcha-image")
 		case "login":
 			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
 		case "register":
@@ -3393,7 +3395,7 @@ func (a NativeSite) executeVirtualLab(ctx context.Context, args []string) (map[s
 		return a.executeServiceStatusWithOptions(ctx, service, "status", label, businessRequestOptions{cookieFile: cookie})
 	}
 	if args[0] == "catalog" {
-		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "live page and userdo.js protocol", "service": service, "operations": []string{"status", "resources", "appointment", "messages", "login", "register", "forgot", "upload-photo", "logout"}}, nil
+		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "live page and userdo.js protocol", "service": service, "operations": []string{"status", "resources", "appointment", "messages", "message-create", "login", "register", "forgot", "upload-photo", "logout"}}, nil
 	}
 	cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
 	if valueErr != nil {
@@ -3414,6 +3416,8 @@ func (a NativeSite) executeVirtualLab(ctx context.Context, args []string) (map[s
 			params = append(params, pair{"keyword", keyword})
 		}
 		return a.virtualLabPageWithParams(ctx, "/Home/Hdjl/", "messages", cookie, false, params)
+	case "message-create":
+		return a.virtualLabMessageCreate(ctx, args[1:], cookie)
 	case "login":
 		return a.virtualLabLogin(ctx, args[1:], cookie)
 	case "register":
@@ -3432,7 +3436,7 @@ func (a NativeSite) executeVirtualLab(ctx context.Context, args []string) (map[s
 		}
 		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "local-cookie-removed", "service": service, "operation": "logout", "logged_out": true, "cookie_file": cookiePath}, nil
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: service + " 只支持 status、catalog、resources、appointment、messages、login、register、forgot、upload-photo、logout"}
+		return nil, &siteError{Code: "invalid_argument", Message: service + " 只支持 status、catalog、resources、appointment、messages、message-create、login、register、forgot、upload-photo、logout"}
 	}
 }
 
@@ -3470,6 +3474,51 @@ func (a NativeSite) virtualLabCaptcha(ctx context.Context, args []string, cookie
 		return "", imageErr
 	}
 	return "", &siteError{Code: "captcha_required", Message: "虚拟实验中心需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": imagePath}}
+}
+
+func (a NativeSite) virtualLabMessageCreate(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "发表虚拟实验中心留言需要 --yes"}
+	}
+	content, contentErr := businessRequired(args, "--content", "message-create 必须提供 --content")
+	if contentErr != nil {
+		return nil, contentErr
+	}
+	anonymous := businessBool(args, "--anonymous")
+	username, phone := "", ""
+	if !anonymous {
+		username, contentErr = businessRequired(args, "--username", "非匿名留言必须提供 --username")
+		if contentErr != nil {
+			return nil, contentErr
+		}
+		phone, contentErr = businessRequired(args, "--phone", "非匿名留言必须提供 --phone")
+		if contentErr != nil {
+			return nil, contentErr
+		}
+	}
+	captcha, captchaErr := a.virtualLabCaptcha(ctx, args, cookie)
+	if captchaErr != nil {
+		return nil, captchaErr
+	}
+	result, requestErr := businessRequest(ctx, "virtual-lab", "POST", "/Home/LyglData", nil, []pair{
+		{"PostUser", username}, {"Contents", content}, {"Phone", phone}, {"Code", captcha},
+	}, nil, businessRequestOptions{cookieFile: cookie, allowBusinessFailure: true}, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	code := strings.TrimSpace(businessBody(result))
+	switch code {
+	case "1":
+		return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "LyglData-response-1", "service": "virtual-lab", "operation": "message-create", "anonymous": anonymous}, nil
+	case "-2":
+		return nil, &siteError{Code: "captcha_failed", Message: "验证码错误", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "LyglData-response-minus-2"}}
+	case "-3":
+		return nil, &siteError{Code: "login_required", Message: "虚拟实验中心留言需要登录", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "LyglData-response-minus-3"}}
+	case "0":
+		return nil, &siteError{Code: "mutation_rejected", Message: "留言提交失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "LyglData-response-0"}}
+	default:
+		return nil, &siteError{Code: "mutation_unverified", Message: "留言已发送但服务端返回了未知结果", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "LyglData-response-unknown", "remote_code": code}}
+	}
 }
 
 func virtualLabPayload(result map[string]any) (map[string]any, *siteError) {

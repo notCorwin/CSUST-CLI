@@ -107,7 +107,7 @@ func nativeUsage(args []string) []byte {
   ehall                       eHall 服务、身份、收藏、消息、邮箱、新闻、评价、服务项收藏、周期与详情
   service-hall                融合服务大厅目录、分类/部门字典、筛选和网络报修表单结构
   continuing-education        继续教育学生信息
-  virtual-lab                公路交通虚拟实验中心
+  virtual-lab                公路交通虚拟实验中心资源、预约入口、留言与账户
   library-center              图书馆个人资料、信用记录、联系方式、密码、空间/座位资源和预约
   library                     图书馆馆藏/书目、读者资料、借阅、预约、权限和规则
   library-services            图书馆服务大厅公开服务目录、关键词筛选和服务详情
