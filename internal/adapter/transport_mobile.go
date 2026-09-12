@@ -2273,7 +2273,7 @@ func transportMobileAccessRecord(row map[string]any) map[string]any {
 func transportMobileAchievement(row map[string]any) map[string]any {
 	result := transportMobileRecord(row)
 	result["achievement_type"] = transportMobileValue(row, "type")
-	result["student_number"] = transportMobileText(row, "studentNo", "student.code")
+	result["student_number"] = transportMobileText(row, "studentNo", "studentCode", "student.code")
 	result["student_code"] = result["student_number"]
 	result["student_name"] = transportMobileText(row, "studentName", "student.name")
 	result["authorization_number"] = transportMobileText(row, "no", "authorizationNo")
@@ -2287,7 +2287,7 @@ func transportMobileAchievement(row map[string]any) map[string]any {
 	result["special_award"] = transportMobileValue(row, "hasSpecialAward")
 	result["students"] = row["student"]
 	result["teachers"] = row["teacher"]
-	result["completed_at"] = transportMobileValue(row, "dateDone")
+	result["completed_at"] = transportMobileValue(row, "dateDone", "dateComplete", "completed_at")
 	result["files"] = row["file"]
 	result["level"] = transportMobileValue(row, "level")
 	result["indexing"] = transportMobileValue(row, "indexing", "indexed")
