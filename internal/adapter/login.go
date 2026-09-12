@@ -489,11 +489,35 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 		service.Path = academicSSOPath
 		serviceURL = service.String()
 	}
+	loginResult, err := a.loginSSOPassword(ctx, &session, serviceURL, account, password, options, cookiePath)
+	if err != nil {
+		return nil, err
+	}
+	body, _, bodyErr := loginBody(loginResult)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	if loginFailure(body) != nil {
+		return nil, loginFailure(body)
+	}
+	if loginPageBody(body) {
+		return nil, &siteError{Code: "authentication_failed", Message: "统一认证登录失败，未建立有效会话"}
+	}
+	probeRequest := siteRequest{Target: probeTarget, SessionTarget: &session, CookieFile: cookiePath, Method: "GET", RequireLogin: true, ReadOnly: true, AllowSSO: true, Yes: true}
+	if _, probeErr := a.loginHTTP(ctx, probeRequest); probeErr != nil {
+		details := loginResponseDetails(loginResult)
+		details["cause"] = probeErr.Code
+		return nil, &siteError{Code: "authentication_failed", Message: "统一认证回跳成功，但服务未建立有效会话", Details: details}
+	}
+	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "username": account, "auth": "sso", "cookie_file": cookiePath, "service": safeSiteURL(serviceTarget), "attempts": 1}, nil
+}
+
+func (a NativeSite) loginSSOPassword(ctx context.Context, session *url.URL, serviceURL, account, password string, options loginOptions, cookiePath string) (map[string]any, *siteError) {
 	authURL, _ := url.Parse(authServerBase + authLoginPath)
 	query := authURL.Query()
 	query.Set("service", serviceURL)
 	authURL.RawQuery = query.Encode()
-	loginResult, err := a.loginHTTP(ctx, siteRequest{Target: authURL, SessionTarget: &session, CookieFile: cookiePath, Method: "GET", ReadOnly: true, AllowSSO: true, Yes: true})
+	loginResult, err := a.loginHTTP(ctx, siteRequest{Target: authURL, SessionTarget: session, CookieFile: cookiePath, Method: "GET", ReadOnly: true, AllowSSO: true, Yes: true})
 	if err != nil {
 		return nil, err
 	}
@@ -531,13 +555,13 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 		return nil, encryptErr
 	}
 	fields = append(fields, pair{"username", account}, pair{"password", encrypted}, pair{"_eventId", "submit"}, pair{"cllt", "userNameLogin"}, pair{"dllt", "generalLogin"})
-	needCaptcha, captchaErr := a.authNeedsCaptcha(ctx, &session, account, cookiePath)
+	needCaptcha, captchaErr := a.authNeedsCaptcha(ctx, session, account, cookiePath)
 	if captchaErr != nil {
 		return nil, captchaErr
 	}
 	if needCaptcha {
 		if options.captcha == "" {
-			path, fetchErr := a.fetchLoginCaptcha(ctx, session, cookiePath, true, options.captchaImage)
+			path, fetchErr := a.fetchLoginCaptcha(ctx, *session, cookiePath, true, options.captchaImage)
 			details := map[string]any{}
 			if fetchErr == nil {
 				details["captcha_image"] = path
@@ -565,27 +589,11 @@ func (a NativeSite) loginSSOWith(ctx context.Context, serviceTarget, probeTarget
 		actionQuery.Set("service", serviceURL)
 		actionURL.RawQuery = actionQuery.Encode()
 	}
-	loginResult, err = a.loginHTTP(ctx, siteRequest{Target: actionURL, SessionTarget: &session, CookieFile: cookiePath, Method: "POST", Data: fields, Headers: []pair{{"Referer", responseURL}}, ReadOnly: true, AllowBusinessFailure: true, AllowSSO: true, Yes: true})
+	loginResult, err = a.loginHTTP(ctx, siteRequest{Target: actionURL, SessionTarget: session, CookieFile: cookiePath, Method: "POST", Data: fields, Headers: []pair{{"Referer", responseURL}}, ReadOnly: true, AllowBusinessFailure: true, AllowSSO: true, Yes: true})
 	if err != nil {
 		return nil, err
 	}
-	body, _, bodyErr := loginBody(loginResult)
-	if bodyErr != nil {
-		return nil, bodyErr
-	}
-	if loginFailure(body) != nil {
-		return nil, loginFailure(body)
-	}
-	if loginPageBody(body) {
-		return nil, &siteError{Code: "authentication_failed", Message: "统一认证登录失败，未建立有效会话"}
-	}
-	probeRequest := siteRequest{Target: probeTarget, SessionTarget: &session, CookieFile: cookiePath, Method: "GET", RequireLogin: true, ReadOnly: true, AllowSSO: true, Yes: true}
-	if _, probeErr := a.loginHTTP(ctx, probeRequest); probeErr != nil {
-		details := loginResponseDetails(loginResult)
-		details["cause"] = probeErr.Code
-		return nil, &siteError{Code: "authentication_failed", Message: "统一认证回跳成功，但服务未建立有效会话", Details: details}
-	}
-	return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "confirmed", "username": account, "auth": "sso", "cookie_file": cookiePath, "service": safeSiteURL(serviceTarget), "attempts": 1}, nil
+	return loginResult, nil
 }
 
 func (a NativeSite) loginLocal(ctx context.Context, base *url.URL, account, password string, options loginOptions) (map[string]any, *siteError) {

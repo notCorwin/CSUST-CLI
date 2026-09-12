@@ -108,6 +108,7 @@ var knownSites = map[string]serviceInfo{
 	"continuing-platform":      {host: "xwwy.csust.edu.cn", scheme: "https", path: "/"},
 	"transport-info":           {host: "jtxxgl.csust.edu.cn", scheme: "https", path: "/"},
 	"transport-mobile":         {host: "jtyxxh.csust.edu.cn", scheme: "https", path: "/"},
+	"electronic-documents":     {host: "kxpz.csust.edu.cn", scheme: "https", path: "/Integrated_platform/modules/student/OnlineAppL"},
 	"academic-affairs":         {host: "jwc.csust.edu.cn", scheme: "http", path: "/"},
 	"continuing-education":     {host: "xwwy.csust.edu.cn", scheme: "https", path: "/"},
 	"graduate-management":      {host: "yjsgl.csust.edu.cn", scheme: "https", path: "/"},

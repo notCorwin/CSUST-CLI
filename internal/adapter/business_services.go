@@ -75,6 +75,7 @@ var businessServices = []businessService{
 	{"professional-learning", "专业技术人员继续教育", "jxjy", "继续教育", "high", "live jxjy public course, category, notice and course-detail APIs"},
 	{"institutional-learning", "事业单位工作人员继续教育", "zyjx", "继续教育", "high", "live zyjx public course, category, notice and course-detail APIs"},
 	{"transport-mobile", "交通运输工程综合信息", "transport-mobile", "学院管理", "high", "live WiJat SPA defines token authentication, user profile, pending count, public dictionaries and protected defense, finance, note, access, achievement, KPI, notice, workflow and vacation tables"},
+	{"electronic-documents", "电子成绩单与在校证明", "electronic-documents", "学生服务", "high", "eHall service link reaches kxpz CAS; live SPA exposes file types, application records, previews, PDF download and email delivery APIs"},
 	{"research", "科研管理系统", "research", "科研", "medium", "live login page exposes researcher/management roles and Login.aspx plus EncryptString.ashx protocol"},
 	{"transport-info", "交通学院综合信息服务", "transport-info", "学院管理", "medium", "live login.js exposes /Login/CheckLogin, captcha and protected /Home/Index"},
 	{"continuing-platform", "继续教育信息服务平台", "continuing-platform", "继续教育", "high", "live xwwy ASP.NET form exposes authority, student and station login roles plus public pre-enrollment query"},
@@ -95,7 +96,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "onlinejudge", "judge", "mooc", "quality-system", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "electronic-documents", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library", "library-catalog", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -162,6 +163,8 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeLearning(ctx, args[1:], args[0])
 	case "transport-mobile":
 		return a.executeTransportMobile(ctx, args[1:])
+	case "electronic-documents":
+		return a.executeElectronicDocuments(ctx, args[1:])
 	case "research":
 		return a.executeResearch(ctx, args[1:])
 	case "transport-info":
@@ -442,6 +445,22 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "finances":
 			add("--keyword", "--page", "--page-size")
 		case "logout":
+		}
+	case "electronic-documents":
+		common()
+		switch operation {
+		case "login":
+			add("--auth", "--username", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			add("--access-token", "--user-id", "--yes")
+		case "status", "types", "file-types":
+			add("--access-token", "--user-id")
+		case "applications", "records":
+			add("--access-token", "--user-id", "--kind", "--page", "--page-size")
+		case "application", "record":
+			add("--access-token", "--user-id", "--id")
+		case "apply", "request":
+			add("--access-token", "--user-id", "--type", "--delivery", "--email", "--output", "--yes")
 		}
 	case "research":
 		common()

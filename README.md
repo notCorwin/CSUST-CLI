@@ -149,6 +149,7 @@ password=密码
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
 | `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务及学院业务查询 |
+| `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
 | `undergraduate-admissions` | 本科招生计划、历年分数、录取进程和考生录取结果查询 |
 | `union` | 智慧工会模块、角色登录、验证码和会话 |
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
@@ -291,6 +292,11 @@ password=密码
 ./csust transport-mobile finances --keyword 科研 --json
 ./csust transport-mobile notices --keyword 评审 --json
 ./csust transport-mobile vacations --page-size 20 --json
+# 电子成绩单与在校证明：CAS 登录后查询类型、申请记录，并申请下载或发送到邮箱
+./csust electronic-documents login --auth sso --password-stdin --json
+./csust electronic-documents types --json
+./csust electronic-documents applications --kind transcript --json
+./csust electronic-documents apply --type chinese-transcript --delivery download --output ./transcript.pdf --yes --json
 # 图书馆远程资源：公开数据库目录、关键词/学科筛选和详情
 ./csust library-remote databases --keyword 知网 --sort visits --json
 ./csust library-remote databases --subject 工学 --json
