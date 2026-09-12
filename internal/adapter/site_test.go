@@ -68,6 +68,19 @@ func TestSiteRedirectPolicy(t *testing.T) {
 	if handoff.Scheme != "https" {
 		t.Fatalf("expected HTTPS SSO handoff, got %s", handoff)
 	}
+	mservice, _ := url.Parse("https://mservice.csust.edu.cn/transfer")
+	casTransfer, _ := url.Parse("https://castransfer.chaoxing.com/transfer")
+	if !safeSiteSSORedirect(mservice, mservice, casTransfer) || !safeSiteSSORedirect(mservice, casTransfer, auth) {
+		t.Fatal("expected the fixed mservice CAS transfer bridge")
+	}
+	otherTransfer, _ := url.Parse("https://evil.example/transfer")
+	if safeSiteSSORedirect(mservice, mservice, otherTransfer) || safeSiteSSORedirect(mservice, otherTransfer, auth) {
+		t.Fatal("unexpected arbitrary transfer bridge")
+	}
+	httpTransfer, _ := url.Parse("http://castransfer.chaoxing.com/transfer")
+	if safeSiteSSORedirect(mservice, mservice, httpTransfer) {
+		t.Fatal("unexpected HTTPS downgrade through transfer bridge")
+	}
 }
 
 func TestEHallSSOUsesCurrentPortalCallback(t *testing.T) {

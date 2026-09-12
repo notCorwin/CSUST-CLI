@@ -1150,6 +1150,19 @@ func safeSiteSSORedirect(base, previous, next *url.URL) bool {
 	if base == nil || previous == nil || next == nil || strings.EqualFold(base.Host, "authserver.csust.edu.cn") {
 		return false
 	}
+	if strings.EqualFold(base.Host, "mservice.csust.edu.cn") {
+		if strings.EqualFold(previous.Host, base.Host) && strings.EqualFold(previous.Path, "/transfer") &&
+			strings.EqualFold(next.Host, "castransfer.chaoxing.com") && strings.EqualFold(next.Path, "/transfer") &&
+			strings.EqualFold(previous.Scheme, "https") && strings.EqualFold(next.Scheme, "https") {
+			return true
+		}
+		if strings.EqualFold(previous.Host, "castransfer.chaoxing.com") && strings.EqualFold(previous.Path, "/transfer") &&
+			strings.EqualFold(next.Host, "authserver.csust.edu.cn") && strings.HasPrefix(next.Path, "/authserver/") &&
+			strings.EqualFold(previous.Scheme, "https") &&
+			strings.EqualFold(next.Scheme, "https") {
+			return true
+		}
+	}
 	if strings.EqualFold(previous.Host, base.Host) && strings.EqualFold(next.Host, "authserver.csust.edu.cn") {
 		return strings.EqualFold(next.Scheme, "https")
 	}
