@@ -15,11 +15,17 @@ func nativeUsage(args []string) []byte {
   login/logout                 教务会话
   schedule/grades/profile     教务查询
   personal-info               个人资料设置（更新需要 --yes）
+  change-password             修改教务密码（需要 --yes）
   graduation-conclusion       毕业结论查询
   graduation-info-check       毕业生信息核对
   exams/in-class-exams       考试安排与随堂考查询
   classrooms/selections      教室与选课查询
   course-selection            选课中心/跨专业选修课程
+  preselection list            预选课阶段
+  preselection courses --term 学期
+                              预选课程列表
+  preselection select/drop --term 学期 --course-id 课程编号 --yes
+                              预选/退选课程（操作后回读）
   special-course-query        特殊选课申请查询
   social-exam-registration    社会考试报名状态与可报名项目
   make-up-exam-registration   补考报名状态与可报名课程
@@ -47,6 +53,11 @@ func nativeUsage(args []string) []byte {
   messages                    已收留言与详情
   message --id ID             查看留言正文
   message reply --id ID       回复留言（需要 --content 和 --yes）
+  online-qa list              在线问答列表
+  online-qa ask --content 内容 --yes
+                              提交在线问答（提交后回读列表）
+  online-qa delete --id ID --yes
+                              删除在线问答（删除后回读列表）
   retake-courses               重修报名可报课程
   terms/semester-start        学期信息
   textbooks                   教材操作

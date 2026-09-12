@@ -33,7 +33,7 @@ func (a NativeSite) runAcademicCommand(ctx context.Context, args []string, jsonM
 
 func academicCommand(value string) bool {
 	switch value {
-	case "schedule", "timetable", "grades", "scores", "profile", "personal", "personal-info", "account-settings", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "special-course-query", "social-exam-registration", "social-exam", "make-up-exam-registration", "makeup-exam-registration", "summer-remedial-registration", "summer-remedial", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
+	case "schedule", "timetable", "grades", "scores", "profile", "personal", "personal-info", "account-settings", "change-password", "academic-password", "graduation-conclusion", "graduation-status", "graduation-info-check", "graduate-info-check", "exams", "exam", "in-class-exams", "in-class-exam", "class-exams", "classrooms", "rooms", "selections", "selection", "course-results", "terms", "semesters", "semester-start", "teaching-calendar", "semester-calendar", "class-changes", "class-change-history", "course-selection", "course-select", "preselection", "preselection-management", "preselection-query", "special-course-query", "social-exam-registration", "social-exam", "make-up-exam-registration", "makeup-exam-registration", "summer-remedial-registration", "summer-remedial", "training-plan", "plan", "cultivation-plan", "training-progress", "training-plan-progress", "deferred-exam-applications", "deferred-exam-application", "deferred-exam-registration", "exempt-exam-applications", "exempt-exam-application", "graduate-exam-registration", "grade-recognition-applications", "grade-recognition-application", "grade-review-applications", "grade-confirmation", "grade-confirmation-status", "enrollment-proof-applications", "enrollment-proof-application", "enrollment-status-changes", "academic-status-changes", "status-change-history", "drop-course-applications", "drop-course-application", "student-status-changes", "student-status-management", "student-status-change-history", "second-class-credits", "innovation-credits", "second-class-credit-query", "second-class-credit-applications", "innovation-credit-applications", "second-class-credit-application", "innovation-credit-application", "second-class-credit-workflow", "status-warnings", "academic-warnings", "announcements", "notices", "received-announcements", "messages", "received-messages", "announcement", "notice", "announcement-detail", "message", "message-detail", "message-reply", "online-qa", "online-question", "question-answer", "retake-courses", "retake-registration", "classroom-request", "room-request", "minor", "minor-registration", "evaluation", "evaluate":
 		return true
 	default:
 		return false
@@ -54,6 +54,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return academicWrap(parseProfilePage(body, pageURL)), nil
 	case "personal-info", "account-settings":
 		return a.academicPersonalInfo(ctx, args[1:])
+	case "change-password", "academic-password":
+		return a.academicPasswordChange(ctx, args[1:])
 	case "graduation-conclusion", "graduation-status":
 		body, pageURL, err := a.academicPage(ctx, "GET", "/jsxsd/bygl/bygl_ckxsList", nil, nil)
 		if err != nil {
@@ -78,6 +80,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicTeachingCalendar(ctx, args[1:])
 	case "course-selection", "course-select":
 		return a.academicCourseSelection(ctx, args[1:])
+	case "preselection", "preselection-management", "preselection-query":
+		return a.academicPreselection(ctx, args[1:])
 	case "special-course-query":
 		return a.academicSpecialCourseQuery(ctx, args[1:])
 	case "social-exam-registration", "social-exam":
@@ -133,6 +137,8 @@ func (a NativeSite) executeAcademic(ctx context.Context, args []string) (map[str
 		return a.academicMessage(ctx, args[1:])
 	case "message-reply":
 		return a.academicMessageReply(ctx, args[1:])
+	case "online-qa", "online-question", "question-answer":
+		return a.academicOnlineQA(ctx, args[1:])
 	case "retake-courses", "retake-registration":
 		return a.academicRetakeCourses(ctx, args[1:])
 	case "classroom-request", "room-request":

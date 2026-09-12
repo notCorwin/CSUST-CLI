@@ -566,7 +566,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 			return nil, outputErr
 		}
 	}
-	mutating := !req.ReadOnly && (mutatingMethod(req.Method) || sideEffectSiteURL(target))
+	mutating := req.mutating || !req.ReadOnly && (mutatingMethod(req.Method) || sideEffectSiteURL(target))
 	req.mutating = mutating
 	if mutating && !req.Yes {
 		return nil, &siteError{Code: "confirmation_required", Message: "site 请求可能修改远端数据，请加 --yes"}

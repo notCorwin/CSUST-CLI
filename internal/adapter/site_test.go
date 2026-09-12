@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -139,6 +140,21 @@ func TestSiteBusinessStateAndBinaryResponse(t *testing.T) {
 	payload := responsePayload(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/html"}}}, []byte("<html></html>"), nil)
 	if payload["confidence"] != "low" || payload["confidence_evidence"] == nil {
 		t.Fatalf("HTML response lacks confidence evidence: %#v", payload)
+	}
+}
+
+func TestSiteExecuteHonorsExplicitMutationForGET(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte("result unknown"))
+	}))
+	defer server.Close()
+	target, _ := url.Parse(server.URL + "/operation")
+	_, err := (NativeSite{}).execute(context.Background(), siteRequest{
+		Target: target, Method: http.MethodGet, CookieFile: filepath.Join(t.TempDir(), "cookies.txt"),
+		ReadOnly: false, Yes: true, mutating: true,
+	})
+	if err == nil || err.Code != "mutation_unverified" {
+		t.Fatalf("expected explicit GET mutation to require success evidence, got %#v", err)
 	}
 }
 

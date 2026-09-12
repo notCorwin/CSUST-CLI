@@ -72,11 +72,14 @@ password=密码
 ./csust profile --json
 ./csust personal-info --json
 ./csust personal-info update --real-name 新姓名 --page-size 200 --yes --json
+CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password-confirm 新密码 --yes --json <<< '新密码'
 ./csust graduation-conclusion --json
 ./csust graduation-info-check --json
 ./csust exams --json
 ./csust in-class-exams --term 2026-2027-1 --exam-type 平时考察 --json
 ./csust course-selection --scope cross-major --json
+./csust preselection list --json
+./csust preselection courses --term 2026-2027-1 --json
 ./csust special-course-query --term 2026-2027-1 --json
 ./csust social-exam-registration --json
 ./csust make-up-exam-registration --json
@@ -104,6 +107,8 @@ password=密码
 ./csust messages --json
 ./csust message --id MESSAGE_ID --json
 ./csust message reply --id MESSAGE_ID --content 回复内容 --yes --json
+./csust online-qa list --json
+./csust online-qa ask --content "关于课程安排的问题" --yes --json
 ./csust retake-courses --json
 ```
 
@@ -114,9 +119,10 @@ password=密码
 | `login` / `logout` | 教务统一认证或旧登录会话 |
 | `schedule`, `grades`, `profile`, `exams`, `in-class-exams` | 教务查询；个人资料保留原始字段并提供 `semantic` 字段，成绩包含学分/绩点汇总和成绩构成详情 |
 | `personal-info` | 查询或更新个人资料设置；更新返回服务端反馈或回读确认 |
+| `change-password` | 修改教务密码；遵循教务端复杂度规则，写入需要 `--yes`，并以服务端成功反馈确认 |
 | `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
 | `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
-| `classrooms`, `selections`, `course-selection`, `special-course-query`, `social-exam-registration`, `make-up-exam-registration`, `summer-remedial-registration`, `terms`, `semester-start` | 教室、选课和考试报名信息；跨专业选修使用 `--scope cross-major`，特殊选课查询使用 `--term` 和可选 `--special-name`，暑期补修可用 `--batch` 查询具体批次 |
+| `classrooms`, `selections`, `course-selection`, `preselection`, `special-course-query`, `social-exam-registration`, `make-up-exam-registration`, `summer-remedial-registration`, `terms`, `semester-start` | 教室、选课、预选课和考试报名信息；预选课支持阶段/课程查询及确认后的预选/退选，跨专业选修使用 `--scope cross-major`，特殊选课查询使用 `--term` 和可选 `--special-name`，暑期补修可用 `--batch` 查询具体批次 |
 | `training-plan` | 培养方案执行计划课程 |
 | `training-progress` | 培养方案课程完成情况和学分汇总 |
 | `deferred-exam-applications` | 按学期、缓考活动、课程和审核状态查询缓考申请记录 |
@@ -131,6 +137,7 @@ password=密码
 | `enrollment-status-changes` | 查询原/新学籍、班级、在校状态和异动终审状态 |
 | `drop-course-applications` | 可退课程、课程属性和退课审核状态 |
 | `student-status-changes` | 个人信息修改历史、审核状态和修改说明 |
+| `online-qa` | 在线问答列表、提问和删除；写操作必须 `--yes`，并以服务端反馈及列表回读确认 |
 | `second-class-credits` | 第二课堂学分认定查询 |
 | `second-class-credit-applications` | 第二课堂学分申报及审核状态，包含 `application_id` 和流程详情路径 |
 | `second-class-credit-application --id` | 查看申报项目获得时间、审核历史和认定历史 |
