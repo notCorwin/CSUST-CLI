@@ -1,0 +1,206 @@
+package adapter
+
+import (
+	"context"
+	"crypto/des"
+	"encoding/hex"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type unionRole struct {
+	name       string
+	label      string
+	loginType  string
+	capability string
+}
+
+var unionRoles = []unionRole{
+	{"representative", "代表", "0", "提出提案、提案附议"},
+	{"department", "承办部门", "1", "承办提案、答复提案"},
+	{"admin", "审核管理员", "2", "审核立案、管理提案"},
+	{"leader", "领导/委员/部门负责人", "3", "审议提案"},
+	{"delegation-leader", "代表团长", "4", "审议提案"},
+}
+
+var unionModules = []map[string]any{
+	{"name": "proposal", "label": "电子提案系统", "path": "/front/news.do?dispatch=sysproposal&proposal_type=1", "capability": "提案提出、附议、承办、答复、审议和管理"},
+	{"name": "branch-union", "label": "二级分工会系统", "path": "/front/news.do?dispatch=listByType_&ntype_id=0903", "capability": "二级分工会信息"},
+	{"name": "membership", "label": "会员会籍系统", "path": "/center/center.do?dispatch=centerindex", "capability": "会员会籍"},
+	{"name": "association", "label": "协会管理系统", "path": "/front/news.do?dispatch=listByType_&ntype_id=0901", "capability": "协会管理"},
+	{"name": "activity-registration", "label": "活动报名系统", "path": "/center/bmreg.do?dispatch=tobmreglist", "capability": "工会活动报名"},
+	{"name": "survey", "label": "在线调查系统", "path": "/front/news.do?dispatch=listByType_&ntype_id=1103&statistic_type=1", "capability": "在线调查"},
+	{"name": "quiz", "label": "知识竞答系统", "path": "/front/news.do?dispatch=listByType_&ntype_id=1103&statistic_type=1&ispa=1", "capability": "知识竞答"},
+	{"name": "benefits", "label": "工会福利平台", "path": "/center/welbut.do?dispatch=freeactlist", "capability": "工会福利"},
+}
+
+func (a NativeSite) executeUnion(ctx context.Context, args []string) (map[string]any, *siteError) {
+	if len(args) == 0 || args[0] == "catalog" || args[0] == "modules" || args[0] == "roles" {
+		result := businessCatalogFilter("union")
+		result["modules"] = unionModules
+		result["roles"] = unionRoleCatalog()
+		if len(args) > 0 && args[0] != "catalog" {
+			result["operation"] = args[0]
+		}
+		return result, nil
+	}
+	cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	switch args[0] {
+	case "login":
+		return a.unionLogin(ctx, args[1:], cookie)
+	case "logout":
+		return a.unionLogout(ctx, args[1:], cookie)
+	default:
+		return nil, &siteError{Code: "invalid_argument", Message: "union 只支持 catalog、modules、roles、login、logout"}
+	}
+}
+
+func unionRoleCatalog() []map[string]any {
+	result := make([]map[string]any, 0, len(unionRoles))
+	for _, role := range unionRoles {
+		result = append(result, map[string]any{"role": role.name, "label": role.label, "login_type": role.loginType, "capability": role.capability})
+	}
+	return result
+}
+
+func findUnionRole(value string) (unionRole, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	aliases := map[string]string{
+		"代表": "representative", "我 是 代 表": "representative", "representatives": "representative",
+		"承办部门": "department", "部门": "department", "审核": "admin", "管理员": "admin", "审核管理员": "admin",
+		"领导": "leader", "委员": "leader", "代表团长": "delegation-leader", "代表团": "delegation-leader",
+	}
+	if alias, ok := aliases[normalized]; ok {
+		normalized = alias
+	}
+	for _, role := range unionRoles {
+		if role.name == normalized {
+			return role, true
+		}
+	}
+	return unionRole{}, false
+}
+
+func unionEncryptedPassword(password string) (string, *siteError) {
+	block, err := des.NewCipher([]byte("gjrsuppo"))
+	if err != nil {
+		return "", &siteError{Code: "protocol_error", Message: "工会登录密码加密失败"}
+	}
+	padding := des.BlockSize - len([]byte(password))%des.BlockSize
+	plain := append([]byte(password), make([]byte, padding)...)
+	for index := len(plain) - padding; index < len(plain); index++ {
+		plain[index] = byte(padding)
+	}
+	ciphertext := make([]byte, len(plain))
+	for offset := 0; offset < len(plain); offset += des.BlockSize {
+		block.Encrypt(ciphertext[offset:offset+des.BlockSize], plain[offset:offset+des.BlockSize])
+	}
+	return hex.EncodeToString(ciphertext), nil
+}
+
+func (a NativeSite) unionLogin(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	role, ok := findUnionRole(flagValue(args, "--role"))
+	if !ok {
+		return nil, &siteError{Code: "invalid_argument", Message: "login 必须提供 --role representative、department、admin、leader 或 delegation-leader"}
+	}
+	username, password, credentialErr := businessCredentials(args, "CSUST_UNION_PASSWORD")
+	if credentialErr != nil {
+		return nil, credentialErr
+	}
+	referer := "https://gonghui.csust.edu.cn/front/proposal.do?dispatch=toProposalLogin&proposal_type=1&login_type=" + role.loginType
+	page, requestErr := a.businessGet(ctx, "union", "/front/user.do", []pair{{"dispatch", "toajaxlogin"}, {"login_type", role.loginType}, {"proposal_type", "1"}, {"_", strconv.FormatInt(time.Now().UnixMilli(), 10)}}, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	document, parseErr := parsePage(businessBody(page))
+	if parseErr != nil || len(document.findAll("form")) == 0 {
+		return nil, &siteError{Code: "parse_error", Message: "工会登录接口没有返回登录表单"}
+	}
+	captcha := flagValue(args, "--captcha")
+	if captcha == "" {
+		return nil, a.unionCaptcha(ctx, args, cookie)
+	}
+	encrypted, encryptErr := unionEncryptedPassword(password)
+	if encryptErr != nil {
+		return nil, encryptErr
+	}
+	result, requestErr := businessRequest(ctx, "union", "POST", "/front/user.do", []pair{{"dispatch", "ajaxlogin"}}, []pair{
+		{"admin_id", username}, {"admin_pwd", encrypted}, {"identifying_code", captcha},
+		{"login_type", role.loginType}, {"proposal_type", "1"}, {"time", time.Now().Format(time.RFC1123)},
+	}, []pair{{"Referer", referer}}, businessRequestOptions{cookieFile: cookie, allowBusinessFailure: true}, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if failure := unionLoginFailure(strings.TrimSpace(businessBody(result))); failure != nil {
+		failure.Details = map[string]any{"submitted": true, "confirmed": false, "evidence": "ajaxlogin-response"}
+		return nil, failure
+	}
+	session, requestErr := a.businessGet(ctx, "union", "/center/center.do", []pair{{"dispatch", "getCenterSessionName"}, {"time", strconv.FormatInt(time.Now().UnixMilli(), 10)}}, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, &siteError{Code: "authentication_failed", Message: "工会登录成功响应已返回，但会话探针失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "session-probe-error"}}
+	}
+	sessionName := strings.TrimSpace(businessBody(session))
+	if sessionName == "" {
+		return nil, &siteError{Code: "authentication_failed", Message: "工会登录响应成功，但未确认业务会话", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "empty-session-probe"}}
+	}
+	return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "ajaxlogin=0-and-center-session", "service": "union", "operation": "login", "role": role.name, "username": username, "session": sessionName}, nil
+}
+
+func unionLoginFailure(body string) *siteError {
+	switch {
+	case body == "0":
+		return nil
+	case body == "-1":
+		return &siteError{Code: "authentication_failed", Message: "工会登录失败，单位信息不存在"}
+	case body == "-4":
+		return &siteError{Code: "captcha_invalid", Message: "工会登录验证码错误"}
+	case body == "-5":
+		return &siteError{Code: "authentication_failed", Message: "工会用户名或密码错误"}
+	case body == "-6":
+		return &siteError{Code: "permission_denied", Message: "当前账号不是该角色，不能登录电子提案系统"}
+	case strings.HasPrefix(body, "-3#"):
+		return &siteError{Code: "account_locked", Message: "工会账号连续登录失败，已被锁定"}
+	case body == "":
+		return &siteError{Code: "authentication_failed", Message: "工会登录响应为空"}
+	default:
+		return &siteError{Code: "authentication_failed", Message: "工会登录响应未确认成功"}
+	}
+}
+
+func (a NativeSite) unionCaptcha(ctx context.Context, args []string, cookie string) *siteError {
+	_, cookiePath, resolveErr := resolveSite(siteRequest{Service: "union", CookieFile: cookie})
+	if resolveErr != nil {
+		return resolveErr
+	}
+	imagePath := flagValue(args, "--captcha-image")
+	if imagePath == "" {
+		imagePath = filepath.Join(filepath.Dir(cookiePath), "union-captcha.png")
+	}
+	imagePath = expandUserPath(imagePath)
+	if _, imageErr := (NativeSite{}).execute(ctx, siteRequest{Service: "union", Method: "GET", Path: "/center/center.do", Params: []pair{{"dispatch", "generateImage"}, {"admin_id", strconv.FormatInt(time.Now().UnixNano()%100000, 10)}}, CookieFile: cookie, Output: imagePath, ReadOnly: true, Yes: true}); imageErr != nil {
+		return imageErr
+	}
+	return &siteError{Code: "captcha_required", Message: "工会登录需要验证码，请查看图片后提供 --captcha", Details: map[string]any{"captcha_image": imagePath, "submitted": false, "confirmed": false, "evidence": "generateImage"}}
+}
+
+func (a NativeSite) unionLogout(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "工会退出会话需要 --yes"}
+	}
+	if _, requestErr := businessRequest(ctx, "union", "GET", "/logout.jsp", nil, nil, nil, businessRequestOptions{cookieFile: cookie, allowBusinessFailure: true}, true, true); requestErr != nil {
+		return nil, requestErr
+	}
+	session, requestErr := a.businessGet(ctx, "union", "/center/center.do", []pair{{"dispatch", "getCenterSessionName"}, {"time", strconv.FormatInt(time.Now().UnixMilli(), 10)}}, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if strings.TrimSpace(businessBody(session)) != "" {
+		return nil, &siteError{Code: "logout_unconfirmed", Message: "工会退出请求已发送，但会话仍存在", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "session-probe-not-empty"}}
+	}
+	return map[string]any{"ok": true, "submitted": true, "confirmed": true, "evidence": "logout-and-empty-session", "service": "union", "operation": "logout", "logged_out": true}, nil
+}

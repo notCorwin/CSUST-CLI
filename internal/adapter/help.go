@@ -57,6 +57,8 @@ func nativeUsage(args []string) []byte {
   quality                     教学质量保障系统
   services                    已映射业务服务目录
   admission-notice            研究生录取通知书查询/打印
+  undergraduate-admissions    本科招生计划、历年分数、录取进程和结果查询
+  union                       智慧工会模块、角色登录和会话
   journal                     期刊检索
   employment                  云就业信息
   onlinejudge                 OnlineJudge 题目/竞赛/提交
@@ -70,6 +72,10 @@ func nativeUsage(args []string) []byte {
   professional-learning       专业技术人员继续教育课程、分类、通知和详情
   institutional-learning      事业单位工作人员继续教育课程、分类、通知和详情
   transport-mobile            交通运输工程综合信息登录、身份、待办、字典、答辩、财务及学院业务查询
+  research                    科研管理系统角色登录、验证码和会话
+  transport-info              交通学院综合信息服务登录、验证码和会话
+  transport-lab               实验室预约用户/教职工登录、注册、找回密码和会话
+  continuing-platform         继续教育信息平台三类用户登录和会话
   ehall                       eHall 服务、身份、收藏、消息、邮箱、新闻、评价、服务项收藏、周期与详情
   continuing-education        继续教育学生信息
   virtual-lab                公路交通虚拟实验中心

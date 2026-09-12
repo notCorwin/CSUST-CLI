@@ -49,8 +49,16 @@ type businessService struct {
 
 var businessServices = []businessService{
 	{"graduate-notice", "研究生录取通知书", "graduate-notice", "招生", "high", "Nuxt bundle exports /api/print/admissionnotice/query/idcard and /generate/pdf; live endpoint returned JSON"},
+	{"undergraduate-admissions", "本科招生计划、分数和录取进程", "undergraduate-admissions", "招生", "high", "live zslq APIs expose plan, historical score, admission progress and candidate lookup endpoints"},
+	{"union", "智慧工会", "union", "工会", "high", "live homepage exposes proposal, membership, activity, survey, quiz and benefits modules; role login API is observable"},
 	{"journal-transport", "交通科学与工程期刊", "journal-transport", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
 	{"journal-highways", "公路与汽运期刊", "journal-highways", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
+	{"journal-highway", "中外公路期刊", "journal-highway", "期刊", "high", "live zwgl /zwgl/ajax/search returned article metadata and public abstract/HTML/PDF links"},
+	{"journal-highway-legacy", "中外公路期刊（旧版）", "journal-highway-legacy", "期刊", "medium", "live Digital Commons site exposes issue/article pages, public full-text links and search entrypoint"},
+	{"journal-qk", "期刊社", "journal-qk", "期刊", "high", "live cslgdxxbqks journal site uses the verified article search and article page protocol"},
+	{"journal-social", "长沙理工大学学报（社科版）", "journal-social", "期刊", "high", "live cslgdxxbsk journal site uses the verified article search and article page protocol"},
+	{"journal-science", "长沙理工大学学报（自然科学版）", "journal-science", "期刊", "high", "live cslgdxxbzk /ajax/search returned article metadata and public links"},
+	{"journal-experiment", "实验教学与仪器", "journal-experiment", "期刊", "high", "live syjxyyq /ajax/search and public article links are available"},
 	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines /api/problem, /api/contest, /api/submissions and /api/submission"},
 	{"library-personal", "图书馆个人中心", "library-personal", "图书馆", "medium", "book.csust.edu.cn redirects ClientWeb personal center into authserver CAS"},
 	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
@@ -64,6 +72,9 @@ var businessServices = []businessService{
 	{"professional-learning", "专业技术人员继续教育", "jxjy", "继续教育", "high", "live jxjy public course, category, notice and course-detail APIs"},
 	{"institutional-learning", "事业单位工作人员继续教育", "zyjx", "继续教育", "high", "live zyjx public course, category, notice and course-detail APIs"},
 	{"transport-mobile", "交通运输工程综合信息", "transport-mobile", "学院管理", "high", "live WiJat SPA defines token authentication, user profile, pending count, public dictionaries and protected defense, finance, note, access, achievement, KPI, notice, workflow and vacation tables"},
+	{"research", "科研管理系统", "research", "科研", "medium", "live login page exposes researcher/management roles and Login.aspx plus EncryptString.ashx protocol"},
+	{"transport-info", "交通学院综合信息服务", "transport-info", "学院管理", "medium", "live login.js exposes /Login/CheckLogin, captcha and protected /Home/Index"},
+	{"continuing-platform", "继续教育信息服务平台", "continuing-platform", "继续教育", "high", "live xwwy ASP.NET form exposes authority, student and station login roles plus public pre-enrollment query"},
 	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
@@ -81,7 +92,7 @@ var recordFormToken = regexp.MustCompile(`name=["']token["'][^>]*value=["']([^"'
 
 func businessCommand(value string) bool {
 	switch value {
-	case "services", "service", "ehall", "admission-notice", "admission", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "continuing-education", "virtual-lab", "library-center", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
+	case "services", "service", "ehall", "admission-notice", "admission", "undergraduate-admissions", "undergrad-admissions", "union", "journal", "employment", "onlinejudge", "judge", "party-exam", "archive", "student-record", "records", "staff-record", "sunshine", "equipment", "recruitment", "professional-learning", "institutional-learning", "transport-mobile", "research", "transport-info", "transport-lab", "continuing-platform", "continuing-education", "virtual-lab", "library-center", "library-remote", "campus-map", "graduate-admissions", "legacy-mail", "security-admin", "cms-admin", "cms-admin-legacy":
 		return true
 	default:
 		return false
@@ -116,6 +127,10 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeEhall(ctx, args[1:])
 	case "admission-notice", "admission":
 		return a.executeAdmissionNotice(ctx, args[1:])
+	case "undergraduate-admissions", "undergrad-admissions":
+		return a.executeUndergraduateAdmissions(ctx, args[1:])
+	case "union":
+		return a.executeUnion(ctx, args[1:])
 	case "journal":
 		return a.executeJournal(ctx, args[1:])
 	case "employment":
@@ -140,6 +155,14 @@ func (a NativeSite) executeBusinessCommand(ctx context.Context, args []string) (
 		return a.executeLearning(ctx, args[1:], args[0])
 	case "transport-mobile":
 		return a.executeTransportMobile(ctx, args[1:])
+	case "research":
+		return a.executeResearch(ctx, args[1:])
+	case "transport-info":
+		return a.executeTransportInfo(ctx, args[1:])
+	case "transport-lab":
+		return a.executeTransportLab(ctx, args[1:])
+	case "continuing-platform":
+		return a.executeContinuingPlatform(ctx, args[1:])
 	case "library-remote":
 		return a.executeLibraryRemote(ctx, args[1:])
 	case "campus-map":
@@ -173,6 +196,8 @@ func validateBusinessArgs(args []string) *siteError {
 	switch service {
 	case "admission":
 		service = "admission-notice"
+	case "undergrad-admissions":
+		service = "undergraduate-admissions"
 	case "judge":
 		service = "onlinejudge"
 	case "records":
@@ -219,14 +244,40 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			common()
 			add("--id-card", "--output", "--password", "--password-stdin")
 		}
+	case "undergraduate-admissions":
+		common()
+		switch operation {
+		case "plans", "scores", "progress":
+			add("--province", "--year", "--category", "--type")
+			if operation == "scores" {
+				add("--major")
+			}
+		case "lookup":
+			add("--candidate-number", "--id-card", "--captcha", "--captcha-image")
+		case "filters":
+		}
+	case "union":
+		common()
+		switch operation {
+		case "login":
+			add("--role", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			add("--yes")
+		}
 	case "journal":
 		switch operation {
 		case "search":
 			common()
-			add("--journal", "--query", "--author", "--year", "--keyword", "--field", "--page", "--page-size")
+			add("--journal", "--query", "--author", "--year", "--keyword", "--field", "--page", "--page-size", "--scope")
 		case "article":
 			common()
-			add("--journal", "--id")
+			add("--journal", "--id", "--volume", "--issue", "--article")
+		case "issue":
+			common()
+			add("--journal", "--volume", "--issue")
+		case "home":
+			common()
+			add("--journal")
 		case "login":
 			common()
 			add("--journal", "--role", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
@@ -359,6 +410,44 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "finances":
 			add("--keyword", "--page", "--page-size")
 		case "logout":
+		}
+	case "research":
+		common()
+		switch operation {
+		case "login":
+			add("--role", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			add("--yes")
+		}
+	case "transport-info":
+		common()
+		switch operation {
+		case "login":
+			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			add("--yes")
+		}
+	case "transport-lab":
+		common()
+		switch operation {
+		case "login":
+			add("--role", "--phone", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "logout":
+			add("--yes")
+		case "getpwdquestion":
+			add("--phone", "--username")
+		case "forgot":
+			add("--yes", "--phone", "--username", "--answer", "--new-password", "--new-password-stdin", "--password-confirm")
+		case "register":
+			add("--yes", "--type", "--name", "--sex", "--phone", "--username", "--password", "--password-stdin", "--password-confirm", "--question", "--answer", "--photo", "--card")
+		}
+	case "continuing-platform":
+		common()
+		switch operation {
+		case "login":
+			add("--role", "--username", "--password", "--password-stdin", "--student-type", "--remember")
+		case "logout":
+			add("--yes")
 		}
 	case "library-remote":
 		common()
@@ -783,15 +872,18 @@ func nestedString(value map[string]any, key string) string {
 
 func (a NativeSite) executeJournal(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
-		return businessCatalogNames("journal-transport", "journal-highways"), nil
+		return businessCatalogNames("journal-transport", "journal-highways", "journal-highway", "journal-highway-legacy", "journal-qk", "journal-social", "journal-science", "journal-experiment"), nil
 	}
-	journal, requiredErr := businessRequired(args[1:], "--journal", "journal 必须提供 --journal transport 或 highways")
+	journal, requiredErr := businessRequired(args[1:], "--journal", "journal 必须提供 --journal transport、highways、highway、qk、social、science 或 experiment")
 	if requiredErr != nil {
 		return nil, requiredErr
 	}
 	prefix, service, ok := journalService(journal)
 	if !ok {
-		return nil, &siteError{Code: "invalid_argument", Message: "--journal 只能是 transport 或 highways"}
+		return nil, &siteError{Code: "invalid_argument", Message: "--journal 只能是 transport、highways、highway、highway-legacy、qk、social、science 或 experiment"}
+	}
+	if service == "journal-highway-legacy" {
+		return a.executeLegacyHighwayJournal(ctx, args)
 	}
 	switch args[0] {
 	case "search":
@@ -838,6 +930,18 @@ func journalService(value string) (prefix, service string, ok bool) {
 		return "jtkxygc", "journal-transport", true
 	case "highways", "glyqy", "公路与汽运":
 		return "glyqy", "journal-highways", true
+	case "highway", "zwgl", "中外公路":
+		return "zwgl", "journal-highway", true
+	case "highway-legacy", "zwgl1980", "中外公路旧版":
+		return "", "journal-highway-legacy", true
+	case "qk", "cslgdxxbqks", "期刊社":
+		return "cslgdxxbqks", "journal-qk", true
+	case "social", "cslgdxxbsk", "社科版":
+		return "cslgdxxbsk", "journal-social", true
+	case "science", "cslgdxxbzk", "自然科学版":
+		return "cslgdxxbzk", "journal-science", true
+	case "experiment", "syjxyyq", "实验教学与仪器":
+		return "syjxyyq", "journal-experiment", true
 	default:
 		return "", "", false
 	}
@@ -1023,17 +1127,33 @@ func (a NativeSite) journalSearch(ctx context.Context, args []string, prefix, se
 
 func journalArticle(row map[string]any, service, prefix string) map[string]any {
 	id := nestedString(row, "file_no")
+	host := journalHost(prefix)
 	return map[string]any{
 		"id": id, "journal": service, "title": row["title"], "authors": row["author_name"],
 		"keywords": row["key_word"], "abstract": row["abstract"], "year": row["year_id"],
 		"volume": row["volume"], "issue": row["issue"], "pages": row["position"], "doi": row["doi"],
 		"citation": row["citation"],
 		"links": map[string]string{
-			"abstract": "https://" + prefix + ".csust.edu.cn/" + prefix + "/article/abstract/" + url.PathEscape(id),
-			"html":     "https://" + prefix + ".csust.edu.cn/" + prefix + "/article/html/" + url.PathEscape(id),
-			"pdf":      "https://" + prefix + ".csust.edu.cn/" + prefix + "/article/pdf/" + url.PathEscape(id),
+			"abstract": "https://" + host + ".csust.edu.cn/" + prefix + "/article/abstract/" + url.PathEscape(id),
+			"html":     "https://" + host + ".csust.edu.cn/" + prefix + "/article/html/" + url.PathEscape(id),
+			"pdf":      "https://" + host + ".csust.edu.cn/" + prefix + "/article/pdf/" + url.PathEscape(id),
 		},
 		"raw": row,
+	}
+}
+
+func journalHost(prefix string) string {
+	switch prefix {
+	case "cslgdxxbqks":
+		return "cslgqk"
+	case "cslgdxxbsk":
+		return "cslgxbsk"
+	case "cslgdxxbzk":
+		return "cslgxbzk"
+	case "syjxyyq":
+		return "syjx"
+	default:
+		return prefix
 	}
 }
 

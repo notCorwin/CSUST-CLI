@@ -50,6 +50,16 @@ func TestBusinessAdaptersKeepSemanticAndRawData(t *testing.T) {
 	if article["id"] != "20260112" || article["title"] != "题目" || article["raw"] == nil {
 		t.Fatalf("article lost semantic/raw fields: %#v", article)
 	}
+	if prefix, service, ok := journalService("science"); !ok || prefix != "cslgdxxbzk" || service != "journal-science" || !strings.Contains(article["links"].(map[string]string)["abstract"], "jtkxygc.csust.edu.cn") {
+		t.Fatalf("journal protocol mapping changed unexpectedly: %#v", article)
+	}
+	if prefix, service, ok := journalService("highway"); !ok || prefix != "zwgl" || service != "journal-highway" {
+		t.Fatalf("highway journal protocol mapping missing: %q %q %v", prefix, service, ok)
+	}
+	science := journalArticle(map[string]any{"file_no": "20250215", "title": "自然科学"}, "journal-science", "cslgdxxbzk")
+	if !strings.Contains(science["links"].(map[string]string)["abstract"], "cslgxbzk.csust.edu.cn/cslgdxxbzk") {
+		t.Fatalf("journal host mapping lost: %#v", science)
+	}
 
 	if got := findID(map[string]any{"data": []any{map[string]any{"submission_id": float64(12)}}}); got != "12" {
 		t.Fatalf("unexpected nested id: %q", got)

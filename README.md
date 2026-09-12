@@ -149,6 +149,13 @@ password=密码
 | `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
 | `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
 | `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务及学院业务查询 |
+| `undergraduate-admissions` | 本科招生计划、历年分数、录取进程和考生录取结果查询 |
+| `union` | 智慧工会模块、角色登录、验证码和会话 |
+| `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
+| `transport-info` | 交通学院综合信息登录、验证码和会话 |
+| `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |
+| `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
+| `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
@@ -237,6 +244,15 @@ password=密码
 
 # 语义化业务服务
 ./csust journal search --journal transport --query 软岩 --page-size 20 --json
+./csust journal search --journal highway --query 长沙 --json
+./csust journal article --journal highway-legacy --volume 43 --issue 1 --article 88 --json
+./csust undergraduate-admissions plans --province 湖南 --year 2026 --category 物理类 --type 普通类 --json
+./csust union catalog --json
+./csust research status --json
+./csust transport-info status --json
+./csust transport-lab catalog --json
+./csust transport-lab login --role user --phone 手机号 --password-stdin --captcha 验证码 --json
+./csust continuing-platform catalog --json
 ./csust employment list --kind career --json
 ./csust onlinejudge problems --limit 20 --json
 ./csust sunshine issues --status 受理中 --json
