@@ -16,6 +16,7 @@ import (
 	"io"
 	"math/big"
 	"math/bits"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -63,8 +64,8 @@ var businessServices = []businessService{
 	{"journal-social", "长沙理工大学学报（社科版）", "journal-social", "期刊", "high", "live cslgdxxbsk journal site uses the verified article search and article page protocol"},
 	{"journal-science", "长沙理工大学学报（自然科学版）", "journal-science", "期刊", "high", "live cslgdxxbzk /ajax/search returned article metadata and public links"},
 	{"journal-experiment", "实验教学与仪器", "journal-experiment", "期刊", "high", "live syjxyyq /ajax/search and public article links are available"},
-	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines /api/problem, /api/contest, /api/submissions and /api/submission"},
-	{"mooc", "本校网络课程目录", "mooc", "教学", "high", "live courseNetwork page exposes keyword, department, pagination and sort parameters with course rows"},
+	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines CSRF-backed /api/login, /api/logout, /api/problem, /api/contest, /api/submissions and /api/submission"},
+	{"mooc", "本校网络课程目录", "mooc", "教学", "high", "live courseNetwork page exposes keyword, department, pagination, sort and signed course-detail entrypoints"},
 	{"quality-system", "教学质量保障系统", "quality-system", "教学质量", "high", "live zbxt config/login plus bearer-protected home, dictionaries and teaching-quality APIs"},
 	{"library-personal", "图书馆个人中心、空间和座位预约查询", "library-personal", "图书馆", "high", "CAS login reaches ClientWeb IC center; init_acc, center.aspx, account.aspx, device.aspx and reserve.aspx expose profile, credit, contact/password, resource, availability and personal-reservation APIs"},
 	{"library-catalog", "图书馆馆藏与读者服务", "library-catalog", "图书馆", "high", "live OPAC exposes catalogue APIs plus CAS-backed reader profile, loans, reservations, privileges, finance, shelf, pre-loan and loan-rule JSON endpoints"},
@@ -387,6 +388,10 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		add("--insecure")
 		switch operation {
+		case "login":
+			add("--username", "--password", "--password-stdin", "--tfa-code", "--tfa-code-stdin")
+		case "logout":
+			add("--yes")
 		case "problems":
 			add("--page", "--limit", "--keyword", "--difficulty", "--tag")
 		case "problem", "contest", "submission":
@@ -405,6 +410,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		switch operation {
 		case "courses", "search", "list":
 			add("--keyword", "--query", "--department", "--department-id", "--page", "--page-size", "--sort", "--order")
+		case "course", "detail":
+			add("--id")
 		case "departments", "department":
 		}
 	case "quality-system":
@@ -2285,7 +2292,7 @@ func (a NativeSite) executeOnlineJudge(ctx context.Context, args []string) (map[
 		return map[string]any{
 			"ok": true, "submitted": false, "confirmed": true, "evidence": "frontend service module",
 			"service": "onlinejudge", "operations": map[string]any{
-				"problems": "/api/problem", "problem": "/api/problem?problem_id=ID", "contests": "/api/contests", "contest": "/api/contest?id=ID", "submissions": "/api/submissions", "submission": "/api/submission?id=ID", "user": "/api/profile?username=NAME", "submit": "POST /api/submission",
+				"login": "POST /api/login (with /api/tfa_required)", "logout": "GET /api/logout", "problems": "/api/problem", "problem": "/api/problem?problem_id=ID", "contests": "/api/contests", "contest": "/api/contest?id=ID", "submissions": "/api/submissions", "submission": "/api/submission?id=ID", "user": "/api/profile?username=NAME", "submit": "POST /api/submission",
 			},
 		}, nil
 	}
@@ -2296,6 +2303,10 @@ func (a NativeSite) executeOnlineJudge(ctx context.Context, args []string) (map[
 	}
 	options := businessRequestOptions{cookieFile: cookie, insecure: insecure}
 	switch args[0] {
+	case "login":
+		return a.onlineJudgeLogin(ctx, args[1:], cookie, insecure)
+	case "logout":
+		return a.onlineJudgeLogout(ctx, args[1:], cookie, insecure)
 	case "problems":
 		page, err := businessInt(args[1:], "--page", 1)
 		if err != nil {
@@ -2370,8 +2381,106 @@ func (a NativeSite) executeOnlineJudge(ctx context.Context, args []string) (map[
 	case "submit":
 		return a.onlineJudgeSubmit(ctx, args[1:], options)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "onlinejudge 只支持 problems、problem、contests、contest、submissions、submission、user、tags、submit、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "onlinejudge 只支持 login、logout、problems、problem、contests、contest、submissions、submission、user、tags、submit、catalog"}
 	}
+}
+
+func onlineJudgeCSRFToken(cookie string) (string, *siteError) {
+	target, cookiePath, resolveErr := resolveSite(siteRequest{Service: "onlinejudge", CookieFile: cookie})
+	if resolveErr != nil {
+		return "", resolveErr
+	}
+	jar, jarErr := cookiejar.New(nil)
+	if jarErr != nil {
+		return "", &siteError{Code: "session_error", Message: "无法创建 OnlineJudge Cookie 会话: " + jarErr.Error()}
+	}
+	if loadErr := loadCookies(jar, cookiePath, target); loadErr != nil {
+		return "", &siteError{Code: "session_error", Message: "无法读取 OnlineJudge Cookie 会话: " + loadErr.Error()}
+	}
+	for _, item := range jar.Cookies(target) {
+		if strings.EqualFold(item.Name, "csrftoken") && item.Value != "" {
+			return item.Value, nil
+		}
+	}
+	return "", &siteError{Code: "authentication_failed", Message: "OnlineJudge 会话缺少 CSRF Cookie，请先重新打开登录页", Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "csrf-cookie-missing"}}
+}
+
+func (a NativeSite) onlineJudgeLogin(ctx context.Context, args []string, cookie string, insecure bool) (map[string]any, *siteError) {
+	account, password, credentialErr := businessCredentials(args, "CSUST_ONLINEJUDGE_PASSWORD")
+	if credentialErr != nil {
+		return nil, credentialErr
+	}
+	options := businessRequestOptions{cookieFile: cookie, insecure: insecure}
+	page, requestErr := a.businessGet(ctx, "onlinejudge", "/", nil, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	csrf, csrfErr := onlineJudgeCSRFToken(cookie)
+	if csrfErr != nil {
+		return nil, csrfErr
+	}
+	options.headers = []pair{{"X-CSRFToken", csrf}, {"Referer", safeResponseURL(page)}}
+	tfaCheck, requestErr := a.businessPostJSON(ctx, "onlinejudge", "/api/tfa_required", map[string]string{"username": account}, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if failure := businessLoginResponseFailure(tfaCheck); failure != nil {
+		return nil, failure
+	}
+	tfaRequired := false
+	if payload, parseErr := businessJSONMap(tfaCheck); parseErr == nil {
+		if data, ok := payload["data"].(map[string]any); ok {
+			tfaRequired, _ = data["result"].(bool)
+		}
+	}
+	loginData := map[string]string{"username": account, "password": password}
+	if tfaRequired {
+		code, codeErr := businessSecret(args, "--tfa-code", "CSUST_ONLINEJUDGE_TFA_CODE")
+		if codeErr != nil {
+			return nil, codeErr
+		}
+		loginData["tfa_code"] = code
+	}
+	result, requestErr := a.businessPostJSON(ctx, "onlinejudge", "/api/login", loginData, options)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if failure := businessLoginResponseFailure(result); failure != nil {
+		return nil, failure
+	}
+	profile, probeErr := a.businessGet(ctx, "onlinejudge", "/api/profile", nil, businessRequestOptions{cookieFile: cookie, insecure: insecure, require: true})
+	if probeErr != nil {
+		return nil, &siteError{Code: "authentication_failed", Message: "登录请求已发送，但 OnlineJudge 会话探针失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "profile-probe-error", "cause": probeErr.Code}}
+	}
+	if failure := businessLoginResponseFailure(profile); failure != nil {
+		return nil, &siteError{Code: "authentication_failed", Message: "登录请求已发送，但 OnlineJudge 会话探针报告失败", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "profile-probe-failure"}}
+	}
+	result["service"], result["operation"], result["username"] = "onlinejudge", "login", account
+	result["submitted"], result["confirmed"], result["evidence"] = true, true, "login-response-and-profile-probe"
+	return result, nil
+}
+
+func (a NativeSite) onlineJudgeLogout(ctx context.Context, args []string, cookie string, insecure bool) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "OnlineJudge 退出会使本地会话失效，需要 --yes"}
+	}
+	_, cookiePath, resolveErr := resolveSite(siteRequest{Service: "onlinejudge", CookieFile: cookie})
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	result, requestErr := a.businessGet(ctx, "onlinejudge", "/api/logout", nil, businessRequestOptions{cookieFile: cookie, insecure: insecure, allowBusinessFailure: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if failure := businessLoginResponseFailure(result); failure != nil {
+		return nil, failure
+	}
+	if removeErr := removeCookieFile(cookiePath); removeErr != nil {
+		return nil, &siteError{Code: "cookie_write_failed", Message: removeErr.Error()}
+	}
+	result["service"], result["operation"], result["logged_out"] = "onlinejudge", "logout", true
+	result["submitted"], result["confirmed"], result["evidence"] = true, true, "logout-response-and-local-cookie-removed"
+	return result, nil
 }
 
 func (a NativeSite) onlineJudgeRead(ctx context.Context, operation, path string, params []pair, options businessRequestOptions) (map[string]any, *siteError) {

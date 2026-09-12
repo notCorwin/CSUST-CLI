@@ -81,6 +81,16 @@ func TestSiteRedirectPolicy(t *testing.T) {
 	if safeSiteSSORedirect(mservice, mservice, httpTransfer) {
 		t.Fatal("unexpected HTTPS downgrade through transfer bridge")
 	}
+	mooc, _ := url.Parse("http://mooc.csust.edu.cn/")
+	moocEntry, _ := url.Parse("http://mooc.csust.edu.cn/fyportal/tomoocportal?courseid=1&ckenc=redacted")
+	moocCourse, _ := url.Parse("http://mooc1.chaoxing.com/mooc-ans/course/portal/opaque")
+	if !safeSiteKnownRedirect(mooc, moocEntry, moocCourse) {
+		t.Fatal("expected the fixed MOOC Chaoxing course redirect")
+	}
+	otherCourse, _ := url.Parse("http://evil.example/mooc-ans/course/portal/opaque")
+	if safeSiteKnownRedirect(mooc, moocEntry, otherCourse) {
+		t.Fatal("unexpected arbitrary MOOC redirect accepted")
+	}
 	v1, _ := url.Parse("https://v1.chaoxing.com/appInter/openPcApp?mappId=19933721")
 	chaoxingAuth, _ := url.Parse("https://auth.chaoxing.com/connect/oauth2/authorize?code=redacted")
 	office, _ := url.Parse("https://office.csust.edu.cn/front/web/approve/apps/forms/fore/apply?id=266714")

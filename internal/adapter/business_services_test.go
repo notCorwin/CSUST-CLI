@@ -90,6 +90,67 @@ func TestBusinessAdaptersKeepSemanticAndRawData(t *testing.T) {
 	}
 }
 
+func TestOnlineJudgeLoginAndLogoutUseCSRFAndProbeSession(t *testing.T) {
+	const username, password, tfaCode, csrf = "alice", "judge-password-secret", "tfa-code-secret", "test-csrf"
+	loggedIn := false
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/":
+			http.SetCookie(writer, &http.Cookie{Name: "csrftoken", Value: csrf, Path: "/"})
+			_, _ = writer.Write([]byte(`{"ok":true}`))
+		case request.Method == http.MethodPost && request.URL.Path == "/api/tfa_required":
+			var body struct {
+				Username string `json:"username"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body.Username != username || request.Header.Get("X-CSRFToken") != csrf {
+				t.Fatalf("OnlineJudge TFA request was not mapped correctly: username=%q", body.Username)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"result":true}}`))
+		case request.Method == http.MethodPost && request.URL.Path == "/api/login":
+			var body struct {
+				Username string `json:"username"`
+				Password string `json:"password"`
+				TFACode  string `json:"tfa_code"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body.Username != username || body.Password != password || body.TFACode != tfaCode || request.Header.Get("X-CSRFToken") != csrf {
+				t.Fatalf("OnlineJudge login request was not mapped correctly: username=%q csrf=%q", body.Username, request.Header.Get("X-CSRFToken"))
+			}
+			loggedIn = true
+			http.SetCookie(writer, &http.Cookie{Name: "sessionid", Value: "session", Path: "/"})
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"username":"alice"}}`))
+		case request.Method == http.MethodGet && request.URL.Path == "/api/profile":
+			if !loggedIn {
+				_, _ = writer.Write([]byte(`{"error":"login required"}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"username":"alice"}}`))
+		case request.Method == http.MethodGet && request.URL.Path == "/api/logout":
+			if _, err := request.Cookie("sessionid"); err != nil || !loggedIn {
+				t.Fatalf("OnlineJudge logout request was not authenticated")
+			}
+			loggedIn = false
+			_, _ = writer.Write([]byte(`{"error":null}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	cookieFile := filepath.Join(t.TempDir(), "cookies.txt")
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", cookieFile)
+
+	result := runIssueJSON(t, "onlinejudge", "login", "--username", username, "--password", password, "--tfa-code", tfaCode)
+	safeResult := string(mustMarshalIssue(result))
+	if result["confirmed"] != true || result["evidence"] != "login-response-and-profile-probe" || strings.Contains(safeResult, password) || strings.Contains(safeResult, tfaCode) || strings.Contains(safeResult, csrf) {
+		t.Fatalf("unexpected or unsafe OnlineJudge login result: %#v", result)
+	}
+	logout := runIssueJSON(t, "onlinejudge", "logout", "--yes")
+	if logout["confirmed"] != true || logout["evidence"] != "logout-response-and-local-cookie-removed" || loggedIn {
+		t.Fatalf("unexpected OnlineJudge logout result: %#v", logout)
+	}
+}
+
 func TestStaffRecordUnitRequestUploadsAndMapsSemanticFields(t *testing.T) {
 	var submitted, uploaded bool
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

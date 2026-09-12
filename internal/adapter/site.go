@@ -534,7 +534,7 @@ func (a NativeSite) execute(ctx context.Context, req siteRequest) (map[string]an
 			if req.AllowSSO {
 				normalizeSSOHTTPRedirect(previous, clientRequest.URL, redirectBase)
 			}
-			if !safeSiteRedirect(previous, clientRequest.URL) && (!req.AllowSSO || !safeSiteSSORedirect(redirectBase, previous, clientRequest.URL)) {
+			if !safeSiteRedirect(previous, clientRequest.URL) && (!req.AllowSSO || !safeSiteSSORedirect(redirectBase, previous, clientRequest.URL)) && !safeSiteKnownRedirect(redirectBase, previous, clientRequest.URL) {
 				return fmt.Errorf("已拒绝跨站或 HTTPS 降级重定向")
 			}
 			if !strings.EqualFold(previous.Host, clientRequest.URL.Host) && mutatingMethod(clientRequest.Method) {
@@ -1146,6 +1146,15 @@ func safeSiteRedirect(previous, next *url.URL) bool {
 		return strings.EqualFold(next.Scheme, "http") || strings.EqualFold(next.Scheme, "https")
 	}
 	return strings.EqualFold(previous.Scheme, "http") && strings.EqualFold(next.Scheme, "https")
+}
+
+func safeSiteKnownRedirect(base, previous, next *url.URL) bool {
+	if base == nil || previous == nil || next == nil || !strings.EqualFold(base.Host, "mooc.csust.edu.cn") {
+		return false
+	}
+	return strings.EqualFold(previous.Host, base.Host) && strings.EqualFold(previous.Path, "/fyportal/tomoocportal") &&
+		strings.EqualFold(next.Host, "mooc1.chaoxing.com") && strings.HasPrefix(next.Path, "/mooc-ans/course/portal/") &&
+		strings.EqualFold(previous.Scheme, next.Scheme)
 }
 
 func safeSiteSSORedirect(base, previous, next *url.URL) bool {

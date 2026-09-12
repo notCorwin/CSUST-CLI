@@ -11,7 +11,10 @@ import (
 
 const moocService = "mooc"
 
-var moocPageCountPattern = regexp.MustCompile(`page\.showPage\(\s*\d+\s*,\s*(\d+)`)
+var (
+	moocPageCountPattern        = regexp.MustCompile(`page\.showPage\(\s*\d+\s*,\s*(\d+)`)
+	moocCourseEvaluationPattern = regexp.MustCompile(`\((\d+)\s*人评价\)`)
+)
 
 func (a NativeSite) executeMooc(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
@@ -24,11 +27,134 @@ func (a NativeSite) executeMooc(ctx context.Context, args []string) (map[string]
 	switch args[0] {
 	case "courses", "search", "list":
 		return a.moocCourses(ctx, args[1:], cookie)
+	case "course", "detail":
+		return a.moocCourse(ctx, args[1:], cookie)
 	case "departments", "department":
 		return a.moocDepartments(ctx, cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "mooc 只支持 courses、departments、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "mooc 只支持 courses、course、departments、catalog"}
 	}
+}
+
+func (a NativeSite) moocCourse(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	id, idErr := businessRequired(args, "--id", "course detail 必须提供 --id")
+	if idErr != nil {
+		return nil, idErr
+	}
+	id = strings.TrimSpace(id)
+	list, requestErr := a.businessGet(ctx, moocService, "/portal/courseNetwork/list", []pair{
+		{"creatorUserId", "0"}, {"pageSize", "10"}, {"keyword", id}, {"departmentId", "0"},
+		{"order", "0"}, {"sort", "createTime"}, {"pageNum", "1"},
+	}, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	body, bodyErr := libraryRemoteBody(list)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	directory, parseErr := parsePage(body)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: "MOOC 课程目录解析失败: " + parseErr.Error()}
+	}
+	accessPath := moocCourseAccessPath(directory, id)
+	if accessPath == "" {
+		return nil, &siteError{Code: "not_found", Message: "MOOC 未找到课程: " + id}
+	}
+	detail, requestErr := a.businessGet(ctx, moocService, accessPath, nil, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	detailBody, bodyErr := libraryRemoteBody(detail)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	detailDocument, parseErr := parsePage(detailBody)
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: "MOOC 课程详情解析失败: " + parseErr.Error()}
+	}
+	data := moocCourseDetailData(detailDocument, id)
+	data["access_url"] = safeSiteReference("http://mooc.csust.edu.cn" + accessPath)
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "MOOC 课程目录签名入口及课程详情页面", "service": moocService, "operation": "course",
+		"data": data,
+	}, nil
+}
+
+func moocCourseAccessPath(document *pageNode, id string) string {
+	for _, table := range document.findAll("table") {
+		for _, row := range directTableRows(table) {
+			values := rowValues(row)
+			if len(values) == 0 || strings.TrimSpace(values[0]) != id {
+				continue
+			}
+			for _, link := range row.findAll("a") {
+				href := strings.TrimSpace(link.attr("href"))
+				if !strings.Contains(href, "/fyportal/tomoocportal") {
+					continue
+				}
+				target, err := url.Parse(resolvePageURL("http://mooc.csust.edu.cn/portal/courseNetwork/list", href))
+				if err != nil || !strings.EqualFold(target.Host, "mooc.csust.edu.cn") || target.Path == "" {
+					continue
+				}
+				path := target.EscapedPath()
+				if target.RawQuery != "" {
+					path += "?" + target.RawQuery
+				}
+				return path
+			}
+		}
+	}
+	return ""
+}
+
+func moocCourseDetailData(document *pageNode, id string) map[string]any {
+	data := map[string]any{"id": id, "title": "", "instructor": ""}
+	if title := libraryRemoteNodeWithClass(document, "f30"); title != nil {
+		data["title"] = strings.TrimSpace(pageDisplayText(title))
+	}
+	if teacher := libraryRemoteNodeWithClass(document, "teacherDiv"); teacher != nil {
+		value := strings.TrimSpace(pageDisplayText(teacher))
+		data["instructor"] = strings.TrimSpace(strings.TrimPrefix(value, "主讲教师："))
+	}
+	fields := make(map[string]string)
+	for _, table := range document.findAll("table") {
+		if !strings.Contains(pageDisplayText(table), "课程编号") {
+			continue
+		}
+		for _, row := range directTableRows(table) {
+			values := rowValues(row)
+			if len(values) < 2 {
+				continue
+			}
+			key := strings.Trim(strings.TrimSpace(values[0]), ":：")
+			value := strings.TrimSpace(values[1])
+			if key != "" {
+				fields[key] = value
+			}
+		}
+		break
+	}
+	data["fields"] = fields
+	for key, value := range map[string]string{
+		"school":        fields["学校"],
+		"department":    fields["开课院系"],
+		"course_number": fields["课程编号"],
+		"credits":       fields["学分"],
+		"hours":         fields["课时"],
+	} {
+		if value != "" {
+			data[key] = value
+		}
+	}
+	if rating := document.first("", "Topingfen"); rating != nil {
+		data["rating"] = strings.TrimSpace(pageDisplayText(rating))
+	}
+	if match := moocCourseEvaluationPattern.FindStringSubmatch(pageDisplayText(document)); len(match) > 1 {
+		data["evaluation_count"], _ = strconv.Atoi(match[1])
+	}
+	return data
 }
 
 func (a NativeSite) moocCourses(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
@@ -200,7 +326,7 @@ func moocCourseItems(document *pageNode) []map[string]any {
 			course["title"] = strings.TrimSpace(pageDisplayText(title))
 		}
 		if link := libraryRemoteNodeWithClass(cells[2], "Limitlogin"); link != nil && link.attr("href") != "" {
-			course["public_access_url"] = link.attr("href")
+			course["public_access_url"] = safeSiteReference(resolvePageURL("http://mooc.csust.edu.cn/portal/courseNetwork/list", link.attr("href")))
 		}
 		items = append(items, course)
 	}

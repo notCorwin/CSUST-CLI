@@ -78,8 +78,8 @@ func nativeUsage(args []string) []byte {
   union                       智慧工会模块、公开组织目录/详情、角色登录和会话
   journal                     期刊检索
   employment                  云就业公开信息、学生会话、登录及邮箱二次验证
-  onlinejudge                 OnlineJudge 题目/竞赛/提交
-  mooc                        本校网络课程目录、院系筛选和分页查询
+  onlinejudge                 OnlineJudge 登录（含 TFA）、题目/竞赛/提交和退出
+  mooc                        本校网络课程目录、课程详情、院系筛选和分页查询
   quality-system              教学质量保障系统配置、登录、听评课和教学质量汇总查询
   party-exam                  党校课程与成绩
   archive                     学生/综合档案系统；person-archive、attachments、download 使用真实档案 API
