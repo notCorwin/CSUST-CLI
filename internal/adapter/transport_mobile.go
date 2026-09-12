@@ -335,7 +335,7 @@ func (a NativeSite) transportMobileSendCode(ctx context.Context, args []string, 
 		return nil, requestErr
 	}
 	result := transportMobileResult("send-code", "验证码接口返回 success=true")
-	result["phone"] = phone
+	result["submitted"], result["phone"] = true, phone
 	result["api_code"] = payload["code"]
 	return result, nil
 }
@@ -407,7 +407,7 @@ func (a NativeSite) transportMobileLogout(ctx context.Context, args []string, co
 		return nil, &siteError{Code: "session_error", Message: "远端退出后令牌删除失败: " + removeErr.Error()}
 	}
 	result := transportMobileResult("logout", "远端退出并删除本地令牌")
-	result["logged_out"], result["token_file"] = true, tokenPath
+	result["submitted"], result["logged_out"], result["token_file"] = true, true, tokenPath
 	return result, nil
 }
 

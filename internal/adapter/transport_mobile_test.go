@@ -145,7 +145,7 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 	}
 
 	code := runIssueJSON(t, "transport-mobile", "send-code", "--phone", "13800138000", "--yes")
-	if code["phone"] != "13800138000" || code["confirmed"] != true {
+	if code["phone"] != "13800138000" || code["submitted"] != true || code["confirmed"] != true {
 		t.Fatalf("verification-code result failed: %#v", code)
 	}
 	if len(tableBodies) != 5 {
@@ -165,7 +165,7 @@ func TestTransportMobileProtocolAndSemanticModels(t *testing.T) {
 	}
 
 	logout := runIssueJSON(t, "transport-mobile", "logout")
-	if logout["logged_out"] != true || logout["confirmed"] != true {
+	if logout["submitted"] != true || logout["logged_out"] != true || logout["confirmed"] != true {
 		t.Fatalf("logout result failed: %#v", logout)
 	}
 	if _, err := os.Stat(tokenFile); !os.IsNotExist(err) {
