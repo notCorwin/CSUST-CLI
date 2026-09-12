@@ -160,6 +160,7 @@ password=密码
 | `quality-system` | 教学质量保障系统配置、登录、听评课和教学质量汇总查询 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
 | `library` | 图书馆馆藏检索、书目详情和馆藏状态 |
+| `library-center` | 图书馆空间/座位资源、可用状态、个人预约查询以及预约/取消 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
@@ -298,6 +299,13 @@ password=密码
 ./csust library search --query 人工智能 --field title --in-library --json
 ./csust library book --id 91103 --json
 ./csust library holdings --id 91103 --json
+# 图书馆空间/座位：先登录，再查资源、状态和个人预约；写操作显式确认并回读
+./csust library-center login --auth sso --password-stdin --json
+./csust library-center resources --json
+./csust library-center availability --resource 座位 --room 阅览室一B205 --date 2026-09-15 --from 09:00 --to 10:00 --json
+./csust library-center reservations --json
+./csust library-center reserve --resource 座位 --room 阅览室一B205 --item B205-001 --date 2026-09-15 --from 09:00 --to 10:00 --yes --json
+./csust library-center cancel --id RESERVATION_ID --yes --json
 # MOOC：本校课程、院系筛选和排序
 ./csust mooc courses --keyword 结构 --department 土木与环境工程学院 --sort views --json
 ./csust mooc departments --json
