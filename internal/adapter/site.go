@@ -86,7 +86,7 @@ var knownSites = map[string]serviceInfo{
 	"map":                      {host: "gis.csust.edu.cn", scheme: "https", path: "/"},
 	"mail":                     {host: "mail.csust.edu.cn", scheme: "https", path: "/"},
 	"library":                  {host: "lib.csust.edu.cn", scheme: "https", path: "/"},
-	"library-catalog":          {host: "opac.csust.edu.cn", scheme: "http", path: "/index"},
+	"library-catalog":          {host: "opac.csust.edu.cn", scheme: "https", path: "/index"},
 	"theol":                    {host: "pt.csust.edu.cn", scheme: "http", path: "/meol/homepage/common/"},
 	"mooc":                     {host: "mooc.csust.edu.cn", scheme: "http", path: "/portal"},
 	"quality":                  {host: "zbxt.csust.edu.cn", scheme: "https", path: "/login"},

@@ -16,6 +16,7 @@ var (
 	libraryCatalogPagesPattern       = regexp.MustCompile(`共\s*([0-9,]+)\s*页`)
 	libraryCatalogPublicationPattern = regexp.MustCompile(`出版日期:\s*([0-9]{4}(?:[-/]\d{1,2}(?:[-/]\d{1,2})?)?)`)
 	libraryCatalogLoanPattern        = regexp.MustCompile(`已借\s*([0-9]+)次`)
+	libraryCatalogDocumentPattern    = regexp.MustCompile(`文献类型:\s*([^,\s]+)`)
 	libraryCatalogISBNPattern        = regexp.MustCompile(`(?i)\b(?:97[89][\d-]{10,}|[\dX]{10,})\b`)
 	libraryCatalogPricePattern       = regexp.MustCompile(`价格[：:]\s*([^\s]+)`)
 )
@@ -236,7 +237,7 @@ func libraryCatalogSearchItems(document *pageNode) []map[string]any {
 		if match := libraryCatalogLoanPattern.FindStringSubmatch(text); len(match) > 1 {
 			item["loan_count"] = libraryCatalogParseInt(match[1])
 		}
-		if match := regexp.MustCompile(`文献类型:\s*([^,\s]+)`).FindStringSubmatch(text); len(match) > 1 {
+		if match := libraryCatalogDocumentPattern.FindStringSubmatch(text); len(match) > 1 {
 			item["document_type"] = match[1]
 		}
 		items = append(items, item)
