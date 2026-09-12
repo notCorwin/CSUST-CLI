@@ -64,7 +64,7 @@ var businessServices = []businessService{
 	{"journal-social", "长沙理工大学学报（社科版）", "journal-social", "期刊", "high", "live cslgdxxbsk journal site uses the verified article search and article page protocol"},
 	{"journal-science", "长沙理工大学学报（自然科学版）", "journal-science", "期刊", "high", "live cslgdxxbzk /ajax/search returned article metadata and public links"},
 	{"journal-experiment", "实验教学与仪器", "journal-experiment", "期刊", "high", "live syjxyyq /ajax/search and public article links are available"},
-	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines CSRF-backed /api/login, /api/logout, /api/problem, /api/contest, /api/submissions and /api/submission"},
+	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines CSRF-backed account, recovery, profile, TFA, avatar, session, problem, contest, question, rank and submission APIs"},
 	{"mooc", "本校网络课程目录", "mooc", "教学", "high", "live courseNetwork page exposes keyword, department, pagination, sort and signed course-detail entrypoints"},
 	{"quality-system", "教学质量保障系统", "quality-system", "教学质量", "high", "live zbxt config/login plus bearer-protected home, dictionaries and teaching-quality APIs"},
 	{"library-personal", "图书馆个人中心、空间和座位预约查询", "library-personal", "图书馆", "high", "CAS login reaches ClientWeb IC center; init_acc, center.aspx, account.aspx, device.aspx and reserve.aspx expose profile, credit, contact/password, resource, availability and personal-reservation APIs"},
@@ -402,6 +402,61 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			add("--page", "--limit", "--username", "--problem-id", "--contest-id", "--language", "--result", "--myself")
 		case "user":
 			add("--username")
+		case "profile":
+			add("--username")
+		case "profile-update":
+			add("--real-name", "--mood", "--major", "--blog", "--school", "--github", "--language", "--yes")
+		case "register":
+			add("--username", "--password", "--password-stdin", "--email", "--captcha", "--yes")
+		case "captcha":
+			add("--output")
+		case "tfa-setup":
+			add("--output")
+		case "password-reset-request":
+			add("--email", "--captcha", "--yes")
+		case "password-reset":
+			add("--token", "--captcha", "--new-password", "--new-password-stdin", "--password-confirm", "--password-confirm-stdin", "--yes")
+		case "check-account":
+			add("--username", "--email")
+		case "change-password":
+			add("--old-password", "--old-password-stdin", "--new-password", "--new-password-stdin", "--tfa-code", "--tfa-code-stdin", "--yes")
+		case "change-email":
+			add("--password", "--password-stdin", "--old-email", "--new-email", "--tfa-code", "--tfa-code-stdin", "--yes")
+		case "tfa-enable", "tfa-disable":
+			add("--code", "--code-stdin", "--yes")
+		case "refresh-display-id":
+			add("--yes")
+		case "avatar-upload":
+			add("--file", "--yes")
+		case "sessions":
+		case "revoke-session":
+			add("--session-key", "--session-key-stdin", "--yes")
+		case "rank", "acm-rank", "oi-rank":
+			add("--rule", "--page", "--limit")
+		case "contest-rank":
+			add("--contest-id", "--page", "--limit", "--force-refresh")
+		case "contest-access":
+			add("--contest-id")
+		case "contest-password":
+			add("--contest-id", "--password", "--password-stdin")
+		case "contest-announcements", "contest-problems":
+			add("--contest-id")
+		case "contest-problem":
+			add("--contest-id", "--problem-id")
+		case "contest-submissions":
+			add("--contest-id", "--page", "--limit", "--username", "--problem-id", "--language", "--result", "--myself")
+		case "questions":
+			add("--page", "--limit", "--username", "--problem-id", "--contest-id", "--solved", "--myself")
+		case "question":
+			add("--id")
+		case "ask-question":
+			add("--problem-id", "--contest-id", "--content", "--content-stdin", "--yes")
+		case "answer-question":
+			add("--id", "--answer", "--answer-stdin", "--yes")
+		case "pick-one", "languages", "announcements":
+			if operation == "announcements" {
+				add("--page", "--limit")
+			}
 		case "submit":
 			add("--problem-id", "--language", "--code", "--contest-id", "--yes")
 		}
@@ -2302,7 +2357,7 @@ func (a NativeSite) executeOnlineJudge(ctx context.Context, args []string) (map[
 		return map[string]any{
 			"ok": true, "submitted": false, "confirmed": true, "evidence": "frontend service module",
 			"service": "onlinejudge", "operations": map[string]any{
-				"login": "POST /api/login (with /api/tfa_required)", "logout": "GET /api/logout", "problems": "/api/problem", "problem": "/api/problem?problem_id=ID", "contests": "/api/contests", "contest": "/api/contest?id=ID", "submissions": "/api/submissions", "submission": "/api/submission?id=ID", "user": "/api/profile?username=NAME", "submit": "POST /api/submission",
+				"login": "POST /api/login (with /api/tfa_required)", "logout": "GET /api/logout", "register": "POST /api/register", "captcha": "GET /api/captcha", "password-reset-request": "POST /api/apply_reset_password", "password-reset": "POST /api/reset_password", "profile": "/api/profile", "profile-update": "PUT /api/profile", "refresh-display-id": "GET /api/profile/fresh_display_id", "avatar-upload": "POST /api/upload_avatar (multipart image)", "change-password": "POST /api/change_password", "change-email": "POST /api/change_email", "tfa-setup": "GET /api/two_factor_auth (QR saved to file)", "tfa-enable": "POST /api/two_factor_auth", "tfa-disable": "PUT /api/two_factor_auth", "sessions": "/api/sessions", "problems": "/api/problem", "problem": "/api/problem?problem_id=ID", "contests": "/api/contests", "contest": "/api/contest?id=ID", "contest-access": "/api/contest/access?contest_id=ID", "contest-password": "POST /api/contest/password", "contest-announcements": "/api/contest/announcement?contest_id=ID", "contest-problems": "/api/contest/problem?contest_id=ID", "contest-submissions": "/api/contest_submissions", "contest-rank": "/api/contest_rank", "submissions": "/api/submissions", "submission": "/api/submission?id=ID", "user": "/api/profile?username=NAME", "rank": "/api/user_rank", "questions": "/api/questions or /api/contest_questions", "question": "/api/question?id=ID", "ask-question": "POST /api/question", "answer-question": "PUT /api/question_answer", "pick-one": "/api/pickone", "languages": "/api/languages", "announcements": "/api/announcement", "submit": "POST /api/submission",
 			},
 		}, nil
 	}
@@ -2386,12 +2441,14 @@ func (a NativeSite) executeOnlineJudge(ctx context.Context, args []string) (map[
 			return nil, err
 		}
 		return a.onlineJudgeRead(ctx, "user", "/api/profile", []pair{{"username", name}}, options)
+	case "profile", "profile-update", "register", "captcha", "tfa-setup", "password-reset-request", "password-reset", "refresh-display-id", "avatar-upload", "check-account", "change-password", "change-email", "tfa-enable", "tfa-disable", "sessions", "revoke-session", "rank", "acm-rank", "oi-rank", "contest-rank", "contest-access", "contest-password", "contest-announcements", "contest-problems", "contest-problem", "contest-submissions", "questions", "question", "ask-question", "answer-question", "pick-one", "languages", "announcements":
+		return a.executeOnlineJudgeExtended(ctx, args[0], args[1:], options)
 	case "tags":
 		return a.onlineJudgeRead(ctx, "tags", "/api/problem/tags", nil, options)
 	case "submit":
 		return a.onlineJudgeSubmit(ctx, args[1:], options)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "onlinejudge 只支持 login、logout、problems、problem、contests、contest、submissions、submission、user、tags、submit、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "onlinejudge 只支持账户、题目、竞赛、问答、排行榜、提交和会话相关操作；可先运行 catalog 查看"}
 	}
 }
 

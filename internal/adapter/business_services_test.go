@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -148,6 +149,252 @@ func TestOnlineJudgeLoginAndLogoutUseCSRFAndProbeSession(t *testing.T) {
 	logout := runIssueJSON(t, "onlinejudge", "logout", "--yes")
 	if logout["confirmed"] != true || logout["evidence"] != "logout-response-and-local-cookie-removed" || loggedIn {
 		t.Fatalf("unexpected OnlineJudge logout result: %#v", logout)
+	}
+}
+
+func TestOnlineJudgeExtendedReadOperationsMapFrontendContracts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		query := request.URL.Query()
+		switch request.URL.Path {
+		case "/api/user_rank":
+			if query.Get("offset") != "3" || query.Get("limit") != "3" || query.Get("rule") != "OI" {
+				t.Fatalf("rank query was not mapped: %v", query)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"results":[],"total":0}}`))
+		case "/api/questions":
+			if query.Get("offset") != "0" || query.Get("limit") != "4" || query.Get("myself") != "1" || query.Get("problem_id") != "12" {
+				t.Fatalf("question query was not mapped: %v", query)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"results":[],"total":0}}`))
+		case "/api/contest/problem":
+			if query.Get("contest_id") != "7" || query.Get("problem_id") != "A" {
+				t.Fatalf("contest problem query was not mapped: %v", query)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"id":"A"}}`))
+		case "/api/contest_rank":
+			if query.Get("contest_id") != "7" || query.Get("force_refresh") != "1" {
+				t.Fatalf("contest rank query was not mapped: %v", query)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"results":[],"total":0}}`))
+		case "/api/pickone":
+			_, _ = writer.Write([]byte(`{"error":null,"data":"12"}`))
+		case "/api/languages":
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"languages":[]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	if result := runIssueJSON(t, "onlinejudge", "oi-rank", "--page", "2", "--limit", "3"); result["operation"] != "rank" {
+		t.Fatalf("unexpected rank result: %#v", result)
+	}
+	if result := runIssueJSON(t, "onlinejudge", "questions", "--limit", "4", "--myself", "--problem-id", "12"); result["operation"] != "questions" {
+		t.Fatalf("unexpected question result: %#v", result)
+	}
+	if result := runIssueJSON(t, "onlinejudge", "contest-problem", "--contest-id", "7", "--problem-id", "A"); result["operation"] != "contest-problem" {
+		t.Fatalf("unexpected contest problem result: %#v", result)
+	}
+	if result := runIssueJSON(t, "onlinejudge", "contest-rank", "--contest-id", "7", "--force-refresh"); result["operation"] != "contest-rank" {
+		t.Fatalf("unexpected contest rank result: %#v", result)
+	}
+	if result := runIssueJSON(t, "onlinejudge", "pick-one"); result["data"] != "12" {
+		t.Fatalf("unexpected pick-one result: %#v", result)
+	}
+	if result := runIssueJSON(t, "onlinejudge", "languages"); result["operation"] != "languages" {
+		t.Fatalf("unexpected languages result: %#v", result)
+	}
+}
+
+func TestOnlineJudgeExtendedMutationsRequireConfirmationAndReadBack(t *testing.T) {
+	const registerPassword = "register-password-secret"
+	const oldPassword = "old-password-secret"
+	const newPassword = "new-password-secret"
+	const emailPassword = "email-password-secret"
+	var revoked bool
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		decode := func() map[string]string {
+			var body map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode OnlineJudge JSON body: %v", err)
+			}
+			return body
+		}
+		switch request.Method + " " + request.URL.Path {
+		case "POST /api/register":
+			body := decode()
+			if body["username"] != "new-user" || body["email"] != "new@example.com" || body["password"] != registerPassword || body["captcha"] != "1234" {
+				t.Fatalf("register body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"username":"new-user"}}`))
+		case "PUT /api/profile":
+			body := decode()
+			if body["real_name"] != "新名字" || body["language"] != "zh-CN" {
+				t.Fatalf("profile body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"real_name":"新名字"}}`))
+		case "POST /api/change_password":
+			body := decode()
+			if body["old_password"] != oldPassword || body["new_password"] != newPassword || body["tfa_code"] != "654321" {
+				t.Fatalf("password body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":true}`))
+		case "POST /api/change_email":
+			body := decode()
+			if body["password"] != emailPassword || body["old_email"] != "old@example.com" || body["new_email"] != "next@example.com" {
+				t.Fatalf("email body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":true}`))
+		case "GET /api/profile":
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"email":"old@example.com"}}`))
+		case "POST /api/two_factor_auth", "PUT /api/two_factor_auth":
+			body := decode()
+			if body["code"] != "654321" {
+				t.Fatalf("TFA body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":true}`))
+		case "POST /api/question":
+			body := decode()
+			if body["problem_id"] != "12" || body["contest_id"] != "7" || body["text"] != "请解释" {
+				t.Fatalf("question body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"question_id":"q1"}}`))
+		case "PUT /api/question_answer":
+			body := decode()
+			if body["id"] != "q1" || body["answer"] != "回答" || body["solved"] != "True" {
+				t.Fatalf("question answer body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":200}`))
+		case "GET /api/question":
+			if request.URL.Query().Get("id") != "q1" {
+				t.Fatalf("question readback query was not mapped: %v", request.URL.Query())
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"id":"q1","solved":true}}`))
+		case "DELETE /api/sessions":
+			if request.URL.Query().Get("session_key") != "session-to-revoke" {
+				t.Fatalf("session revoke query was not mapped: %v", request.URL.Query())
+			}
+			revoked = true
+			_, _ = writer.Write([]byte(`{"error":null}`))
+		case "GET /api/sessions":
+			if !revoked {
+				t.Fatalf("session readback ran before revoke")
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	register := runIssueJSON(t, "onlinejudge", "register", "--username", "new-user", "--password", registerPassword, "--email", "new@example.com", "--captcha", "1234", "--yes")
+	profile := runIssueJSON(t, "onlinejudge", "profile-update", "--real-name", "新名字", "--language", "zh-CN", "--yes")
+	password := runIssueJSON(t, "onlinejudge", "change-password", "--old-password", oldPassword, "--new-password", newPassword, "--tfa-code", "654321", "--yes")
+	email := runIssueJSON(t, "onlinejudge", "change-email", "--password", emailPassword, "--new-email", "next@example.com", "--yes")
+	tfaEnable := runIssueJSON(t, "onlinejudge", "tfa-enable", "--code", "654321", "--yes")
+	tfaDisable := runIssueJSON(t, "onlinejudge", "tfa-disable", "--code", "654321", "--yes")
+	question := runIssueJSON(t, "onlinejudge", "ask-question", "--problem-id", "12", "--contest-id", "7", "--content", "请解释", "--yes")
+	answer := runIssueJSON(t, "onlinejudge", "answer-question", "--id", "q1", "--answer", "回答", "--yes")
+	session := runIssueJSON(t, "onlinejudge", "revoke-session", "--session-key", "session-to-revoke", "--yes")
+	if question["question_id"] != "q1" || answer["question_id"] != "q1" || session["evidence"] != "session-revoked-and-read-back" {
+		t.Fatalf("extended mutation evidence missing: question=%#v answer=%#v session=%#v", question, answer, session)
+	}
+	if tfaEnable["operation"] != "tfa-enable" || tfaDisable["operation"] != "tfa-disable" {
+		t.Fatalf("TFA evidence missing: enable=%#v disable=%#v", tfaEnable, tfaDisable)
+	}
+	serialized, _ := json.Marshal([]map[string]any{register, profile, password, email, tfaEnable, tfaDisable, question, answer, session})
+	for _, secret := range []string{registerPassword, oldPassword, newPassword, emailPassword, "654321", "session-to-revoke"} {
+		if strings.Contains(string(serialized), secret) {
+			t.Fatalf("OnlineJudge mutation output leaked secret %q", secret)
+		}
+	}
+}
+
+func TestOnlineJudgeRecoveryAvatarAndDisplayIDContracts(t *testing.T) {
+	const resetPassword = "reset-password-secret"
+	var avatar []byte
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		decode := func() map[string]string {
+			var body map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode OnlineJudge recovery JSON body: %v", err)
+			}
+			return body
+		}
+		switch request.Method + " " + request.URL.Path {
+		case "GET /api/captcha":
+			_, _ = writer.Write([]byte(`{"error":null,"data":"data:image/png;base64,UE5H"}`))
+		case "GET /api/two_factor_auth":
+			_, _ = writer.Write([]byte(`{"error":null,"data":"data:image/png;base64,UVI="}`))
+		case "POST /api/apply_reset_password":
+			body := decode()
+			if body["email"] != "user@example.com" || body["captcha"] != "A1B2" {
+				t.Fatalf("password reset request body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":true}`))
+		case "POST /api/reset_password":
+			body := decode()
+			if body["token"] != "mail-token" || body["captcha"] != "C3D4" || body["password"] != resetPassword {
+				t.Fatalf("password reset body was not mapped: %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":true}`))
+		case "GET /api/profile/fresh_display_id":
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"display_id":"new-display"}}`))
+		case "POST /api/upload_avatar":
+			file, _, err := request.FormFile("image")
+			if err != nil {
+				t.Fatalf("avatar was not uploaded as image: %v", err)
+			}
+			avatar, err = io.ReadAll(file)
+			_ = file.Close()
+			if err != nil {
+				t.Fatalf("read avatar: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"error":null,"data":true}`))
+		case "GET /api/profile":
+			_, _ = writer.Write([]byte(`{"error":null,"data":{"avatar":"/public/avatar/new.png"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(root, "cookies.txt"))
+
+	captchaPath := filepath.Join(root, "captcha.png")
+	captcha := runIssueJSON(t, "onlinejudge", "captcha", "--output", captchaPath)
+	content, err := os.ReadFile(captchaPath)
+	if err != nil || string(content) != "PNG" || captcha["operation"] != "captcha" {
+		t.Fatalf("captcha was not decoded and saved: result=%#v err=%v content=%q", captcha, err, content)
+	}
+	tfaPath := filepath.Join(root, "tfa.png")
+	tfaSetup := runIssueJSON(t, "onlinejudge", "tfa-setup", "--output", tfaPath)
+	tfaContent, err := os.ReadFile(tfaPath)
+	if err != nil || string(tfaContent) != "QR" || tfaSetup["operation"] != "tfa-setup" {
+		t.Fatalf("TFA setup QR was not decoded and saved: result=%#v err=%v content=%q", tfaSetup, err, tfaContent)
+	}
+	requestResult := runIssueJSON(t, "onlinejudge", "password-reset-request", "--email", "user@example.com", "--captcha", "A1B2", "--yes")
+	resetResult := runIssueJSON(t, "onlinejudge", "password-reset", "--token", "mail-token", "--captcha", "C3D4", "--new-password", resetPassword, "--password-confirm", resetPassword, "--yes")
+	displayID := runIssueJSON(t, "onlinejudge", "refresh-display-id", "--yes")
+	avatarPath := filepath.Join(root, "avatar.png")
+	if err := os.WriteFile(avatarPath, []byte("avatar-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	avatarResult := runIssueJSON(t, "onlinejudge", "avatar-upload", "--file", avatarPath, "--yes")
+	if requestResult["operation"] != "password-reset-request" || resetResult["operation"] != "password-reset" || displayID["operation"] != "refresh-display-id" || avatarResult["evidence"] != "avatar-upload-response-and-profile-readback" || string(avatar) != "avatar-bytes" {
+		t.Fatalf("OnlineJudge recovery/avatar evidence missing: request=%#v reset=%#v display=%#v avatar=%#v uploaded=%q", requestResult, resetResult, displayID, avatarResult, avatar)
+	}
+	serialized, _ := json.Marshal([]map[string]any{requestResult, resetResult, displayID, avatarResult})
+	if strings.Contains(string(serialized), resetPassword) {
+		t.Fatal("OnlineJudge reset password leaked in result")
 	}
 }
 

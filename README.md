@@ -181,6 +181,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `fcmg` | fcmg 基础 API 服务状态；业务 schema 需认证，当前未取得公开协议 |
 | `transport-info` | 交通学院综合信息登录、验证码和会话 |
 | `employment` | 云就业公开信息、学生会话、登录及邮箱二次验证（行为验证码需显式提供） |
+| `onlinejudge` | OnlineJudge 账户、资料/TFA、找回密码、头像、题目/竞赛、问答、排行榜、提交和会话 |
 | `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |
 | `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
 | `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
@@ -300,6 +301,17 @@ printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --meth
 ./csust onlinejudge login --username 用户名 --password-stdin --insecure --json
 # 账号启用 TFA 时追加 --tfa-code-stdin，或设置 CSUST_ONLINEJUDGE_TFA_CODE
 ./csust onlinejudge problems --limit 20 --json
+./csust onlinejudge contest-problems --contest-id CONTEST_ID --json
+./csust onlinejudge questions --problem-id PROBLEM_ID --json
+./csust onlinejudge rank --rule acm --page 1 --limit 30 --json
+./csust onlinejudge profile --json
+# TFA 二维码只保存到文件；启用/停用需要当前一次性验证码，并显式确认
+./csust onlinejudge tfa-setup --output ~/.cache/csust-onlinejudge-tfa.png --json
+./csust onlinejudge tfa-enable --code-stdin --yes --json <<< '一次性验证码'
+./csust onlinejudge captcha --output ~/.cache/csust-onlinejudge-captcha.png --json
+./csust onlinejudge password-reset-request --email user@example.com --captcha 验证码 --yes --json
+./csust onlinejudge password-reset --token 邮件令牌 --captcha 验证码 --new-password-stdin --password-confirm-stdin --yes --json <<< $'新密码\n新密码'
+./csust onlinejudge avatar-upload --file avatar.png --yes --json
 ./csust onlinejudge submit --problem-id PROBLEM_ID --language C++ --code @main.cpp --yes --insecure --json
 ./csust sunshine issues --status 受理中 --json
 ./csust sunshine stats --json
