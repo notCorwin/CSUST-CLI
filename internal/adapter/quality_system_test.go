@@ -14,6 +14,13 @@ import (
 
 func TestQualitySystemSession(t *testing.T) {
 	var loginQuery url.Values
+	authorized := func(writer http.ResponseWriter, request *http.Request) bool {
+		if request.Header.Get("Authorization") == "Bearerquality-token" {
+			return true
+		}
+		writer.WriteHeader(http.StatusUnauthorized)
+		return false
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/manage/config/selectOne":
@@ -34,15 +41,46 @@ func TestQualitySystemSession(t *testing.T) {
 			writer.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"accessToken":"quality-token","UserContext":{"loginname":"1001","realname":"测试"}}}`)
 		case "/api/manage/common/getCurrenUser":
-			if request.Header.Get("Authorization") != "Bearerquality-token" {
-				writer.WriteHeader(http.StatusUnauthorized)
+			if !authorized(writer, request) {
 				return
 			}
 			writer.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"data":{"loginname":"1001","realname":"测试"}}}`)
+		case "/api/manage/homePage/selectByLoginName", "/api/manage/selectopt/semesters", "/api/manage/selectopt/orgns", "/api/manage/selectopt/courses", "/api/manage/selectopt/teachers", "/api/manage/selectopt/roles":
+			if !authorized(writer, request) {
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			if request.URL.Path == "/api/manage/selectopt/courses" || request.URL.Path == "/api/manage/selectopt/teachers" {
+				if request.URL.Query().Get("orgCode") != "ORG" || request.URL.Query().Get("search") != "课程" {
+					writer.WriteHeader(http.StatusBadRequest)
+					return
+				}
+			}
+			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"opts":[{"id":"1","name":"测试项"}],"home":"ok"}}`)
+		case "/api/tpk/tpk/getMytpktask", "/api/tpk/tpk/getTtpkListenresultList", "/api/tpk/tpk/getTtpkWaitListencourseList", "/api/tpk/tpk/getTtpkImprovementsList":
+			if !authorized(writer, request) {
+				return
+			}
+			query := request.URL.Query()
+			if query.Get("yeartermcode") != "2026-2027-1" || query.Get("orgcode") != "ORG" || query.Get("searchss") != "课程" || query.Get("page") != "2" || query.Get("limit") != "20" {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"pageData":{"records":[{"id":"42","title":"测试任务"}],"total":1}}}`)
+		case "/api/tpk/tpk/getTtpkListenresultListxq":
+			if !authorized(writer, request) {
+				return
+			}
+			if request.URL.Query().Get("resultid") != "42" {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"resultid":"42","score":95}}`)
 		case "/api/manage/doLogout":
-			if request.Header.Get("Authorization") != "Bearerquality-token" {
-				writer.WriteHeader(http.StatusUnauthorized)
+			if !authorized(writer, request) {
 				return
 			}
 			writer.Header().Set("Content-Type", "application/json")
@@ -79,6 +117,37 @@ func TestQualitySystemSession(t *testing.T) {
 	}
 	if content, readErr := os.ReadFile(captchaImage); readErr != nil || string(content) != "jpeg" {
 		t.Fatalf("captcha image was not saved: err=%v content=%q", readErr, content)
+	}
+
+	home := runIssueJSON(t, "quality-system", "home")
+	if home["data"].(map[string]any)["home"] != "ok" {
+		t.Fatalf("quality-system home model failed: %#v", home)
+	}
+	semesters := runIssueJSON(t, "quality-system", "semesters")
+	if semesters["api_code"] != float64(200) {
+		t.Fatalf("quality-system semesters failed: %#v", semesters)
+	}
+	courses := runIssueJSON(t, "quality-system", "courses", "--organization", "ORG", "--keyword", "课程")
+	if courses["filters"].(map[string]any)["organization"] != "ORG" {
+		t.Fatalf("quality-system course filters failed: %#v", courses)
+	}
+	teachers := runIssueJSON(t, "quality-system", "teachers", "--organization", "ORG", "--keyword", "课程")
+	if teachers["ok"] != true {
+		t.Fatalf("quality-system teachers failed: %#v", teachers)
+	}
+	roles := runIssueJSON(t, "quality-system", "roles")
+	if roles["ok"] != true {
+		t.Fatalf("quality-system roles failed: %#v", roles)
+	}
+	for _, operation := range []string{"tasks", "results", "improvements", "waitlist"} {
+		result := runIssueJSON(t, "quality-system", operation, "--semester", "2026-2027-1", "--organization", "ORG", "--keyword", "课程", "--page", "2", "--page-size", "20")
+		if result["ok"] != true || result["filters"].(map[string]any)["page_size"] != float64(20) {
+			t.Fatalf("quality-system %s failed: %#v", operation, result)
+		}
+	}
+	detail := runIssueJSON(t, "quality-system", "result", "--id", "42")
+	if detail["data"].(map[string]any)["resultid"] != "42" {
+		t.Fatalf("quality-system result detail failed: %#v", detail)
 	}
 
 	profile := runIssueJSON(t, "quality-system", "profile")

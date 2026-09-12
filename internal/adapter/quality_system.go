@@ -32,9 +32,113 @@ func (a NativeSite) executeQualitySystem(ctx context.Context, args []string) (ma
 		return a.qualitySystemStatus(ctx, args[1:], cookie)
 	case "profile":
 		return a.qualitySystemProfile(ctx, args[1:], cookie)
+	case "home":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "home", "/api/manage/homePage/selectByLoginName", nil, "当前用户首页接口返回 code=200")
+	case "semesters":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "semesters", "/api/manage/selectopt/semesters", nil, "学期字典接口返回 code=200")
+	case "organizations", "orgs":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "organizations", "/api/manage/selectopt/orgns", []qualitySystemParamSpec{{"--keyword", "search", false}}, "组织字典接口返回 code=200")
+	case "courses":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "courses", "/api/manage/selectopt/courses", []qualitySystemParamSpec{{"--organization", "orgCode", false}, {"--keyword", "search", false}}, "课程字典接口返回 code=200")
+	case "teachers":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "teachers", "/api/manage/selectopt/teachers", []qualitySystemParamSpec{{"--organization", "orgCode", false}, {"--keyword", "search", false}}, "教师字典接口返回 code=200")
+	case "roles":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "roles", "/api/manage/selectopt/roles", nil, "角色字典接口返回 code=200")
+	case "tasks":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "tasks", "/api/tpk/tpk/getMytpktask", qualitySystemListParams, "当前用户听评课任务接口返回 code=200")
+	case "results":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "results", "/api/tpk/tpk/getTtpkListenresultList", qualitySystemListParams, "听评课结果列表接口返回 code=200")
+	case "result":
+		if _, requiredErr := businessRequired(args[1:], "--id", "result 必须提供 --id"); requiredErr != nil {
+			return nil, requiredErr
+		}
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "result", "/api/tpk/tpk/getTtpkListenresultListxq", []qualitySystemParamSpec{{"--id", "resultid", false}}, "听评课结果详情接口返回 code=200")
+	case "improvements":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "improvements", "/api/tpk/tpk/getTtpkImprovementsList", qualitySystemListParams, "教学改进报告接口返回 code=200")
+	case "waitlist":
+		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "waitlist", "/api/tpk/tpk/getTtpkWaitListencourseList", qualitySystemListParams, "待听评课列表接口返回 code=200")
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "quality-system 只支持 config、login、logout、status、profile、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "quality-system 只支持 config、login、logout、status、profile、home、semesters、organizations、courses、teachers、roles、tasks、results、result、improvements、waitlist、catalog"}
 	}
+}
+
+type qualitySystemParamSpec struct {
+	flag     string
+	remote   string
+	positive bool
+}
+
+var qualitySystemListParams = []qualitySystemParamSpec{
+	{"--semester", "yeartermcode", false},
+	{"--organization", "orgcode", false},
+	{"--keyword", "searchss", false},
+	{"--page", "page", true},
+	{"--page-size", "limit", true},
+}
+
+func qualitySystemParams(args []string, specs []qualitySystemParamSpec) ([]pair, map[string]any, *siteError) {
+	params := make([]pair, 0, len(specs))
+	filters := map[string]any{}
+	for _, spec := range specs {
+		value, found, valueErr := businessValue(args, spec.flag)
+		if valueErr != nil {
+			return nil, nil, valueErr
+		}
+		if !found {
+			continue
+		}
+		filterName := strings.ReplaceAll(strings.TrimPrefix(spec.flag, "--"), "-", "_")
+		if spec.positive {
+			number, numberErr := strconv.Atoi(value)
+			if numberErr != nil || number < 1 {
+				return nil, nil, &siteError{Code: "invalid_argument", Message: spec.flag + " 必须是正整数"}
+			}
+			value = strconv.Itoa(number)
+			filters[filterName] = number
+		} else {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return nil, nil, &siteError{Code: "invalid_argument", Message: spec.flag + " 不能为空"}
+			}
+			filters[filterName] = value
+		}
+		params = append(params, pair{spec.remote, value})
+	}
+	return params, filters, nil
+}
+
+func (a NativeSite) qualitySystemProtectedQuery(ctx context.Context, args []string, cookie, operation, path string, specs []qualitySystemParamSpec, evidence string) (map[string]any, *siteError) {
+	token, tokenPath, sessionErr := qualitySystemSession(args, cookie)
+	if sessionErr != nil {
+		return nil, sessionErr
+	}
+	if token == "" {
+		return nil, &siteError{Code: "login_required", Message: "请先运行 quality-system login 或提供 --access-token"}
+	}
+	var params []pair
+	filters := map[string]any{}
+	if specs != nil {
+		var queryErr *siteError
+		params, filters, queryErr = qualitySystemParams(args, specs)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+	}
+	payload, requestErr := a.qualitySystemRequest(ctx, "POST", path, params, token, cookie)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, parseErr := qualitySystemPayload(payload)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if !qualitySystemSuccess(payload) {
+		return nil, qualitySystemRejected(payload)
+	}
+	result := qualitySystemResult(operation, evidence)
+	result["token_file"], result["filters"], result["api_code"] = tokenPath, filters, payload["code"]
+	result["data"], result["raw"] = redactSiteJSON(payload["data"]), redactSiteJSON(payload)
+	return result, nil
 }
 
 func (a NativeSite) qualitySystemRequest(ctx context.Context, method, path string, params []pair, token, cookie string) (map[string]any, *siteError) {

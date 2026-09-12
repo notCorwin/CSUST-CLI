@@ -61,7 +61,7 @@ var businessServices = []businessService{
 	{"journal-experiment", "实验教学与仪器", "journal-experiment", "期刊", "high", "live syjxyyq /ajax/search and public article links are available"},
 	{"onlinejudge", "程序设计 OnlineJudge", "onlinejudge", "竞赛", "high", "frontend bundle defines /api/problem, /api/contest, /api/submissions and /api/submission"},
 	{"mooc", "本校网络课程目录", "mooc", "教学", "high", "live courseNetwork page exposes keyword, department, pagination and sort parameters with course rows"},
-	{"quality-system", "教学质量保障系统", "quality-system", "教学质量", "high", "live zbxt login config, salted MD5 login and bearer-protected user API"},
+	{"quality-system", "教学质量保障系统", "quality-system", "教学质量", "high", "live zbxt config/login plus bearer-protected home, dictionaries and teaching-quality APIs"},
 	{"library-personal", "图书馆个人中心", "library-personal", "图书馆", "medium", "book.csust.edu.cn redirects ClientWeb personal center into authserver CAS"},
 	{"library-catalog", "图书馆馆藏书目", "library-catalog", "图书馆", "high", "live OPAC exposes server-side catalogue search, book detail and /api/holding availability data"},
 	{"library-remote", "图书馆远程资源导航", "library-remote", "图书馆", "high", "live tsgvpn2 server-rendered database navigation exposes /accessData, /detail, subject filters and public databases"},
@@ -332,8 +332,14 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 	case "quality-system":
 		common()
 		switch operation {
-		case "config", "status", "profile":
+		case "config", "status", "profile", "home", "semesters", "organizations", "orgs", "roles":
 			add("--access-token")
+		case "courses", "teachers":
+			add("--access-token", "--organization", "--keyword")
+		case "tasks", "results", "improvements", "waitlist":
+			add("--access-token", "--semester", "--organization", "--keyword", "--page", "--page-size")
+		case "result":
+			add("--access-token", "--id")
 		case "login":
 			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
 		case "logout":
