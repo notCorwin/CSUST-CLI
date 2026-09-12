@@ -166,7 +166,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `finance-query` | 智慧财务收费、奖助、减免、退费、缓交、收入和贷款查询 |
 | `undergraduate-admissions` | 本科招生计划、历年分数、录取进程和考生录取结果查询 |
 | `graduate-admissions` | 研究生招生系统登录、密码重置和会话退出；重置必须 `--yes` 并以服务端反馈确认 |
-| `union` | 智慧工会模块、角色登录、验证码和会话 |
+| `union` | 智慧工会模块、公开分工会/协会目录与详情、角色登录、验证码和会话 |
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
 | `mail` | 企业邮箱登录节点、RSA 预登录、验证码和会话 |
 | `fcmg` | fcmg 基础 API 服务状态；业务 schema 需认证，当前未取得公开协议 |

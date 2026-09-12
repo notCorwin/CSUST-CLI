@@ -53,7 +53,7 @@ var businessServices = []businessService{
 	{"training-platform", "干部培训与社会培训公开资讯", "peixun", "继续教育", "medium", "live peixun article/list categories expose public training/news lists and article/detail pages"},
 	{"graduate-notice", "研究生录取通知书", "graduate-notice", "招生", "high", "Nuxt bundle exports /api/print/admissionnotice/query/idcard and /generate/pdf; live endpoint returned JSON"},
 	{"undergraduate-admissions", "本科招生计划、分数和录取进程", "undergraduate-admissions", "招生", "high", "live zslq APIs expose plan, historical score, admission progress and candidate lookup endpoints"},
-	{"union", "智慧工会", "union", "工会", "high", "live homepage exposes proposal, membership, activity, survey, quiz and benefits modules; role login API is observable"},
+	{"union", "智慧工会", "union", "工会", "high", "live homepage exposes proposal, membership, activity, survey, quiz, benefits and public branch/association directories; role login API is observable"},
 	{"service-hall", "融合服务大厅", "service-hall", "校园服务", "high", "authenticated mservice portal exposes the current service catalogue through POST /handleHall/getApp"},
 	{"journal-transport", "交通科学与工程期刊", "journal-transport", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
 	{"journal-highways", "公路与汽运期刊", "journal-highways", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
@@ -328,6 +328,10 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 	case "union":
 		common()
 		switch operation {
+		case "organizations", "branches", "associations":
+			add("--kind", "--keyword")
+		case "organization":
+			add("--id")
 		case "login":
 			add("--role", "--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
 		case "logout":

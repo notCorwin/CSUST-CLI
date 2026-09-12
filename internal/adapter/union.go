@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/des"
 	"encoding/hex"
+	"net/url"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +43,7 @@ func (a NativeSite) executeUnion(ctx context.Context, args []string) (map[string
 		result := businessCatalogFilter("union")
 		result["modules"] = unionModules
 		result["roles"] = unionRoleCatalog()
+		result["operations"] = []string{"catalog", "modules", "roles", "organizations", "branches", "associations", "organization", "login", "logout"}
 		if len(args) > 0 && args[0] != "catalog" {
 			result["operation"] = args[0]
 		}
@@ -51,13 +54,182 @@ func (a NativeSite) executeUnion(ctx context.Context, args []string) (map[string
 		return nil, valueErr
 	}
 	switch args[0] {
+	case "organizations":
+		return a.unionOrganizations(ctx, args[1:], cookie, "")
+	case "branches":
+		return a.unionOrganizations(ctx, args[1:], cookie, "branch")
+	case "associations":
+		return a.unionOrganizations(ctx, args[1:], cookie, "association")
+	case "organization":
+		return a.unionOrganization(ctx, args[1:], cookie)
 	case "login":
 		return a.unionLogin(ctx, args[1:], cookie)
 	case "logout":
 		return a.unionLogout(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "union 只支持 catalog、modules、roles、login、logout"}
+		return nil, &siteError{Code: "invalid_argument", Message: "union 只支持 catalog、modules、roles、organizations、branches、associations、organization、login、logout"}
 	}
+}
+
+func unionDirectoryKind(value string) (string, *siteError) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "all", "全部":
+		return "", nil
+	case "branch", "branches", "branch-union", "分工会", "二级分工会":
+		return "branch", nil
+	case "association", "associations", "club", "协会", "社团":
+		return "association", nil
+	default:
+		return "", &siteError{Code: "invalid_argument", Message: "--kind 只支持 branch、association 或 all"}
+	}
+}
+
+func unionDirectoryPath(kind string) string {
+	if kind == "association" {
+		return "/front/news.do?dispatch=listByType_&ntype_id=0901"
+	}
+	return "/front/news.do?dispatch=listByType_&ntype_id=0903"
+}
+
+func (a NativeSite) unionOrganizations(ctx context.Context, args []string, cookie, forcedKind string) (map[string]any, *siteError) {
+	kindValue, _, valueErr := businessValue(args, "--kind")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	if forcedKind != "" && kindValue != "" {
+		parsedKind, kindErr := unionDirectoryKind(kindValue)
+		if kindErr != nil {
+			return nil, kindErr
+		}
+		if parsedKind != forcedKind {
+			return nil, &siteError{Code: "invalid_argument", Message: "该命令的 --kind 与命令名冲突"}
+		}
+	}
+	kind := forcedKind
+	if kind == "" {
+		kind, valueErr = unionDirectoryKind(kindValue)
+		if valueErr != nil {
+			return nil, valueErr
+		}
+	}
+	keyword, _, valueErr := businessValue(args, "--keyword")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+
+	kinds := []string{kind}
+	if kind == "" {
+		kinds = []string{"branch", "association"}
+	}
+	items := make([]map[string]any, 0)
+	for _, currentKind := range kinds {
+		result, requestErr := a.businessGet(ctx, "union", unionDirectoryPath(currentKind), nil, businessRequestOptions{cookieFile: cookie})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		document, parseErr := parsePage(businessBody(result))
+		if parseErr != nil {
+			return nil, &siteError{Code: "parse_error", Message: "工会组织目录解析失败: " + parseErr.Error()}
+		}
+		items = append(items, unionDirectoryItems(document, safeResponseURL(result), currentKind)...)
+	}
+	keyword = strings.TrimSpace(keyword)
+	if keyword != "" {
+		filtered := items[:0]
+		for _, item := range items {
+			if strings.Contains(strings.ToLower(item["name"].(string)), strings.ToLower(keyword)) {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "工会公开分工会/协会目录页面返回组织卡片",
+		"service":  "union", "operation": "organizations", "kind": firstNonEmpty(kind, "all"), "keyword": keyword,
+		"data": items, "total": len(items),
+	}, nil
+}
+
+func unionDirectoryItems(document *pageNode, pageURL, kind string) []map[string]any {
+	items := make([]map[string]any, 0)
+	seen := map[string]bool{}
+	for _, node := range document.findAll("a") {
+		if !strings.Contains(" "+node.attr("class")+" ", " GH-mian-card1 ") {
+			continue
+		}
+		target := resolvePageURL(pageURL, node.attr("href"))
+		parsed, err := url.Parse(target)
+		if err != nil || parsed.Query().Get("dispatch") != "shetuanMain" {
+			continue
+		}
+		id := strings.TrimSpace(parsed.Query().Get("ntype_id"))
+		if id == "" || seen[id] {
+			continue
+		}
+		name := strings.TrimSpace(pageDisplayText(libraryRemoteNodeWithClass(node, "text1")))
+		if name == "" {
+			name = strings.TrimSpace(node.attr("title"))
+		}
+		if name == "" {
+			continue
+		}
+		items = append(items, map[string]any{"id": id, "name": name, "kind": kind, "url": pagePath(pageURL, target)})
+		seen[id] = true
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i]["name"].(string) < items[j]["name"].(string) })
+	return items
+}
+
+func (a NativeSite) unionOrganization(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	id, requiredErr := businessRequired(args, "--id", "organization 必须提供 --id")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	if _, err := strconv.Atoi(strings.TrimSpace(id)); err != nil {
+		return nil, &siteError{Code: "invalid_argument", Message: "organization --id 必须是数字"}
+	}
+	result, requestErr := a.businessGet(ctx, "union", "/front/news.do", []pair{{"dispatch", "shetuanMain"}, {"ntype_id", strings.TrimSpace(id)}}, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	document, parseErr := parsePage(businessBody(result))
+	if parseErr != nil {
+		return nil, &siteError{Code: "parse_error", Message: "工会组织详情解析失败: " + parseErr.Error()}
+	}
+	data := map[string]any{"id": strings.TrimSpace(id), "url": pagePath(safeResponseURL(result), safeResponseURL(result))}
+	for _, box := range document.findAll("") {
+		if !strings.Contains(" "+box.attr("class")+" ", " pc-user-box2 ") {
+			continue
+		}
+		label := strings.TrimRight(strings.TrimSpace(pageDisplayText(libraryRemoteNodeWithClass(box, "info-text1"))), " ：:")
+		value := strings.TrimSpace(pageDisplayText(libraryRemoteNodeWithClass(box, "info-text2")))
+		if label == "" || value == "" {
+			continue
+		}
+		switch label {
+		case "分工会简介", "协会简介", "简介":
+			data["description"] = value
+		case "所辖部门", "活动地点", "地点":
+			data["department"] = value
+		case "分工会主席", "协会负责人", "负责人":
+			data["leader"] = value
+		default:
+			if fields, ok := data["fields"].(map[string]any); ok {
+				fields[label] = value
+			} else {
+				data["fields"] = map[string]any{label: value}
+			}
+		}
+	}
+	if links := unionDirectoryItems(document, safeResponseURL(result), ""); len(links) > 0 {
+		data["name"] = links[0]["name"]
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true,
+		"evidence": "工会公开组织详情页面返回组织资料",
+		"service":  "union", "operation": "organization", "data": data,
+	}, nil
 }
 
 func unionRoleCatalog() []map[string]any {

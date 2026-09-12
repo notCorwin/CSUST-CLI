@@ -63,3 +63,38 @@ func TestUnionCatalogLoginAndLogout(t *testing.T) {
 		t.Fatalf("union logout was not confirmed: %#v", logout)
 	}
 }
+
+func TestUnionPublicOrganizationDirectoryAndDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		query := request.URL.Query()
+		switch {
+		case query.Get("dispatch") == "listByType_" && query.Get("ntype_id") == "0903":
+			_, _ = fmt.Fprint(writer, `<a class="GH-mian-card1" href="/front/news.do?dispatch=shetuanMain&amp;ntype_id=090302"><div class="text1">土木与环境工程学院</div></a><a class="GH-mian-card1" href="/front/news.do?dispatch=shetuanMain&amp;ntype_id=090301"><div class="text1">交通学院</div></a>`)
+		case query.Get("dispatch") == "listByType_" && query.Get("ntype_id") == "0901":
+			_, _ = fmt.Fprint(writer, `<a class="GH-mian-card1" href="/front/news.do?dispatch=shetuanMain&amp;ntype_id=090101"><div class="text1">篮球协会</div></a>`)
+		case query.Get("dispatch") == "shetuanMain" && query.Get("ntype_id") == "090301":
+			_, _ = fmt.Fprint(writer, `<div class="pc-user-box2"><div class="info-text1">所辖部门：</div><div class="info-text2">交通学院</div></div><div class="pc-user-box2"><div class="info-text1">分工会主席：</div><div class="info-text2">叶群山</div></div>`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	all := runIssueJSON(t, "union", "organizations")
+	if all["total"] != float64(3) {
+		t.Fatalf("union organization directory was incomplete: %#v", all)
+	}
+	branches := runIssueJSON(t, "union", "branches", "--keyword", "交通")
+	items := branches["data"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["id"] != "090301" {
+		t.Fatalf("union branch filter was not mapped: %#v", branches)
+	}
+	detail := runIssueJSON(t, "union", "organization", "--id", "090301")
+	data := detail["data"].(map[string]any)
+	if data["department"] != "交通学院" || data["leader"] != "叶群山" {
+		t.Fatalf("union organization detail was not parsed: %#v", detail)
+	}
+}

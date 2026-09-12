@@ -74,7 +74,7 @@ func nativeUsage(args []string) []byte {
   training-platform           干部培训与社会培训公开资讯
   admission-notice            研究生录取通知书查询/打印
   undergraduate-admissions    本科招生计划、历年分数、录取进程和结果查询
-  union                       智慧工会模块、角色登录和会话
+  union                       智慧工会模块、公开组织目录/详情、角色登录和会话
   journal                     期刊检索
   employment                  云就业公开信息、学生会话、登录及邮箱二次验证
   onlinejudge                 OnlineJudge 题目/竞赛/提交
