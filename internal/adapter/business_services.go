@@ -713,6 +713,10 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		switch operation {
 		case "catalog":
+		case "categories", "labels":
+			add("--favorites")
+		case "departments":
+			add("--category-id", "--favorites")
 		case "services", "list":
 			add("--page", "--page-size", "--keyword", "--category-id", "--label-id", "--department-id", "--serve-type", "--sort", "--favorites")
 		case "login":
