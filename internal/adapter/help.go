@@ -71,6 +71,7 @@ func nativeUsage(args []string) []byte {
   quality                     教学质量保障系统登录、状态、评价和毕业设计入口
   services                    已映射业务服务目录
   official                    官网公开全文检索和文章详情
+  training-platform           干部培训与社会培训公开资讯
   admission-notice            研究生录取通知书查询/打印
   undergraduate-admissions    本科招生计划、历年分数、录取进程和结果查询
   union                       智慧工会模块、角色登录和会话

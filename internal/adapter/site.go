@@ -162,6 +162,7 @@ var knownSites = map[string]serviceInfo{
 	"highway-experiment":       {host: "highwayexperiment.csust.edu.cn", scheme: "http", path: "/"},
 	"highway":                  {host: "highwayexperiment.csust.edu.cn", scheme: "https", path: "/"},
 	"training":                 {host: "gcxljxgl.csust.edu.cn", scheme: "http", path: "/"},
+	"peixun":                   {host: "peixun.csust.edu.cn", scheme: "http", path: "/"},
 	"journal-highway":          {host: "zwgl.csust.edu.cn", scheme: "https", path: "/zwgl/home"},
 	"journal-highway-legacy":   {host: "zwgl1980.csust.edu.cn", scheme: "https", path: "/journal"},
 	"fcmg":                     {host: "fcmg.csust.edu.cn", scheme: "https", path: "/"},

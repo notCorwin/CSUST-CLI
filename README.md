@@ -188,6 +188,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选和网络报修表单结构 |
 | `services` | 已映射业务服务及依据 |
 | `official` | 官网公开全文检索、分页结果和文章详情 |
+| `training-platform` | 干部培训与社会培训公开资讯列表、分页和详情 |
 
 更多业务命令可先查看目录：
 
@@ -195,6 +196,8 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust services catalog --json
 ./csust official search --keyword 人工智能 --page 1 --json
 ./csust official article --id 1299/22951 --json
+./csust training-platform list --category news --page 1 --json
+./csust training-platform detail --id 8001 --json
 ./csust teaching catalog --json
 ./csust quality catalog --json
 ```
