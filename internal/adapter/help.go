@@ -94,7 +94,7 @@ func nativeUsage(args []string) []byte {
   fcmg                        fcmg 基础 API 服务状态（业务 schema 需认证）
   professional-learning       专业技术人员继续教育课程、分类、通知和详情
   institutional-learning      事业单位工作人员继续教育课程、分类、通知和详情
-  transport-mobile            交通运输工程综合信息登录、身份、权限路由、待办、字典、答辩、财务、成果、业绩、通知、留言、请假单、审批、工作室考勤与改密
+  transport-mobile            交通运输工程综合信息登录、身份、权限路由、待办、字典、答辩/财务及导出、成果、业绩、通知、留言、请假单、审批、工作室考勤与改密
   electronic-documents         电子成绩单与在校证明登录、文件类型、申请记录和申请/下载
   campus-network              校园网自助服务资料、账单、详单、缴费、套餐和设备
   campus-card                 校园卡入口可用性状态（卡务 API 待网络恢复后确认）

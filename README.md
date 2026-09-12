@@ -362,6 +362,9 @@ printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --meth
 ./csust transport-mobile finance-item-create --project-id FINANCE_PROJECT_ID --money 100 --direction expense --type TYPE --remark 备注 --yes --json
 ./csust transport-mobile finance-item-update --id FINANCE_ITEM_ID --money 100 --direction expense --remark 修改后的备注 --yes --json
 ./csust transport-mobile finance-item-delete --id FINANCE_ITEM_ID --yes --json
+./csust transport-mobile finance-export --id FINANCE_PROJECT_ID --output ./finance-project.xlsx --json
+./csust transport-mobile defense-export --id DEFENSE_ID --output ./defense.xlsx --json
+./csust transport-mobile defense-batch-export --id DEFENSE_ID_1 --id DEFENSE_ID_2 --output ./defenses.xlsx --json
 ./csust transport-mobile achievements --keyword 论文 --json
 ./csust transport-mobile achievement --id ACHIEVEMENT_ID --json
 ./csust transport-mobile achievement-create --type paper --name 论文题目 --student-no STUDENT_NO --student-name 学生姓名 --journal 期刊名称 --index SCI --completed-at 2026-09-12 --file-id FILE_ID --yes --json

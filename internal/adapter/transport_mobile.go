@@ -86,7 +86,7 @@ var transportMobileTables = map[string]transportMobileTable{
 func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
 		result := businessCatalogNames(transportMobileService)
-		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "routes", "dictionaries", "defenses", "defense", "finances", "finance", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "achievement", "achievement-create", "achievement-update", "achievement-status", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update", "rooms", "room-attendance", "room-sync"}
+		result["operations"] = []string{"login", "send-code", "change-password", "logout", "profile", "pending", "routes", "dictionaries", "defenses", "defense", "defense-export", "defense-batch-export", "finances", "finance", "finance-export", "finance-items", "finance-item", "finance-item-create", "finance-item-update", "finance-item-delete", "notes", "note", "note-create", "note-reply", "note-delete", "access-records", "achievements", "achievement", "achievement-create", "achievement-update", "achievement-status", "kpis", "kpi-create", "kpi-update", "notices", "notice-create", "notice-update", "workflows", "workflow-action", "vacations", "vacation-create", "vacation-update", "rooms", "room-attendance", "room-sync"}
 		return result, nil
 	}
 	cookie, _, valueErr := businessValue(args, "--cookie-file")
@@ -164,10 +164,16 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 		return a.transportMobileWorkflowAction(ctx, args[1:], cookie)
 	case "defense":
 		return a.transportMobileDefenseDetail(ctx, args[1:], cookie)
+	case "defense-export":
+		return a.transportMobileRecordExport(ctx, args[1:], cookie, "defense", "defense-export", "答辩")
+	case "defense-batch-export":
+		return a.transportMobileDefenseBatchExport(ctx, args[1:], cookie)
 	case "finances":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["finances"], "finances")
 	case "finance":
 		return a.transportMobileFinanceDetail(ctx, args[1:], cookie)
+	case "finance-export":
+		return a.transportMobileRecordExport(ctx, args[1:], cookie, "finance", "finance-export", "财务项目")
 	case "finance-items":
 		return a.transportMobileTableList(ctx, args[1:], cookie, transportMobileTables["finance-items"], "finance-items")
 	case "finance-item":
@@ -179,7 +185,7 @@ func (a NativeSite) executeTransportMobile(ctx context.Context, args []string) (
 	case "finance-item-delete":
 		return a.transportMobileFinanceItemDelete(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、routes、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、achievement、achievement-create、achievement-update、achievement-status、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、rooms、room-attendance、room-sync、defense、finances、finance、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "transport-mobile 只支持 login、send-code、change-password、logout、profile、pending、routes、dictionaries、defenses、notes、note、note-create、note-reply、note-delete、access-records、achievements、achievement、achievement-create、achievement-update、achievement-status、kpis、kpi-create、kpi-update、notices、notice-create、notice-update、workflows、workflow-action、vacations、vacation-create、vacation-update、rooms、room-attendance、room-sync、defense、defense-export、defense-batch-export、finances、finance、finance-export、finance-items、finance-item、finance-item-create、finance-item-update、finance-item-delete、catalog"}
 	}
 }
 
@@ -1816,6 +1822,67 @@ func (a NativeSite) transportMobileDefenseDetail(ctx context.Context, args []str
 	}
 	result := transportMobileResult("defense", "答辩详情接口返回 success=true")
 	result["id"], result["data"], result["defense"], result["raw"] = strings.TrimSpace(id), transportMobileDefense(data), transportMobileDefense(data), redactSiteJSON(payload)
+	return result, nil
+}
+
+func (a NativeSite) transportMobileRecordExport(ctx context.Context, args []string, cookie, kind, operation, label string) (map[string]any, *siteError) {
+	id, idErr := businessRequired(args, "--id", operation+" 必须提供 --id")
+	if idErr != nil {
+		return nil, idErr
+	}
+	return a.transportMobileExport(ctx, args, cookie, operation, label, "GET", "/api/export/"+kind+"/"+url.PathEscape(strings.TrimSpace(id)), nil, false, map[string]any{"id": strings.TrimSpace(id)})
+}
+
+func (a NativeSite) transportMobileDefenseBatchExport(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	ids, idsErr := transportMobileIDArgs(args, "--id", nil)
+	if idsErr != nil {
+		return nil, idsErr
+	}
+	if len(ids) == 0 {
+		return nil, &siteError{Code: "invalid_argument", Message: "defense-batch-export 至少提供一个 --id"}
+	}
+	return a.transportMobileExport(ctx, args, cookie, "defense-batch-export", "答辩", "POST", "/api/defensesop", map[string]any{"ids": ids}, true, map[string]any{"ids": ids})
+}
+
+func (a NativeSite) transportMobileExport(ctx context.Context, args []string, cookie, operation, label, method, path string, body any, hasJSON bool, identity map[string]any) (map[string]any, *siteError) {
+	output, outputErr := businessRequired(args, "--output", operation+" 必须提供 --output")
+	if outputErr != nil {
+		return nil, outputErr
+	}
+	token, tokenErr := a.transportMobileRequiredToken(args, cookie)
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
+	payload, requestErr := a.transportMobileCall(ctx, method, path, body, hasJSON, token, cookie, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, &siteError{Code: "protocol_unconfirmed", Message: label + "导出成功反馈缺少文件令牌"}
+	}
+	exportToken := transportMobileText(data, "token")
+	if exportToken == "" {
+		return nil, &siteError{Code: "protocol_unconfirmed", Message: label + "导出成功反馈缺少文件令牌"}
+	}
+	download, downloadErr := a.execute(ctx, siteRequest{
+		Service: transportMobileService, Method: "GET", Path: "/api/download/" + url.PathEscape(exportToken),
+		Params:  []pair{{"t", strconv.FormatInt(time.Now().UnixMilli(), 10)}, {"token", token}},
+		Headers: []pair{{"token", token}}, CookieFile: cookie, Output: strings.TrimSpace(output), ReadOnly: true, Yes: true,
+	})
+	if downloadErr != nil {
+		return nil, downloadErr
+	}
+	result := transportMobileResult(operation, label+"导出接口返回文件令牌且下载成功")
+	result["downloaded"], result["api_code"] = true, payload["code"]
+	for key, value := range identity {
+		result[key] = value
+	}
+	for _, key := range []string{"output", "bytes", "content_type"} {
+		if value, found := download[key]; found {
+			result[key] = value
+		}
+	}
 	return result, nil
 }
 
