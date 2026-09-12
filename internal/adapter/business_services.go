@@ -81,7 +81,7 @@ var businessServices = []businessService{
 	{"finance-query", "智慧财务查询", "finance-query", "财务", "high", "eHall 进入智慧财务工作台；live CWCX_V2 exposes fees, aid, exemption, refund, deferred-payment, income, student-loan and public financial query APIs"},
 	{"research", "科研管理系统", "research", "科研", "medium", "live login page exposes researcher/management roles and Login.aspx plus EncryptString.ashx protocol"},
 	{"transport-info", "交通学院综合信息服务", "transport-info", "学院管理", "medium", "live login.js exposes /Login/CheckLogin, captcha and protected /Home/Index"},
-	{"continuing-platform", "继续教育信息服务平台", "continuing-platform", "继续教育", "high", "live xwwy ASP.NET form exposes authority, student and station login roles plus public pre-enrollment query"},
+	{"continuing-platform", "继续教育信息服务平台", "continuing-platform", "继续教育", "high", "live xwwy ASP.NET form exposes authority, student and station login roles; the pre-enrollment query entrypoint currently redirects to login"},
 	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
 	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
 	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
