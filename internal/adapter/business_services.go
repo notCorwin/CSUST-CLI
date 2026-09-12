@@ -69,7 +69,7 @@ var businessServices = []businessService{
 	{"campus-map", "校园地图与公共点", "campus-map", "校园服务", "high", "live GIS APIs expose zones, public point types, points, point details, search and aerial/panorama resources"},
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data; student login uses vi_code, encode token and behavioral captcha"},
 	{"mail", "企业邮箱登录与会话", "mail", "邮件", "medium", "live page exposes 163 enterprise-mail provider, RSA prelogin, domainEntLogin and captcha protocol"},
-	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "linked external page returned title 统招生学籍查询_长沙理工大学档案馆 查询预约系统"},
+	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "live form supports appointment/upload and linked script calls arctrace queryExpressCode for express tracking"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
 	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
 	{"equipment", "实验室仪器", "equipment", "实验", "high", "live equipmentlist.js exposes encrypted GetApparatusList_Nei, GetIndexDevBm, GetDevListCols and GetApparatusOne APIs"},
@@ -389,6 +389,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 	case "student-record":
 		common()
 		switch operation {
+		case "trace", "whereabouts":
+			add("--name", "--student-id", "--id-card")
 		case "upload":
 			add("--yes", "--field", "--file")
 		case "request":
@@ -1557,7 +1559,10 @@ func (a NativeSite) executeStudentRecord(ctx context.Context, args []string) (ma
 	}
 	if args[0] == "form" || args[0] == "catalog" {
 		if args[0] == "catalog" {
-			return businessCatalogFilter("student-record-query"), nil
+			result := businessCatalogFilter("student-record-query")
+			result["operations"] = []string{"form", "trace", "upload", "request"}
+			result["trace_api"] = "https://arctrace.csust.edu.cn/jeecg-boot/trans/dasStudentInfo/queryExpressCode"
+			return result, nil
 		}
 		cookie, _, err := businessValue(args[1:], "--cookie-file")
 		if err != nil {
@@ -1574,10 +1579,54 @@ func (a NativeSite) executeStudentRecord(ctx context.Context, args []string) (ma
 	if args[0] == "upload" {
 		return a.studentRecordUpload(ctx, args[1:])
 	}
+	if args[0] == "trace" || args[0] == "whereabouts" {
+		return a.studentRecordTrace(ctx, args[1:])
+	}
 	if args[0] != "request" {
-		return nil, &siteError{Code: "invalid_argument", Message: "student-record 只支持 form、upload、request、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "student-record 只支持 form、trace、upload、request、catalog"}
 	}
 	return a.studentRecordRequest(ctx, args[1:])
+}
+
+const studentRecordTracePath = "/jeecg-boot/trans/dasStudentInfo/queryExpressCode"
+
+func (a NativeSite) studentRecordTrace(ctx context.Context, args []string) (map[string]any, *siteError) {
+	name, requiredErr := businessRequired(args, "--name", "trace 必须提供 --name")
+	if requiredErr != nil {
+		return nil, requiredErr
+	}
+	studentID := flagValue(args, "--student-id")
+	idCard := flagValue(args, "--id-card")
+	if strings.TrimSpace(studentID) == "" && strings.TrimSpace(idCard) == "" {
+		return nil, &siteError{Code: "invalid_argument", Message: "trace 至少需要 --student-id 或 --id-card"}
+	}
+	target, parseErr := url.Parse("https://arctrace.csust.edu.cn" + studentRecordTracePath)
+	if parseErr != nil {
+		return nil, &siteError{Code: "protocol_error", Message: "学生档案去向查询地址无效: " + parseErr.Error()}
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	result, requestErr := a.execute(ctx, siteRequest{
+		Service: "student-record-query", Target: target, Method: "GET", CookieFile: cookie,
+		Params:               []pair{{"xm", strings.TrimSpace(name)}, {"xh", strings.TrimSpace(studentID)}, {"sfzh", strings.TrimSpace(idCard)}},
+		AllowBusinessFailure: true, RawJSON: true, ReadOnly: true, Yes: true,
+	})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	success, _ := payload["success"].(bool)
+	expressCode := findString(payload, "expressCode")
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "arctrace-query-response",
+		"service": "student-record-query", "operation": "trace", "found": success && expressCode != "",
+		"express_code": expressCode, "message": fmt.Sprint(payload["message"]),
+	}, nil
 }
 
 func (a NativeSite) studentRecordUpload(ctx context.Context, args []string) (map[string]any, *siteError) {

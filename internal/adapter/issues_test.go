@@ -464,6 +464,13 @@ func TestArchiveUsesJeecgBootPersonAndDownloadAPIs(t *testing.T) {
 	}
 }
 
+func TestStudentRecordTraceRequiresStudentIdentity(t *testing.T) {
+	_, err := (NativeSite{}).executeStudentRecord(context.Background(), []string{"trace", "--name", "测试"})
+	if err == nil || err.Code != "invalid_argument" {
+		t.Fatalf("trace accepted a name without student identity: %v", err)
+	}
+}
+
 func mustMarshalIssue(value any) []byte {
 	encoded, _ := json.Marshal(value)
 	return encoded
