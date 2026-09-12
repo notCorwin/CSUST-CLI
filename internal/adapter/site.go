@@ -119,6 +119,7 @@ var knownSites = map[string]serviceInfo{
 	"library-remote":           {host: "tsgvpn2.csust.edu.cn", scheme: "https", path: "/"},
 	"campus-map":               {host: "gis.csust.edu.cn", scheme: "https", path: "/"},
 	"campus-network":           {host: "bw.csust.edu.cn", scheme: "http", path: "/Self/idstarlogin.action"},
+	"student-digital-archive":  {host: "pdp.csust.edu.cn:8900", scheme: "https", path: "/stu/home/"},
 	"equipment":                {host: "cslgdygx.csust.edu.cn", scheme: "https", path: "/"},
 	"highway":                  {host: "highwayexperiment.csust.edu.cn", scheme: "https", path: "/"},
 	"training":                 {host: "gcxljxgl.csust.edu.cn", scheme: "http", path: "/"},
@@ -922,13 +923,13 @@ func jsonBusinessState(value any) (bool, bool) {
 			if code, ok := typed["code"]; ok {
 				switch numeric := code.(type) {
 				case float64:
-					if numeric == 0 || numeric == 200 {
+					if numeric == 0 || numeric == 200 || numeric == 2000 {
 						states = append(states, true)
 					} else if numeric >= 400 {
 						states = append(states, false)
 					}
 				case string:
-					if numeric == "0" || numeric == "200" {
+					if numeric == "0" || numeric == "200" || numeric == "2000" {
 						states = append(states, true)
 					} else if parsed, err := strconv.Atoi(numeric); err == nil && parsed >= 400 && parsed <= 599 {
 						states = append(states, false)

@@ -151,6 +151,7 @@ password=密码
 | `transport-mobile` | 交通运输工程综合信息登录、个人信息、待办、公开字典、答辩、财务及学院业务查询 |
 | `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
 | `campus-network` | 校园网自助服务资料、账单、详单、缴费、套餐和设备 |
+| `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
 | `undergraduate-admissions` | 本科招生计划、历年分数、录取进程和考生录取结果查询 |
 | `union` | 智慧工会模块、角色登录、验证码和会话 |
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
@@ -304,6 +305,12 @@ password=密码
 ./csust campus-network usage --from 2026-09-01 --to 2026-09-12 --json
 ./csust campus-network online --json
 ./csust campus-network package-options --json
+# 学生数字档案：CAS 登录后读取个人、学业、借阅、消费、上网和随手记
+./csust student-digital-archive profile --json
+./csust student-digital-archive overview --json
+./csust student-digital-archive grades --json
+./csust student-digital-archive schedule --term 2025-2026-1 --json
+./csust student-digital-archive notes --json
 # 图书馆远程资源：公开数据库目录、关键词/学科筛选和详情
 ./csust library-remote databases --keyword 知网 --sort visits --json
 ./csust library-remote databases --subject 工学 --json
