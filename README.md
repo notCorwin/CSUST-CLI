@@ -157,6 +157,7 @@ password=密码
 | `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
 | `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
+| `library` | 图书馆馆藏检索、书目详情和馆藏状态 |
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `web` / `routes` | 教务页面目录、快照、表单和动作 |
@@ -291,6 +292,10 @@ password=密码
 ./csust library-remote databases --keyword 知网 --sort visits --json
 ./csust library-remote databases --subject 工学 --json
 ./csust library-remote database --id 1 --json
+# 图书馆馆藏：检索、书目详情和馆藏/可借状态
+./csust library search --query 人工智能 --field title --in-library --json
+./csust library book --id 91103 --json
+./csust library holdings --id 91103 --json
 # 校园地图：校区、公共点分类/详情、地点搜索和全景资源
 ./csust campus-map zones --json
 ./csust campus-map types --campus 云塘 --json
