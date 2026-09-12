@@ -182,7 +182,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
 | `evaluation` | 学生评价批次、课程和保存/提交 |
 | `vpn` | VPN 登录、状态、退出、工作台/分组、申请、设备、会话、消息和文件 |
-| `teaching` | 网络教学平台课程、课程详情和课程顺序 |
+| `teaching` | 网络教学平台课程、公开通知、课程详情和课程顺序 |
 | `quality` | 教学质量保障系统登录、状态、评价和毕业设计入口 |
 | `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价、服务项收藏和周期提醒 |
 | `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选和网络报修表单结构 |
@@ -229,6 +229,8 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 ./csust vpn links --search 文件名 --json
 ./csust vpn profile password --current-password-stdin --new-password "$CSUST_VPN_NEW_PASSWORD" --yes --json
 ./csust teaching courses --json
+./csust teaching public-notices --keyword 教学 --match fuzzy --json
+./csust teaching public-notice --id NOTICE_ID --json
 ./csust quality status --json
 
 ./csust ehall services --json

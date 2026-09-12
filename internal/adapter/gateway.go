@@ -103,6 +103,10 @@ func (a NativeSite) executeGatewayCommand(ctx context.Context, service string, a
 			return a.teachingPublicTeacher(ctx, args[1:])
 		case "public-departments":
 			return a.teachingPublicDepartments(ctx, args[1:])
+		case "public-notices":
+			return a.teachingPublicNotices(ctx, args[1:])
+		case "public-notice":
+			return a.teachingPublicNotice(ctx, args[1:])
 		}
 	}
 	if service == qualityServiceName && child == "status" {
@@ -136,6 +140,8 @@ func gatewayCatalog(service string) map[string]any {
 			{"name": "public-teachers", "description": "公开教师检索"},
 			{"name": "public-teacher", "description": "公开教师主讲课程"},
 			{"name": "public-departments", "description": "公开院系目录"},
+			{"name": "public-notices", "description": "公开通知列表和关键词筛选"},
+			{"name": "public-notice", "description": "公开通知详情"},
 		}
 	} else {
 		system = "教学质量保障系统"
