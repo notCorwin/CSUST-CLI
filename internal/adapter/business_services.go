@@ -332,7 +332,7 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 	case "quality-system":
 		common()
 		switch operation {
-		case "config", "status", "profile", "home", "semesters", "organizations", "orgs", "roles":
+		case "config", "status", "profile", "dashboard", "home", "semesters", "organizations", "orgs", "roles":
 			add("--access-token")
 		case "courses", "teachers":
 			add("--access-token", "--organization", "--keyword")

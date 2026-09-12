@@ -32,6 +32,8 @@ func (a NativeSite) executeQualitySystem(ctx context.Context, args []string) (ma
 		return a.qualitySystemStatus(ctx, args[1:], cookie)
 	case "profile":
 		return a.qualitySystemProfile(ctx, args[1:], cookie)
+	case "dashboard":
+		return a.qualitySystemDashboard(ctx, args[1:], cookie)
 	case "home":
 		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "home", "/api/manage/homePage/selectByLoginName", nil, "当前用户首页接口返回 code=200")
 	case "semesters":
@@ -58,8 +60,47 @@ func (a NativeSite) executeQualitySystem(ctx context.Context, args []string) (ma
 	case "waitlist":
 		return a.qualitySystemProtectedQuery(ctx, args[1:], cookie, "waitlist", "/api/tpk/tpk/getTtpkWaitListencourseList", qualitySystemListParams, "待听评课列表接口返回 code=200")
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "quality-system 只支持 config、login、logout、status、profile、home、semesters、organizations、courses、teachers、roles、tasks、results、result、improvements、waitlist、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "quality-system 只支持 config、login、logout、status、profile、dashboard、home、semesters、organizations、courses、teachers、roles、tasks、results、result、improvements、waitlist、catalog"}
 	}
+}
+
+func (a NativeSite) qualitySystemDashboard(ctx context.Context, args []string, cookie string) (map[string]any, *siteError) {
+	token, tokenPath, sessionErr := qualitySystemSession(args, cookie)
+	if sessionErr != nil {
+		return nil, sessionErr
+	}
+	if token == "" {
+		return nil, &siteError{Code: "login_required", Message: "请先运行 quality-system login 或提供 --access-token"}
+	}
+	endpoints := []struct {
+		name string
+		path string
+	}{
+		{"task_counts", "/api/tpk/tpk/getTaskNums"},
+		{"task_statistics", "/api/tpk/tpk/getTkInfoStatictis"},
+		{"completion", "/api/tpk/tpk/getCompleteOfTasksInfo"},
+	}
+	data, raw, codes := map[string]any{}, map[string]any{}, map[string]any{}
+	for _, endpoint := range endpoints {
+		result, requestErr := a.qualitySystemRequest(ctx, "GET", endpoint.path, nil, token, cookie)
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		payload, parseErr := qualitySystemPayload(result)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if !qualitySystemSuccess(payload) {
+			return nil, qualitySystemRejected(payload)
+		}
+		data[endpoint.name] = redactSiteJSON(payload["data"])
+		raw[endpoint.name] = redactSiteJSON(payload)
+		codes[endpoint.name] = payload["code"]
+	}
+	result := qualitySystemResult("dashboard", "教学质量保障系统首页汇总接口返回 code=200")
+	result["token_file"], result["api_code"] = tokenPath, codes
+	result["data"], result["raw"] = data, raw
+	return result, nil
 }
 
 type qualitySystemParamSpec struct {

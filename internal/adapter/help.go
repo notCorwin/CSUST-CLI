@@ -63,7 +63,7 @@ func nativeUsage(args []string) []byte {
   employment                  云就业信息
   onlinejudge                 OnlineJudge 题目/竞赛/提交
   mooc                        本校网络课程目录、院系筛选和分页查询
-  quality-system              教学质量保障系统配置、登录、听评课和教学改进查询
+  quality-system              教学质量保障系统配置、登录、听评课和教学质量汇总查询
   party-exam                  党校课程与成绩
   archive                     学生/综合档案系统
   student-record              学籍档案预约

@@ -46,6 +46,18 @@ func TestQualitySystemSession(t *testing.T) {
 			}
 			writer.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprint(writer, `{"code":200,"data":{"data":{"loginname":"1001","realname":"测试"}}}`)
+		case "/api/tpk/tpk/getTaskNums", "/api/tpk/tpk/getTkInfoStatictis", "/api/tpk/tpk/getCompleteOfTasksInfo":
+			if !authorized(writer, request) || request.Method != http.MethodGet {
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			data := `{"pending":2}`
+			if request.URL.Path == "/api/tpk/tpk/getTkInfoStatictis" {
+				data = `{"average":91}`
+			} else if request.URL.Path == "/api/tpk/tpk/getCompleteOfTasksInfo" {
+				data = `{"completed":8}`
+			}
+			_, _ = fmt.Fprintf(writer, `{"code":200,"data":%s}`, data)
 		case "/api/manage/homePage/selectByLoginName", "/api/manage/selectopt/semesters", "/api/manage/selectopt/orgns", "/api/manage/selectopt/courses", "/api/manage/selectopt/teachers", "/api/manage/selectopt/roles":
 			if !authorized(writer, request) {
 				return
@@ -119,6 +131,10 @@ func TestQualitySystemSession(t *testing.T) {
 		t.Fatalf("captcha image was not saved: err=%v content=%q", readErr, content)
 	}
 
+	dashboard := runIssueJSON(t, "quality-system", "dashboard")
+	if dashboard["data"].(map[string]any)["task_counts"].(map[string]any)["pending"] != float64(2) || dashboard["api_code"].(map[string]any)["completion"] != float64(200) {
+		t.Fatalf("quality-system dashboard model failed: %#v", dashboard)
+	}
 	home := runIssueJSON(t, "quality-system", "home")
 	if home["data"].(map[string]any)["home"] != "ok" {
 		t.Fatalf("quality-system home model failed: %#v", home)
