@@ -74,16 +74,16 @@ func nativeUsage(args []string) []byte {
   official                    官网公开全文检索和文章详情
   training-platform           干部培训与社会培训公开资讯
   admission-notice            研究生录取通知书查询/打印
-  undergraduate-admissions    本科招生计划、历年分数、录取进程和结果查询
+  undergraduate-admissions    本科招生计划、历年分数、艺术类/城南学院分数、录取进程和结果查询
   union                       智慧工会模块、公开组织目录/详情、角色登录和会话
-  journal                     期刊检索
+  journal                     期刊主页、卷期、检索、文章及期刊社新闻
   employment                  云就业公开信息、学生会话、登录及邮箱二次验证
   onlinejudge                 OnlineJudge 账户、资料/TFA、找回密码、头像、题目/竞赛、问答、排行榜、提交和会话
   mooc                        本校网络课程目录、课程详情、院系筛选和分页查询
   quality-system              教学质量保障系统配置、登录、听评课和教学质量汇总查询
-  party-exam                  党校课程与成绩
+  party-exam                  党校会话、在线评教/考试与成绩
   archive                     学生/综合档案系统；person-archive、attachments、download 使用真实档案 API
-  student-record              学籍档案去向查询、预约和材料上传
+  student-record              学籍档案去向查询、统招/继续教育预约、材料上传和会员会话
   staff-record                教工人事档案预约
   sunshine                    教育阳光服务诉求提交/查询与短信验证
   visit-reservation           三全育人教育基地入馆预约渠道与说明

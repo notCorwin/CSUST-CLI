@@ -53,14 +53,14 @@ var businessServices = []businessService{
 	{"official", "学校官网公开资讯", "official", "内容", "medium", "live www homepage exposes full-text search at sch.jsp and article pages under info/{channel}/{article}.htm"},
 	{"training-platform", "干部培训与社会培训公开资讯", "peixun", "继续教育", "medium", "live peixun article/list categories expose public training/news lists and article/detail pages"},
 	{"graduate-notice", "研究生录取通知书", "graduate-notice", "招生", "high", "Nuxt bundle exports /api/print/admissionnotice/query/idcard and /generate/pdf; live endpoint returned JSON"},
-	{"undergraduate-admissions", "本科招生计划、分数和录取进程", "undergraduate-admissions", "招生", "high", "live zslq APIs expose plan, historical score, admission progress and candidate lookup endpoints"},
+	{"undergraduate-admissions", "本科招生计划、分数和录取进程", "undergraduate-admissions", "招生", "high", "live zslq APIs expose plan, historical score, admission progress, candidate lookup and CMS art/Chengnan score endpoints"},
 	{"union", "智慧工会", "union", "工会", "high", "live homepage exposes proposal, membership, activity, survey, quiz, benefits and public branch/association directories; role login API is observable"},
 	{"service-hall", "融合服务大厅", "service-hall", "校园服务", "high", "authenticated mservice portal exposes the current service catalogue through POST /handleHall/getApp"},
-	{"journal-transport", "交通科学与工程期刊", "journal-transport", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
+	{"journal-transport", "交通科学与工程期刊", "journal-transport", "期刊", "high", "live homepage, issue目录、article摘要/HTML/PDF/export links, author/reviewer/editor login and /ajax/search"},
 	{"journal-highways", "公路与汽运期刊", "journal-highways", "期刊", "high", "homepage links author/reviewer/editor login and /ajax/search returned article JSON"},
 	{"journal-highway", "中外公路期刊", "journal-highway", "期刊", "high", "live zwgl /zwgl/ajax/search returned article metadata and public abstract/HTML/PDF links"},
 	{"journal-highway-legacy", "中外公路期刊（旧版）", "journal-highway-legacy", "期刊", "medium", "live Digital Commons site exposes issue/article pages, public full-text links and search entrypoint"},
-	{"journal-qk", "期刊社", "journal-qk", "期刊", "high", "live cslgdxxbqks journal site uses the verified article search and article page protocol"},
+	{"journal-qk", "期刊社", "journal-qk", "期刊", "high", "live cslgdxxbqks exposes article search/article pages and the news_search/news view protocol"},
 	{"journal-social", "长沙理工大学学报（社科版）", "journal-social", "期刊", "high", "live cslgdxxbsk journal site uses the verified article search and article page protocol"},
 	{"journal-science", "长沙理工大学学报（自然科学版）", "journal-science", "期刊", "high", "live cslgdxxbzk /ajax/search returned article metadata and public links"},
 	{"journal-experiment", "实验教学与仪器", "journal-experiment", "期刊", "high", "live syjxyyq /ajax/search and public article links are available"},
@@ -75,7 +75,7 @@ var businessServices = []businessService{
 	{"employment", "云就业平台", "employment", "就业", "high", "official homepage embeds career, job_fair and online data; student login uses vi_code, encode token and behavioral captcha"},
 	{"mail", "企业邮箱登录与会话", "mail", "邮件", "medium", "live page exposes 163 enterprise-mail provider, RSA prelogin, domainEntLogin and captcha protocol"},
 	{"fcmg", "fcmg 基础 API 服务", "fcmg", "基础服务", "low", "live root is a Spring Boot health page; Swagger UI is present, while /api and /openapi.json require authentication and expose no public business schema"},
-	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "live form supports appointment/upload and linked script calls arctrace queryExpressCode for express tracking"},
+	{"student-record-query", "学生学籍档案查询预约", "student-record-query", "档案", "high", "live fid=2/3 forms expose regular/continuing-education appointment fields, upload and member login/register; linked script calls arctrace queryExpressCode for express tracking"},
 	{"staff-record-appointment", "教工人事档案预约", "student-record-query", "档案", "high", "official archive page exposes personal/unit appointment forms fid=4/5 with live fields and token"},
 	{"sunshine", "教育阳光服务", "sunshine", "诉求服务", "high", "official homepage links 阳光服务; live Angular API exposes public issues, detail, departments, statistics, system limits and phone verification"},
 	{"visit-reservation", "三全育人教育基地入馆预约", "sqyrjd", "预约", "medium", "live appointment guide documents mini-program, WeChat public-account and offline booking; no direct web form was found"},
@@ -93,16 +93,16 @@ var businessServices = []businessService{
 	{"research", "科研管理系统", "research", "科研", "medium", "live login page exposes researcher/management roles and Login.aspx plus EncryptString.ashx protocol"},
 	{"transport-info", "交通学院综合信息服务", "transport-info", "学院管理", "medium", "live login.js exposes /Login/CheckLogin, captcha and protected /Home/Index"},
 	{"continuing-platform", "继续教育信息服务平台", "continuing-platform", "继续教育", "high", "live xwwy ASP.NET form exposes authority, student and station login roles; the pre-enrollment query entrypoint currently redirects to login"},
-	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "10.255.196.10:8080 returned ASP.NET student information login"},
-	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "mobile login returned documented status codes 0/1/2/3/4/-2 and page links exam/score"},
-	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "10.255.196.138:8060 returned Vue archive SPA and archive API modules"},
-	{"archive-management", "综合档案管理", "archive-management", "档案", "high", "DAS login returned Vue archive collection/user/file API modules"},
+	{"continuing-info", "继续教育学生信息管理", "continuing-info", "继续教育", "high", "live ASP.NET formLogin exposes hidden VIEWSTATE/EVENTVALIDATION and default.aspx btnLogin/btnQuit"},
+	{"party-school-exam", "党校评教和考试", "party-school-exam", "考试", "high", "live mobile login returned documented status codes 0/1/2/3/4/-2; protected main links online evaluation, exam and score"},
+	{"student-archive", "学生档案管理", "student-archive", "档案", "high", "live 10.255.196.138:8060 Vue/Jeecg login SPA exposes /jeecg-boot/sys/randomImage and archive report/person/attachment/download APIs"},
+	{"archive-management", "综合档案管理", "archive-management", "档案", "high", "live 10.255.196.138:8080/DAS/login.jsp Vue/Jeecg login SPA exposes /jeecg-boot/sys/randomImage and archive report/person/attachment/download APIs"},
 	{"virtual-lab", "公路交通虚拟仿真实验中心", "virtual-lab", "实验", "high", "live center exposes discipline resource pages, authenticated appointment page, public message list/create, login/register/password reset and photo upload endpoints"},
 	{"graduate-admissions", "研究生招生旧系统", "graduate-admissions", "招生", "medium", "live ksxt login/pass ASP.NET forms expose login, password reset and session exit; root currently IIS default"},
 	{"legacy-mail", "旧邮件改密入口", "legacy-mail", "邮件", "low", "mail/changepass redirects to CAS but root returns 404"},
 	{"security-admin", "安全运维管理平台", "security-admin", "运维", "medium", "baolei host returned NSFOCUS OSMS page; administrative scope"},
-	{"cms-admin", "内容后台", "cms-admin", "后台", "medium", "official pages expose 10.255.196.62:8080/system/login.jsp"},
-	{"cms-admin-legacy", "旧内容后台", "cms-admin-legacy", "后台", "medium", "official pages expose 10.255.196.2:8080/system/login.jsp"},
+	{"cms-admin", "内容后台", "cms-admin", "后台", "medium", "live login.jsp exposes website/system roles, four-character codeimg.jsp captcha and MD5+SM3 login payload"},
+	{"cms-admin-legacy", "旧内容后台", "cms-admin-legacy", "后台", "low", "2026-09-13 Playwright probe of the official legacy entry returned HTTP 502 at root and /system/login.jsp; no business protocol was available"},
 	{"legacy-portal", "旧统一门户（当前不可达）", "legacy-portal", "入口", "low", "2026-09-13 Playwright probe returned HTTP 502/connection closed; no page or business protocol was available"},
 	{"academic-affairs", "教务处独立入口（当前不可达）", "academic-affairs", "入口", "low", "2026-09-13 Playwright probe returned HTTP 502; core academic transactions remain under the xk adapter"},
 	{"graduate-management", "研究生管理入口（当前为默认页）", "graduate-management", "入口", "low", "2026-09-13 Playwright probe returned an empty IIS default page; no application route was exposed"},
@@ -361,6 +361,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 			if operation == "scores" {
 				add("--major")
 			}
+		case "arts-scores", "chengnan-scores":
+			add("--year", "--page", "--page-size")
 		case "lookup":
 			add("--candidate-number", "--id-card", "--captcha", "--captcha-image")
 		case "filters":
@@ -382,6 +384,12 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		case "search":
 			common()
 			add("--journal", "--query", "--author", "--year", "--keyword", "--field", "--page", "--page-size", "--scope")
+		case "news-search":
+			common()
+			add("--journal", "--query", "--field", "--category-id", "--category-name", "--page", "--page-size")
+		case "news", "news-detail":
+			common()
+			add("--journal", "--id")
 		case "article":
 			common()
 			add("--journal", "--id", "--volume", "--issue", "--article")
@@ -525,6 +533,8 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 		common()
 		if operation == "login" {
 			add("--username", "--password", "--password-stdin", "--checkcode")
+		} else if operation == "logout" {
+			add("--yes")
 		}
 	case "archive":
 		common()
@@ -544,12 +554,21 @@ func businessAllowedFlags(service, operation string) map[string]bool {
 	case "student-record":
 		common()
 		switch operation {
+		case "status":
+		case "form":
+			add("--record-type")
 		case "trace", "whereabouts":
 			add("--name", "--student-id", "--id-card")
 		case "upload":
 			add("--yes", "--field", "--file")
 		case "request":
-			add("--yes", "--type", "--name", "--id-card", "--phone", "--education", "--enroll", "--graduate", "--class", "--origin", "--college", "--major", "--recipient-phone", "--recipient-email", "--captcha", "--purpose", "--content", "--school", "--work", "--unit-letter-token", "--photo-token", "--recipient-address", "--recipient-name", "--notes")
+			add("--yes", "--record-type", "--type", "--name", "--id-card", "--phone", "--education", "--education-type", "--enroll", "--graduate", "--class", "--origin", "--college", "--major", "--enrollment-site", "--exam-site", "--recipient-phone", "--recipient-email", "--captcha", "--purpose", "--content", "--school", "--work", "--unit-letter-token", "--photo-token", "--recipient-address", "--recipient-name", "--notes")
+		case "login":
+			add("--username", "--password", "--password-stdin", "--captcha", "--captcha-image")
+		case "register":
+			add("--yes", "--username", "--password", "--password-stdin", "--password-confirm", "--password-confirm-stdin", "--email", "--captcha", "--captcha-image")
+		case "logout":
+			add("--yes")
 		}
 	case "staff-record":
 		common()
@@ -1336,7 +1355,9 @@ func nestedString(value map[string]any, key string) string {
 
 func (a NativeSite) executeJournal(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
-		return businessCatalogNames("journal-transport", "journal-highways", "journal-highway", "journal-highway-legacy", "journal-qk", "journal-social", "journal-science", "journal-experiment"), nil
+		result := businessCatalogNames("journal-transport", "journal-highways", "journal-highway", "journal-highway-legacy", "journal-qk", "journal-social", "journal-science", "journal-experiment")
+		result["operations"] = []string{"home", "issue", "search", "article", "news-search", "news", "login", "logout", "catalog"}
+		return result, nil
 	}
 	journal, requiredErr := businessRequired(args[1:], "--journal", "journal 必须提供 --journal transport、highways、highway、qk、social、science 或 experiment")
 	if requiredErr != nil {
@@ -1350,8 +1371,61 @@ func (a NativeSite) executeJournal(ctx context.Context, args []string) (map[stri
 		return a.executeLegacyHighwayJournal(ctx, args)
 	}
 	switch args[0] {
+	case "home":
+		cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
+		if valueErr != nil {
+			return nil, valueErr
+		}
+		result, requestErr := a.businessGet(ctx, service, "/"+prefix+"/home", nil, businessRequestOptions{cookieFile: cookie})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		result = sitePageResult(result)
+		result["service"], result["operation"] = service, "home"
+		return result, nil
+	case "issue":
+		volume, issue, locationErr := legacyJournalLocation(args[1:])
+		if locationErr != nil {
+			return nil, locationErr
+		}
+		cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
+		if valueErr != nil {
+			return nil, valueErr
+		}
+		result, requestErr := a.businessGet(ctx, service, "/"+prefix+"/article/issue/"+strconv.Itoa(volume)+"_"+strconv.Itoa(issue), nil, businessRequestOptions{cookieFile: cookie})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		result = sitePageResult(result)
+		result["service"], result["operation"] = service, "issue"
+		result["volume"], result["issue"] = volume, issue
+		return result, nil
 	case "search":
 		return a.journalSearch(ctx, args[1:], prefix, service)
+	case "news-search":
+		return a.journalNewsSearch(ctx, args[1:], prefix, service)
+	case "news", "news-detail":
+		id, err := businessRequired(args[1:], "--id", args[0]+" 必须提供 --id")
+		if err != nil {
+			return nil, err
+		}
+		cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
+		if valueErr != nil {
+			return nil, valueErr
+		}
+		result, requestErr := a.businessGet(ctx, service, "/"+prefix+"/news/view/"+url.PathEscape(id), nil, businessRequestOptions{cookieFile: cookie})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		pageURL := safeResponseURL(result)
+		document, parseErr := parsePage(businessBody(result))
+		if parseErr != nil {
+			return nil, &siteError{Code: "parse_error", Message: parseErr.Error()}
+		}
+		news := journalNewsDetail(document, service, prefix, id, pageURL)
+		result = sitePageResult(result)
+		result["service"], result["operation"], result["news_id"], result["news"] = service, "news", id, news
+		return result, nil
 	case "article":
 		id, err := businessRequired(args[1:], "--id", "article 必须提供 --id")
 		if err != nil {
@@ -1384,7 +1458,7 @@ func (a NativeSite) executeJournal(ctx context.Context, args []string) (map[stri
 		}
 		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "local-cookie-removed", "service": service, "operation": "logout", "logged_out": true, "cookie_file": cookiePath}, nil
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "journal 只支持 search、article、login、logout、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "journal 只支持 home、issue、search、article、news-search、news、login、logout、catalog"}
 	}
 }
 
@@ -1413,6 +1487,8 @@ func journalService(value string) (prefix, service string, ok bool) {
 
 const journalLoginModulus = "90B105D7925701AEFC63535FB064A71A4479D44CD4283C65E6F6CD97A816A5270FF314F45D93FCA0A5FEE35692B5625F0CDFB14C02254F70F244211737AA896D89950D7ECD0CC64921C1B31F5C712F5C4E12EBFB162D83A528BD33BF48D394DA34D0553C9A7B6B1E643E34A0C72D69C31D1AAB3B1BAB3A3F51077EF19"
 
+var journalLoginRSAModulus = regexp.MustCompile(`new RSAKeyPair\(\s*"010001"\s*,\s*""\s*,\s*"([0-9A-Fa-f]+)"\s*\)`)
+
 func journalRole(value string) string {
 	switch strings.ToLower(value) {
 	case "author", "作者":
@@ -1435,14 +1511,25 @@ func journalEncryptedPassword(password string) (string, *siteError) {
 }
 
 func journalEncryptedPasswordWithRandom(password string, random io.Reader) (string, *siteError) {
-	number, ok := new(big.Int).SetString(journalLoginModulus, 16)
+	return journalEncryptedPasswordWithModulus(password, journalLoginModulus, random)
+}
+
+func journalLoginModulusFromPage(body string) string {
+	if match := journalLoginRSAModulus.FindStringSubmatch(body); len(match) > 1 {
+		return match[1]
+	}
+	return journalLoginModulus
+}
+
+func journalEncryptedPasswordWithModulus(password, modulus string, random io.Reader) (string, *siteError) {
+	number, ok := new(big.Int).SetString(modulus, 16)
 	if !ok {
 		return "", &siteError{Code: "protocol_error", Message: "期刊登录 RSA 公钥无效"}
 	}
 	digest := md5.Sum([]byte(password))
 	plain := password + "#" + hex.EncodeToString(digest[:])
 	message := []byte(plain)
-	digitSize := 2 * ((len(journalLoginModulus) + 3) / 4)
+	digitSize := 2 * ((len(modulus) + 3) / 4)
 	if len(message) > digitSize-11 {
 		return "", &siteError{Code: "invalid_argument", Message: "期刊登录密码过长"}
 	}
@@ -1505,7 +1592,7 @@ func (a NativeSite) journalLogin(ctx context.Context, args []string, prefix, ser
 		}
 		return nil, &siteError{Code: "captcha_required", Message: "期刊登录需要验证码，请提供 --captcha", Details: map[string]any{"captcha_image": imagePath}}
 	}
-	encrypted, encryptErr := journalEncryptedPassword(password)
+	encrypted, encryptErr := journalEncryptedPasswordWithModulus(password, journalLoginModulusFromPage(businessBody(page)), cryptorand.Reader)
 	if encryptErr != nil {
 		return nil, encryptErr
 	}
@@ -1589,6 +1676,66 @@ func (a NativeSite) journalSearch(ctx context.Context, args []string, prefix, se
 	}, nil
 }
 
+func (a NativeSite) journalNewsSearch(ctx context.Context, args []string, prefix, service string) (map[string]any, *siteError) {
+	query := flagValue(args, "--query")
+	field := flagValue(args, "--field")
+	if field == "" {
+		field = "title"
+	}
+	if field != "title" && field != "content" {
+		return nil, &siteError{Code: "invalid_argument", Message: "news-search --field 只能是 title 或 content"}
+	}
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	pageSize, sizeErr := businessInt(args, "--page-size", 10)
+	if sizeErr != nil {
+		return nil, sizeErr
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	pageResult, requestErr := a.businessGet(ctx, service, "/"+prefix+"/news/list", nil, businessRequestOptions{cookieFile: cookie})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	csrfMatch := journalCSRF.FindStringSubmatch(businessBody(pageResult))
+	if len(csrfMatch) < 2 {
+		return nil, &siteError{Code: "parse_error", Message: "期刊新闻列表页缺少 CsrfCheckCode，无法调用新闻检索接口"}
+	}
+	data := []pair{
+		{"title", query}, {"page", strconv.Itoa(page)}, {"field", field},
+		{"category_id", flagValue(args, "--category-id")}, {"category_name", flagValue(args, "--category-name")},
+		{"second_category_id", ""}, {"second_category_name", ""}, {"display_time", ""}, {"order_by", ""},
+		{"page_size", strconv.Itoa(pageSize)}, {"CsrfCheckCode", csrfMatch[1]},
+	}
+	result, requestErr := businessRequest(ctx, service, "POST", "/"+prefix+"/ajax/news_search", nil, data, []pair{{"Referer", safeResponseURL(pageResult)}}, businessRequestOptions{cookieFile: cookie}, true, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	rows, _ := payload["rows"].([]any)
+	news := make([]map[string]any, 0, len(rows))
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		news = append(news, journalNewsItem(row, service, prefix))
+	}
+	return map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "journal news JSON search response",
+		"service": service, "operation": "news-search", "journal": prefix, "query": query,
+		"filters":     map[string]any{"field": field, "category_id": flagValue(args, "--category-id"), "category_name": flagValue(args, "--category-name"), "page": page, "page_size": pageSize},
+		"total_pages": payload["total"], "total_records": payload["records"], "news": news,
+	}, nil
+}
+
 func journalArticle(row map[string]any, service, prefix string) map[string]any {
 	id := nestedString(row, "file_no")
 	host := journalHost(prefix)
@@ -1604,6 +1751,77 @@ func journalArticle(row map[string]any, service, prefix string) map[string]any {
 		},
 		"raw": row,
 	}
+}
+
+func journalNewsItem(row map[string]any, service, prefix string) map[string]any {
+	id := nestedString(row, "id")
+	link := "https://" + journalHost(prefix) + ".csust.edu.cn/" + prefix + "/news/view/" + url.PathEscape(id)
+	return map[string]any{
+		"id": id, "journal": service, "title": row["title"], "author": row["author"],
+		"published_at": row["send_time"], "abstract": row["news_abstract"], "keywords": row["key_words"],
+		"source": row["from_source"], "view_count": row["click_num"], "image": row["image_url"],
+		"url": link, "raw": row,
+	}
+}
+
+func journalNewsDetail(document *pageNode, service, prefix, id, pageURL string) map[string]any {
+	title := pageDisplayText(journalNodeByClass(document, "news_title"))
+	contentNode := journalNodeByClass(document, "news_content")
+	content := pageDisplayText(contentNode)
+	timeText := pageDisplayText(journalNodeByClass(document, "news_time"))
+	publishedAt := ""
+	if match := regexp.MustCompile(`发布日期\s*[:：]\s*([0-9]{4}[-/]\d{1,2}[-/]\d{1,2})`).FindStringSubmatch(timeText); len(match) > 1 {
+		publishedAt = match[1]
+	}
+	viewCount := ""
+	if match := regexp.MustCompile(`浏览次数\s*[:：]?\s*(\d+)`).FindStringSubmatch(timeText); len(match) > 1 {
+		viewCount = match[1]
+	}
+	pdfLinks := make([]string, 0)
+	for _, linkNode := range contentNode.findAll("a") {
+		href := pageSafeValue(linkNode.attr("href"), pageURL)
+		if strings.HasSuffix(strings.ToLower(strings.SplitN(href, "?", 2)[0]), ".pdf") {
+			pdfLinks = append(pdfLinks, href)
+		}
+	}
+	return map[string]any{
+		"id": id, "journal": service, "title": title, "published_at": publishedAt, "view_count": viewCount,
+		"abstract": journalNewsField(content, "摘要", "关键词", "全文下载地址", "引用格式"),
+		"keywords": journalNewsField(content, "关键词", "全文下载地址", "引用格式"),
+		"citation": journalNewsField(content, "引用格式", "扫一扫分享本文"), "content_text": content, "pdf_links": pdfLinks,
+		"url": pageURL,
+	}
+}
+
+func journalNodeByClass(document *pageNode, className string) *pageNode {
+	for _, node := range document.findAll("") {
+		for _, value := range strings.Fields(node.attr("class")) {
+			if value == className {
+				return node
+			}
+		}
+	}
+	return nil
+}
+
+func journalNewsField(text, label string, nextLabels ...string) string {
+	if len(nextLabels) == 0 {
+		match := regexp.MustCompile(`(?s)` + regexp.QuoteMeta(label) + `\s*[:：]\s*(.*)$`).FindStringSubmatch(text)
+		if len(match) < 2 {
+			return ""
+		}
+		return strings.TrimSpace(match[1])
+	}
+	stop := make([]string, 0, len(nextLabels))
+	for _, next := range nextLabels {
+		stop = append(stop, regexp.QuoteMeta(next)+`\s*[:：]`)
+	}
+	pattern := regexp.QuoteMeta(label) + `\s*[:：]\s*(.*?)(?:\s+(?:` + strings.Join(stop, "|") + `)|$)`
+	match := regexp.MustCompile(`(?s)` + pattern).FindStringSubmatch(text)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
 }
 
 func journalHost(prefix string) string {
@@ -1798,6 +2016,29 @@ func employmentDetailPath(kind, id string) string {
 }
 
 const studentRecordFormPath = "/?a=add&c=form&fid=2"
+const continuingStudentRecordFormPath = "/?a=add&c=form&fid=3"
+
+func studentRecordOptions(cookie string) businessRequestOptions {
+	return businessRequestOptions{cookieFile: cookie, headers: []pair{{"User-Agent", "Mozilla/5.0"}}}
+}
+
+func studentRecordFormTarget(args []string) (string, string, *siteError) {
+	recordType, found, valueErr := businessValue(args, "--record-type")
+	if valueErr != nil {
+		return "", "", valueErr
+	}
+	if !found || strings.TrimSpace(recordType) == "" {
+		return studentRecordFormPath, "regular", nil
+	}
+	switch strings.ToLower(strings.TrimSpace(recordType)) {
+	case "regular", "undergraduate", "admission", "统招", "统招生":
+		return studentRecordFormPath, "regular", nil
+	case "continuing", "continuing-education", "adult-education", "继续教育":
+		return continuingStudentRecordFormPath, "continuing", nil
+	default:
+		return "", "", &siteError{Code: "invalid_argument", Message: "--record-type 只能是 regular 或 continuing"}
+	}
+}
 
 func (a NativeSite) executeStudentRecord(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 {
@@ -1806,7 +2047,8 @@ func (a NativeSite) executeStudentRecord(ctx context.Context, args []string) (ma
 	if args[0] == "form" || args[0] == "catalog" {
 		if args[0] == "catalog" {
 			result := businessCatalogFilter("student-record-query")
-			result["operations"] = []string{"form", "trace", "upload", "request"}
+			result["operations"] = []string{"status", "form", "trace", "upload", "request", "login", "register", "logout"}
+			result["record_types"] = map[string]string{"regular": studentRecordFormPath, "continuing": continuingStudentRecordFormPath}
 			result["trace_api"] = "https://arctrace.csust.edu.cn/jeecg-boot/trans/dasStudentInfo/queryExpressCode"
 			return result, nil
 		}
@@ -1814,13 +2056,29 @@ func (a NativeSite) executeStudentRecord(ctx context.Context, args []string) (ma
 		if err != nil {
 			return nil, err
 		}
-		result, requestErr := a.businessGet(ctx, "student-record-query", studentRecordFormPath, nil, businessRequestOptions{cookieFile: cookie})
+		formPath, recordType, targetErr := studentRecordFormTarget(args[1:])
+		if targetErr != nil {
+			return nil, targetErr
+		}
+		result, requestErr := a.businessGet(ctx, "student-record-query", formPath, nil, studentRecordOptions(cookie))
 		if requestErr != nil {
 			return nil, requestErr
 		}
 		result = sitePageResult(result)
-		result["service"], result["operation"] = "student-record-query", "form"
+		result["service"], result["operation"], result["record_type"] = "student-record-query", "form", recordType
 		return result, nil
+	}
+	if args[0] == "status" {
+		return a.studentRecordStatus(ctx, args[1:])
+	}
+	if args[0] == "login" {
+		return a.studentRecordLogin(ctx, args[1:])
+	}
+	if args[0] == "register" {
+		return a.studentRecordRegister(ctx, args[1:])
+	}
+	if args[0] == "logout" {
+		return a.studentRecordLogout(ctx, args[1:])
 	}
 	if args[0] == "upload" {
 		return a.studentRecordUpload(ctx, args[1:])
@@ -1829,9 +2087,172 @@ func (a NativeSite) executeStudentRecord(ctx context.Context, args []string) (ma
 		return a.studentRecordTrace(ctx, args[1:])
 	}
 	if args[0] != "request" {
-		return nil, &siteError{Code: "invalid_argument", Message: "student-record 只支持 form、trace、upload、request、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "student-record 只支持 status、form、trace、upload、request、login、register、logout、catalog"}
 	}
 	return a.studentRecordRequest(ctx, args[1:])
+}
+
+func studentRecordLoginPage(body string) bool {
+	return strings.Contains(body, `name="uname"`) && strings.Contains(body, `name="upass"`) && strings.Contains(body, "会员登录")
+}
+
+func studentRecordMutation(result map[string]any, operation string) (map[string]any, *siteError) {
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	state := strings.ToLower(strings.TrimSpace(fmt.Sprint(payload["state"])))
+	if state != "success" {
+		return nil, &siteError{Code: "mutation_rejected", Message: firstNonEmpty(fmt.Sprint(payload["msg"]), "档案馆服务未确认操作成功"), Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "response-state", "remote_state": state}}
+	}
+	result = businessResult(result, "student-record-query", operation)
+	result["submitted"], result["confirmed"], result["evidence"] = true, true, "response-state-success"
+	return result, nil
+}
+
+func (a NativeSite) studentRecordStatus(ctx context.Context, args []string) (map[string]any, *siteError) {
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	result, requestErr := a.businessGet(ctx, "student-record-query", "/?m=user", nil, studentRecordOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	loggedIn := !studentRecordLoginPage(businessBody(result))
+	result = sitePageResult(result)
+	result["service"], result["operation"] = "student-record-query", "status"
+	result["logged_in"] = loggedIn
+	return result, nil
+}
+
+func (a NativeSite) studentRecordLogin(ctx context.Context, args []string) (map[string]any, *siteError) {
+	account, password, credentialErr := businessCredentials(args, "CSUST_STUDENT_RECORD_PASSWORD")
+	if credentialErr != nil {
+		return nil, credentialErr
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	page, requestErr := a.businessGet(ctx, "student-record-query", "/?m=login", nil, studentRecordOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	captcha := strings.TrimSpace(flagValue(args, "--captcha"))
+	if captcha == "" {
+		return nil, businessCaptcha(ctx, "student-record-query", "/?c=user&a=code", "student-record-login-captcha.png", args, cookie)
+	}
+	tokenMatch := recordFormToken.FindStringSubmatch(businessBody(page))
+	if len(tokenMatch) < 2 {
+		return nil, &siteError{Code: "parse_error", Message: "档案馆登录页缺少动态 token"}
+	}
+	options := studentRecordOptions(cookie)
+	options.allowBusinessFailure = true
+	result, requestErr := businessRequest(ctx, "student-record-query", "POST", "/?m=login", nil, []pair{
+		{"uname", account}, {"upass", password}, {"code", captcha}, {"token", tokenMatch[1]},
+	}, []pair{{"Referer", safeResponseURL(page)}}, options, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if failure := businessLoginResponseFailure(result); failure != nil {
+		return nil, failure
+	}
+	evidence, probeErr := a.confirmBusinessLogin(ctx, "student-record-query", "/?m=user", cookie, studentRecordLoginPage)
+	if probeErr != nil {
+		return nil, probeErr
+	}
+	result = businessResult(result, "student-record-query", "login")
+	result["username"], result["submitted"], result["confirmed"] = account, true, true
+	result["evidence"] = "login-response-and-" + evidence
+	return result, nil
+}
+
+func (a NativeSite) studentRecordRegister(ctx context.Context, args []string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "档案馆会员注册会提交个人资料，需要 --yes"}
+	}
+	account, err := businessRequired(args, "--username", "register 必须提供 --username")
+	if err != nil {
+		return nil, err
+	}
+	password, err := businessSecret(args, "--password", "CSUST_STUDENT_RECORD_PASSWORD")
+	if err != nil {
+		return nil, err
+	}
+	passwordConfirm, err := businessSecret(args, "--password-confirm", "CSUST_STUDENT_RECORD_PASSWORD_CONFIRM")
+	if err != nil {
+		return nil, err
+	}
+	if password != passwordConfirm {
+		return nil, &siteError{Code: "invalid_argument", Message: "--password 与 --password-confirm 不一致"}
+	}
+	email, err := businessRequired(args, "--email", "register 必须提供 --email")
+	if err != nil {
+		return nil, err
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	page, requestErr := a.businessGet(ctx, "student-record-query", "/?m=reg", nil, studentRecordOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	captcha := strings.TrimSpace(flagValue(args, "--captcha"))
+	if captcha == "" {
+		return nil, businessCaptcha(ctx, "student-record-query", "/?c=user&a=code", "student-record-register-captcha.png", args, cookie)
+	}
+	tokenMatch := recordFormToken.FindStringSubmatch(businessBody(page))
+	if len(tokenMatch) < 2 {
+		return nil, &siteError{Code: "parse_error", Message: "档案馆注册页缺少动态 token"}
+	}
+	options := studentRecordOptions(cookie)
+	options.allowBusinessFailure = true
+	result, requestErr := businessRequest(ctx, "student-record-query", "POST", "/?m=reg", nil, []pair{
+		{"uname", account}, {"upass", password}, {"repass", passwordConfirm}, {"email", email}, {"code", captcha}, {"token", tokenMatch[1]},
+	}, []pair{{"Referer", safeResponseURL(page)}}, options, false, true)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	result, mutationErr := studentRecordMutation(result, "register")
+	if mutationErr != nil {
+		return nil, mutationErr
+	}
+	result["username"], result["email"] = account, email
+	return result, nil
+}
+
+func (a NativeSite) studentRecordLogout(ctx context.Context, args []string) (map[string]any, *siteError) {
+	if !businessBool(args, "--yes") {
+		return nil, &siteError{Code: "confirmation_required", Message: "档案馆退出会话需要 --yes"}
+	}
+	cookie, _, valueErr := businessValue(args, "--cookie-file")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	result, requestErr := a.execute(ctx, siteRequest{Service: "student-record-query", Method: "GET", Path: "/?m=user&a=logout", CookieFile: cookie, Headers: []pair{{"User-Agent", "Mozilla/5.0"}}, ReadOnly: true, Yes: true})
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	probe, requestErr := a.businessGet(ctx, "student-record-query", "/?m=user", nil, studentRecordOptions(cookie))
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	if !studentRecordLoginPage(businessBody(probe)) {
+		return nil, &siteError{Code: "logout_unconfirmed", Message: "档案馆退出请求已发送，但登录页未重新出现", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "login-page-probe"}}
+	}
+	_, cookiePath, resolveErr := resolveSite(siteRequest{Service: "student-record-query", CookieFile: cookie})
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	if removeErr := removeCookieFile(cookiePath); removeErr != nil {
+		return nil, &siteError{Code: "cookie_write_failed", Message: removeErr.Error()}
+	}
+	result = sitePageResult(result)
+	result["service"], result["operation"], result["logged_out"] = "student-record-query", "logout", true
+	result["submitted"], result["confirmed"], result["evidence"] = true, true, "logout-response-and-login-page"
+	return result, nil
 }
 
 const studentRecordTracePath = "/jeecg-boot/trans/dasStudentInfo/queryExpressCode"
@@ -1857,6 +2278,7 @@ func (a NativeSite) studentRecordTrace(ctx context.Context, args []string) (map[
 	result, requestErr := a.execute(ctx, siteRequest{
 		Service: "student-record-query", Target: target, Method: "GET", CookieFile: cookie,
 		Params:               []pair{{"xm", strings.TrimSpace(name)}, {"xh", strings.TrimSpace(studentID)}, {"sfzh", strings.TrimSpace(idCard)}},
+		Headers:              []pair{{"User-Agent", "Mozilla/5.0"}},
 		AllowBusinessFailure: true, RawJSON: true, ReadOnly: true, Yes: true,
 	})
 	if requestErr != nil {
@@ -1903,13 +2325,13 @@ func (a NativeSite) studentRecordUpload(ctx context.Context, args []string) (map
 	if valueErr != nil {
 		return nil, valueErr
 	}
-	form, requestErr := a.businessGet(ctx, "student-record-query", studentRecordFormPath, nil, businessRequestOptions{cookieFile: cookie})
+	form, requestErr := a.businessGet(ctx, "student-record-query", studentRecordFormPath, nil, studentRecordOptions(cookie))
 	if requestErr != nil {
 		return nil, requestErr
 	}
 	result, requestErr := a.execute(ctx, siteRequest{
 		Service: "student-record-query", Method: "POST", Path: "/?c=upload&a=upfile&type=1", CookieFile: cookie,
-		Headers: []pair{{"Referer", safeResponseURL(form)}}, Files: []filePart{file},
+		Headers: []pair{{"Referer", safeResponseURL(form)}, {"User-Agent", "Mozilla/5.0"}}, Files: []filePart{file},
 		ReadOnly: false, Yes: true, RawJSON: true,
 	})
 	if requestErr != nil {
@@ -1937,11 +2359,15 @@ func (a NativeSite) studentRecordRequest(ctx context.Context, args []string) (ma
 	if !businessBool(args, "--yes") {
 		return nil, &siteError{Code: "confirmation_required", Message: "档案查询预约会提交个人资料，必须加 --yes"}
 	}
+	formPath, recordType, targetErr := studentRecordFormTarget(args)
+	if targetErr != nil {
+		return nil, targetErr
+	}
 	cookie, _, err := businessValue(args, "--cookie-file")
 	if err != nil {
 		return nil, err
 	}
-	formResult, requestErr := a.businessGet(ctx, "student-record-query", studentRecordFormPath, nil, businessRequestOptions{cookieFile: cookie})
+	formResult, requestErr := a.businessGet(ctx, "student-record-query", formPath, nil, studentRecordOptions(cookie))
 	if requestErr != nil {
 		return nil, requestErr
 	}
@@ -1981,17 +2407,22 @@ func (a NativeSite) studentRecordRequest(ctx context.Context, args []string) (ma
 	if err != nil {
 		return nil, err
 	}
-	className, err := businessRequired(args, "--class", "request 必须提供 --class")
-	if err != nil {
-		return nil, err
-	}
-	origin, err := businessRequired(args, "--origin", "request 必须提供 --origin")
-	if err != nil {
-		return nil, err
-	}
-	college, err := businessRequired(args, "--college", "request 必须提供 --college")
-	if err != nil {
-		return nil, err
+	className := flagValue(args, "--class")
+	origin := flagValue(args, "--origin")
+	college := flagValue(args, "--college")
+	if recordType == "regular" {
+		className, err = businessRequired(args, "--class", "regular request 必须提供 --class")
+		if err != nil {
+			return nil, err
+		}
+		origin, err = businessRequired(args, "--origin", "regular request 必须提供 --origin")
+		if err != nil {
+			return nil, err
+		}
+		college, err = businessRequired(args, "--college", "regular request 必须提供 --college")
+		if err != nil {
+			return nil, err
+		}
 	}
 	major, err := businessRequired(args, "--major", "request 必须提供 --major")
 	if err != nil {
@@ -2024,16 +2455,38 @@ func (a NativeSite) studentRecordRequest(ctx context.Context, args []string) (ma
 	if school == "" {
 		return nil, &siteError{Code: "invalid_argument", Message: "--school 必须是 csust、transport、electric、light-industry 或 water"}
 	}
-	originCode := recordOriginValue(origin)
-	if originCode == "" {
-		return nil, &siteError{Code: "invalid_argument", Message: "--origin 必须是省份编号 1-34，或当前支持的省份名称"}
-	}
 	data := []pair{
 		{"mytype", typeValue}, {"myquery_name", name}, {"myquery_sfz", idCard}, {"myquery_work", flagValue(args, "--work")},
 		{"myunit_id", flagValue(args, "--unit-letter-token")}, {"myquery_tel", phone}, {"myschool", school}, {"myeducational", education},
-		{"myphoto", flagValue(args, "--photo-token")}, {"myenrol", enrol}, {"mygraduate", graduate}, {"myclass", className},
-		{"mycollege", college}, {"mymajor", major}, {"mystudents", originCode}, {"myrecipient_add", flagValue(args, "--recipient-address")}, {"myrecipient_name", flagValue(args, "--recipient-name")},
+		{"myphoto", flagValue(args, "--photo-token")}, {"myenrol", enrol}, {"mygraduate", graduate}, {"mymajor", major}, {"myrecipient_add", flagValue(args, "--recipient-address")}, {"myrecipient_name", flagValue(args, "--recipient-name")},
 		{"myrecipient_phone", recipientPhone}, {"myrecipient_email", recipientEmail}, {"mynotes", flagValue(args, "--notes")}, {"code", captcha}, {"token", tokenMatch[1]},
+	}
+	if recordType == "regular" {
+		originCode := recordOriginValue(origin)
+		if originCode == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "--origin 必须是省份编号 1-34，或当前支持的省份名称"}
+		}
+		data = append(data, pair{"myclass", className}, pair{"mycollege", college}, pair{"mystudents", originCode})
+	} else {
+		educationType, educationTypeErr := businessRequired(args, "--education-type", "continuing request 必须提供 --education-type")
+		if educationTypeErr != nil {
+			return nil, educationTypeErr
+		}
+		normalizedEducationType := map[string]string{
+			"函授": "函授", "correspondence": "函授", "自考": "自考", "self-study": "自考", "夜大": "夜大", "night-school": "夜大",
+		}[strings.ToLower(strings.TrimSpace(educationType))]
+		if normalizedEducationType == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "--education-type 必须是 函授、 自考、 夜大、 correspondence、 self-study 或 night-school"}
+		}
+		examSite, examSiteErr := businessRequired(args, "--exam-site", "continuing request 必须提供 --exam-site")
+		if examSiteErr != nil {
+			return nil, examSiteErr
+		}
+		examSiteCode := recordExamSiteValue(examSite)
+		if examSiteCode == "" {
+			return nil, &siteError{Code: "invalid_argument", Message: "--exam-site 必须是 1-5，或湖南、海南、新疆、天津、青海"}
+		}
+		data = append(data, pair{"myxltype", normalizedEducationType}, pair{"myhsbmzd", flagValue(args, "--enrollment-site")}, pair{"myzkbmd", examSiteCode})
 	}
 	for _, purpose := range purposes {
 		data = append(data, pair{"myobject[]", purpose})
@@ -2041,13 +2494,13 @@ func (a NativeSite) studentRecordRequest(ctx context.Context, args []string) (ma
 	for _, content := range contents {
 		data = append(data, pair{"myshow[]", content})
 	}
-	result, requestErr := businessRequest(ctx, "student-record-query", "POST", studentRecordFormPath, nil, data, []pair{{"Referer", safeResponseURL(formResult)}}, businessRequestOptions{cookieFile: cookie}, false, true)
+	result, requestErr := businessRequest(ctx, "student-record-query", "POST", formPath, nil, data, []pair{{"Referer", safeResponseURL(formResult)}}, studentRecordOptions(cookie), false, true)
 	if requestErr != nil {
 		return nil, requestErr
 	}
 	result = sitePageResult(result)
 	result["service"], result["operation"] = "student-record-query", "request"
-	result["request_type"] = typeValue
+	result["request_type"], result["record_type"] = typeValue, recordType
 	return result, nil
 }
 
@@ -2369,6 +2822,23 @@ func recordSchoolValue(value string) string {
 	case "4", "light-industry", "湖南省轻工业高等专科学校":
 		return "4"
 	case "5", "water", "湖南省水利水电学校":
+		return "5"
+	default:
+		return ""
+	}
+}
+
+func recordExamSiteValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "湖南", "湖南省":
+		return "1"
+	case "2", "海南", "海南省":
+		return "2"
+	case "3", "新疆", "新疆维吾尔自治区":
+		return "3"
+	case "4", "天津", "天津市":
+		return "4"
+	case "5", "青海", "青海省":
 		return "5"
 	default:
 		return ""
@@ -2718,13 +3188,22 @@ func findID(value any) string {
 
 func (a NativeSite) executePartyExam(ctx context.Context, args []string) (map[string]any, *siteError) {
 	if len(args) == 0 || args[0] == "catalog" {
-		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "live page and index.js mapping", "service": "party-school-exam", "operations": []string{"login", "courses", "scores", "logout"}}, nil
+		return map[string]any{"ok": true, "submitted": false, "confirmed": true, "evidence": "live page and index.js mapping", "service": "party-school-exam", "operations": []string{"status", "login", "courses", "scores", "logout"}}, nil
 	}
 	cookie, _, valueErr := businessValue(args[1:], "--cookie-file")
 	if valueErr != nil {
 		return nil, valueErr
 	}
 	switch args[0] {
+	case "status":
+		result, requestErr := a.businessGet(ctx, "party-school-exam", "/mobile/main", nil, businessRequestOptions{cookieFile: cookie})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		loggedIn := !partyExamLoginPage(businessBody(result))
+		result = sitePageResult(result)
+		result["service"], result["operation"], result["logged_in"] = "party-school-exam", "status", loggedIn
+		return result, nil
 	case "login":
 		username, err := businessRequired(args[1:], "--username", "login 必须提供 --username")
 		if err != nil {
@@ -2747,8 +3226,12 @@ func (a NativeSite) executePartyExam(ctx context.Context, args []string) (map[st
 			}
 			return nil, &siteError{Code: "authentication_failed", Message: message, Details: map[string]any{"submitted": false, "confirmed": false, "evidence": "rejected", "remote_code": code}}
 		}
+		evidence, probeErr := a.confirmBusinessLogin(ctx, "party-school-exam", "/mobile/main", cookie, partyExamLoginPage)
+		if probeErr != nil {
+			return nil, probeErr
+		}
 		result["service"], result["operation"], result["role"] = "party-school-exam", "login", map[string]string{"1": "student", "3": "admin"}[code]
-		result["confirmed"], result["evidence"] = true, "remote-login-code"
+		result["submitted"], result["confirmed"], result["evidence"] = true, true, "remote-login-code-and-"+evidence
 		return result, nil
 	case "courses", "scores":
 		path := "/subsys/examcourse/student"
@@ -2763,9 +3246,21 @@ func (a NativeSite) executePartyExam(ctx context.Context, args []string) (map[st
 		result["service"], result["operation"] = "party-school-exam", args[0]
 		return result, nil
 	case "logout":
+		if !businessBool(args[1:], "--yes") {
+			return nil, &siteError{Code: "confirmation_required", Message: "党校系统退出会话需要 --yes"}
+		}
 		result, requestErr := a.businessGet(ctx, "party-school-exam", "/mobile/logout", nil, businessRequestOptions{cookieFile: cookie})
 		if requestErr != nil {
 			return nil, requestErr
+		}
+		if !partyExamLoginPage(businessBody(result)) {
+			probe, probeErr := a.businessGet(ctx, "party-school-exam", "/mobile/main", nil, businessRequestOptions{cookieFile: cookie})
+			if probeErr != nil {
+				return nil, probeErr
+			}
+			if !partyExamLoginPage(businessBody(probe)) {
+				return nil, &siteError{Code: "logout_unconfirmed", Message: "党校系统退出请求已发送，但登录页未重新出现", Details: map[string]any{"submitted": true, "confirmed": false, "evidence": "login-page-probe"}}
+			}
 		}
 		_, cookiePath, resolveErr := resolveSite(siteRequest{Service: "party-school-exam", CookieFile: cookie})
 		if resolveErr != nil {
@@ -2774,11 +3269,17 @@ func (a NativeSite) executePartyExam(ctx context.Context, args []string) (map[st
 		if removeErr := removeCookieFile(cookiePath); removeErr != nil {
 			return nil, &siteError{Code: "cookie_write_failed", Message: removeErr.Error()}
 		}
+		result = sitePageResult(result)
 		result["service"], result["operation"], result["logged_out"] = "party-school-exam", "logout", true
+		result["submitted"], result["confirmed"], result["evidence"] = true, true, "logout-response-and-login-page"
 		return result, nil
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "party-exam 只支持 login、courses、scores、logout、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "party-exam 只支持 status、login、courses、scores、logout、catalog"}
 	}
+}
+
+func partyExamLoginPage(body string) bool {
+	return strings.Contains(body, `id="username"`) && strings.Contains(body, `id="pwd"`) && strings.Contains(body, "长沙理工大学党校在线评教和考试系统")
 }
 
 func (a NativeSite) executeArchive(ctx context.Context, args []string) (map[string]any, *siteError) {

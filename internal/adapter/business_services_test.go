@@ -74,6 +74,10 @@ func TestBusinessAdaptersKeepSemanticAndRawData(t *testing.T) {
 	if encrypted, err := journalEncryptedPasswordWithRandom("secret", bytes.NewReader(bytes.Repeat([]byte{1}, 126))); err != nil || len(encrypted) != 252 {
 		t.Fatalf("unexpected journal RSA payload: len=%d err=%v", len(encrypted), err)
 	}
+	const pageModulus = "91B1EDECBF730CC6B56D0B2F3A6E47396C5FB8AE1619B5FDC016E85F9DB4AEB31C08DDF7626902AFDAEF4140A3145325AE9FADCA5540ECD11DD7E042269EF4DA5CF420A63E69CA3F9D75C36ED2BC27B700645FBAFCE24D6172C35FBE19C3BDFEB4527DEB95B4895401DC95303C8145C34718F9AA0715D8826E4671BDD57F6557"
+	if got := journalLoginModulusFromPage(`new RSAKeyPair("010001", "", "` + pageModulus + `")`); got != pageModulus {
+		t.Fatalf("journal page RSA modulus was not detected: %q", got)
+	}
 	if got := strings.ToLower(sm3Hex("abc")); got != "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0" {
 		t.Fatalf("unexpected SM3 digest: %s", got)
 	}
@@ -88,6 +92,50 @@ func TestBusinessAdaptersKeepSemanticAndRawData(t *testing.T) {
 	}
 	if got := redactSiteJSON(map[string]any{"results": []any{1}, "password": "secret"}); !reflect.DeepEqual(got, map[string]any{"results": []any{1}, "password": "<redacted>"}) {
 		t.Fatalf("sensitive redaction changed ordinary result fields: %#v", got)
+	}
+}
+
+func TestJournalHomeAndIssue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch request.URL.Path {
+		case "/jtkxygc/home":
+			_, _ = fmt.Fprint(writer, `<html><title>home</title><body>期刊主页</body></html>`)
+		case "/jtkxygc/article/issue/42_3":
+			_, _ = fmt.Fprint(writer, `<html><title>issue</title><body>42年第3期</body></html>`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	home := runIssueJSON(t, "journal", "home", "--journal", "transport")
+	if home["operation"] != "home" {
+		t.Fatalf("journal home was not mapped: %#v", home)
+	}
+	issue := runIssueJSON(t, "journal", "issue", "--journal", "transport", "--volume", "42", "--issue", "3")
+	if issue["operation"] != "issue" || issue["volume"] != float64(42) || issue["issue"] != float64(3) {
+		t.Fatalf("journal issue was not mapped: %#v", issue)
+	}
+}
+
+func TestJournalNewsParsing(t *testing.T) {
+	document, err := parsePage(`<div class="news_title"><span>新闻标题</span></div><div class="news_content"><p>文章正文</p><p>摘要：摘要内容</p><p>关键词：关键词甲；关键词乙</p><p>全文下载地址:<a href="/upload/news.pdf">全文</a></p><p>引用格式：作者. 新闻标题.</p></div><div class="news_time"><span>发布日期:2026-06-25</span><span>浏览次数:12</span></div>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	news := journalNewsDetail(document, "journal-qk", "cslgdxxbqks", "N-1", "https://cslgqk.csust.edu.cn/cslgdxxbqks/news/view/N-1")
+	if news["title"] != "新闻标题" || news["published_at"] != "2026-06-25" || news["view_count"] != "12" {
+		t.Fatalf("unexpected news metadata: %#v", news)
+	}
+	if news["abstract"] != "摘要内容" || news["keywords"] != "关键词甲；关键词乙" || news["citation"] != "作者. 新闻标题." {
+		t.Fatalf("unexpected news fields: %#v", news)
+	}
+	pdfLinks, ok := news["pdf_links"].([]string)
+	if !ok || len(pdfLinks) != 1 || !strings.HasSuffix(pdfLinks[0], "/upload/news.pdf") {
+		t.Fatalf("unexpected news PDF links: %#v", news["pdf_links"])
 	}
 }
 
@@ -501,6 +549,140 @@ func TestStaffRecordUnitRequestUploadsAndMapsSemanticFields(t *testing.T) {
 	if fields["mydate"][0] != "1980-01-02" || fields["mygoal[]"][0] != "开具证明" {
 		encoded, _ := json.Marshal(fields)
 		t.Fatalf("personal appointment fields were not mapped: %s", encoded)
+	}
+}
+
+func TestStudentRecordContinuingFormAndMemberSession(t *testing.T) {
+	var continuingSubmitted, loginSubmitted, registerSubmitted bool
+	loggedIn := false
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		query := request.URL.Query()
+		switch {
+		case request.Method == http.MethodGet && query.Get("c") == "form" && query.Get("fid") == "3":
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(writer, `<form method="post"><input type="hidden" name="token" value="continuing-token"></form>`)
+		case request.Method == http.MethodPost && query.Get("c") == "form" && query.Get("fid") == "3":
+			_ = request.ParseForm()
+			continuingSubmitted = request.Form.Get("mytype") == "个人查档" &&
+				request.Form.Get("myxltype") == "函授" &&
+				request.Form.Get("myeducational") == "本科" &&
+				request.Form.Get("myzkbmd") == "1" &&
+				request.Form.Get("mymajor") == "土木工程" &&
+				request.Form.Get("token") == "continuing-token"
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(writer, `{"state":"success","msg":"预约成功"}`)
+		case request.Method == http.MethodGet && query.Get("m") == "login":
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(writer, `<div>会员登录</div><form><input name="uname"><input name="upass"><input type="hidden" name="token" value="member-token"></form>`)
+		case request.Method == http.MethodGet && query.Get("m") == "reg":
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(writer, `<div>会员注册</div><form><input name="uname"><input name="upass"><input name="repass"><input name="email"><input name="code"><input type="hidden" name="token" value="member-token"></form>`)
+		case request.Method == http.MethodGet && query.Get("m") == "user" && query.Get("a") == "logout":
+			loggedIn = false
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(writer, `<div>会员登录</div><form><input name="uname"><input name="upass"></form>`)
+		case request.Method == http.MethodGet && query.Get("m") == "user":
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if loggedIn {
+				_, _ = fmt.Fprint(writer, `<div>会员中心</div>`)
+			} else {
+				_, _ = fmt.Fprint(writer, `<div>会员登录</div><form><input name="uname"><input name="upass"></form>`)
+			}
+		case request.Method == http.MethodPost && query.Get("m") == "login":
+			_ = request.ParseForm()
+			loginSubmitted = request.Form.Get("uname") == "alice" && request.Form.Get("upass") == "login-secret" && request.Form.Get("code") == "1234" && request.Form.Get("token") == "member-token"
+			loggedIn = loginSubmitted
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(writer, `{"state":"success","msg":"登录成功"}`)
+		case request.Method == http.MethodPost && query.Get("m") == "reg":
+			_ = request.ParseForm()
+			registerSubmitted = request.Form.Get("uname") == "bob" && request.Form.Get("upass") == "register-secret" && request.Form.Get("repass") == "register-secret" && request.Form.Get("email") == "bob@example.com" && request.Form.Get("code") == "5678" && request.Form.Get("token") == "member-token"
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(writer, `{"state":"success","msg":"注册成功"}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(root, "cookies.txt"))
+
+	continuing := runIssueJSON(t, "student-record", "request", "--record-type", "continuing", "--type", "personal", "--name", "档案对象", "--id-card", "430000000000000000", "--phone", "13800138000", "--school", "csust", "--education-type", "correspondence", "--education", "本科", "--enroll", "2020-09", "--graduate", "2022-06", "--major", "土木工程", "--exam-site", "湖南", "--recipient-phone", "13800138001", "--recipient-email", "receiver@example.com", "--purpose", "求职", "--content", "成绩单", "--captcha", "1234", "--yes")
+	if !continuingSubmitted || continuing["record_type"] != "continuing" || continuing["confirmed"] != true {
+		t.Fatalf("continuing student record request was not mapped: submitted=%v result=%#v", continuingSubmitted, continuing)
+	}
+
+	login := runIssueJSON(t, "student-record", "login", "--username", "alice", "--password", "login-secret", "--captcha", "1234")
+	if !loginSubmitted || login["confirmed"] != true || login["operation"] != "login" {
+		t.Fatalf("student record member login was not confirmed: submitted=%v result=%#v", loginSubmitted, login)
+	}
+	status := runIssueJSON(t, "student-record", "status")
+	if status["logged_in"] != true {
+		t.Fatalf("student record member status was not detected: %#v", status)
+	}
+	logout := runIssueJSON(t, "student-record", "logout", "--yes")
+	if logout["logged_out"] != true || logout["confirmed"] != true || loggedIn {
+		t.Fatalf("student record member logout was not confirmed: logged_in=%v result=%#v", loggedIn, logout)
+	}
+	statusAfterLogout := runIssueJSON(t, "student-record", "status")
+	if statusAfterLogout["logged_in"] != false {
+		t.Fatalf("student record member status stayed logged in after logout: %#v", statusAfterLogout)
+	}
+	register := runIssueJSON(t, "student-record", "register", "--username", "bob", "--password", "register-secret", "--password-confirm", "register-secret", "--email", "bob@example.com", "--captcha", "5678", "--yes")
+	if !registerSubmitted || register["confirmed"] != true || register["operation"] != "register" {
+		t.Fatalf("student record member registration was not mapped: submitted=%v result=%#v", registerSubmitted, register)
+	}
+	serialized, _ := json.Marshal([]map[string]any{login, register})
+	if strings.Contains(string(serialized), "login-secret") || strings.Contains(string(serialized), "register-secret") {
+		t.Fatal("student record member password leaked in result")
+	}
+}
+
+func TestPartySchoolExamSessionProbeAndLogout(t *testing.T) {
+	loggedIn := false
+	var loginSubmitted bool
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/mobile/main":
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if loggedIn {
+				_, _ = fmt.Fprint(writer, `<title>长沙理工大学党校在线评教和考试系统</title><a href="/mobile/score">成绩查询</a>`)
+			} else {
+				_, _ = fmt.Fprint(writer, `<title>长沙理工大学党校在线评教和考试系统</title><input id="username"><input id="pwd">`)
+			}
+		case "/mobile/login":
+			_ = request.ParseForm()
+			loginSubmitted = request.Form.Get("username") == "alice" && request.Form.Get("pwd") == "secret"
+			loggedIn = loginSubmitted
+			_, _ = fmt.Fprint(writer, "1")
+		case "/mobile/logout":
+			loggedIn = false
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(writer, `<title>长沙理工大学党校在线评教和考试系统</title><input id="username"><input id="pwd">`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	status := runIssueJSON(t, "party-exam", "status")
+	if status["logged_in"] != false {
+		t.Fatalf("party exam status incorrectly reported a session: %#v", status)
+	}
+	login := runIssueJSON(t, "party-exam", "login", "--username", "alice", "--password", "secret")
+	if !loginSubmitted || login["confirmed"] != true || login["role"] != "student" {
+		t.Fatalf("party exam login was not confirmed: submitted=%v result=%#v", loginSubmitted, login)
+	}
+	status = runIssueJSON(t, "party-exam", "status")
+	if status["logged_in"] != true {
+		t.Fatalf("party exam status missed the session: %#v", status)
+	}
+	logout := runIssueJSON(t, "party-exam", "logout", "--yes")
+	if logout["logged_out"] != true || logout["confirmed"] != true || loggedIn {
+		t.Fatalf("party exam logout was not confirmed: logged_in=%v result=%#v", loggedIn, logout)
 	}
 }
 

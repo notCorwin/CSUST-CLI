@@ -70,3 +70,41 @@ func TestUndergraduateAdmissionsAPIsMapSemanticQueries(t *testing.T) {
 		t.Fatalf("unexpected API call count: %#v", calls)
 	}
 }
+
+func TestUndergraduateAdmissionsCMSScores(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/f/ajax_get_csrfToken":
+			_, _ = fmt.Fprint(writer, `{"state":1,"data":"cms-token,cms-token"}`)
+		case "/f/newsCenter/ajax_article_list":
+			if err := request.ParseForm(); err != nil || request.Form.Get("categoryId") != "f3b8e524abf644fa8532782652121b1e" || request.Form.Get("pageSize") != "20" {
+				t.Fatalf("CMS list fields were not mapped: %v", request.Form)
+			}
+			_, _ = fmt.Fprint(writer, `{"state":1,"data":{"page":{"totalPage":1,"count":1,"list":[{"id":"art-2024","title":"艺术类录取信息","subtitle":"2024","releaseDate":1747381320000,"hits":12,"description":"湖南艺术类","url":"/static/front/csust/basic/html_cms/frontViewArticle.html?id=art-2024","isExternalLink":false}]}}}`)
+		case "/f/newsCenter/ajax_article_view":
+			if err := request.ParseForm(); err != nil || request.Form.Get("contentId") != "art-2024" {
+				t.Fatalf("CMS detail fields were not mapped: %v", request.Form)
+			}
+			_, _ = fmt.Fprint(writer, `{"state":1,"data":{"article":{"id":"art-2024","title":"艺术类录取信息","subtitle":"2024","releaseDate":1747381320000,"url":"/static/front/csust/basic/html_cms/frontViewArticle.html?id=art-2024","articleData":{"content":"<table><tr><th>省份</th><th>最低分</th></tr><tr><td>湖南</td><td>305.9</td></tr></table>"}}}}`)
+		default:
+			if request.Method == http.MethodGet {
+				_, _ = fmt.Fprint(writer, `<html><head><title>艺术类成绩</title></head><body>艺术类成绩</body></html>`)
+				return
+			}
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CSUST_BASE_URL", server.URL)
+	t.Setenv("CSUST_COOKIE_FILE", filepath.Join(t.TempDir(), "cookies.txt"))
+
+	result := runIssueJSON(t, "undergraduate-admissions", "arts-scores", "--year", "2024")
+	if result["operation"] != "arts-scores" || len(result["items"].([]any)) != 1 {
+		t.Fatalf("CMS score list was not semantic: %#v", result)
+	}
+	article := result["article"].(map[string]any)
+	if article["published_at"] != "2025-05-16" || !strings.Contains(article["content"].(string), "湖南") || len(article["tables"].([]any)) != 1 {
+		t.Fatalf("CMS score detail was not parsed: %#v", article)
+	}
+}

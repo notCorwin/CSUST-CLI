@@ -41,11 +41,154 @@ func (a NativeSite) executeUndergraduateAdmissions(ctx context.Context, args []s
 			return nil, requestErr
 		}
 		return undergraduateAdmissionResult(args[0], query, payload), nil
+	case "arts-scores":
+		return a.undergraduateAdmissionCMSScores(ctx, args[1:], cookie, undergraduateAdmissionCMSConfig{
+			operation: "arts-scores", pagePath: "/static/front/csust/basic/html_cms/frontList.html?id=f3b8e524abf644fa8532782652121b1e",
+			categoryID: "f3b8e524abf644fa8532782652121b1e", categoryName: "艺术类成绩",
+		})
+	case "chengnan-scores":
+		return a.undergraduateAdmissionCMSScores(ctx, args[1:], cookie, undergraduateAdmissionCMSConfig{
+			operation: "chengnan-scores", pagePath: "/static/front/csust/basic/html_web/cnxycj.html",
+			categoryID: "5cf963ca046f402088beab540e6fd689", categoryName: "城南学院历年分数",
+		})
 	case "lookup":
 		return a.undergraduateAdmissionLookup(ctx, args[1:], cookie)
 	default:
-		return nil, &siteError{Code: "invalid_argument", Message: "undergraduate-admissions 只支持 filters、plans、scores、progress、lookup、catalog"}
+		return nil, &siteError{Code: "invalid_argument", Message: "undergraduate-admissions 只支持 filters、plans、scores、progress、arts-scores、chengnan-scores、lookup、catalog"}
 	}
+}
+
+type undergraduateAdmissionCMSConfig struct {
+	operation    string
+	pagePath     string
+	categoryID   string
+	categoryName string
+}
+
+func (a NativeSite) undergraduateAdmissionCMSScores(ctx context.Context, args []string, cookie string, config undergraduateAdmissionCMSConfig) (map[string]any, *siteError) {
+	year, _, valueErr := businessValue(args, "--year")
+	if valueErr != nil {
+		return nil, valueErr
+	}
+	year = strings.TrimSpace(year)
+	if year != "" && (len(year) != 4 || func() bool { _, err := strconv.Atoi(year); return err != nil }()) {
+		return nil, &siteError{Code: "invalid_argument", Message: "--year 必须是四位年份"}
+	}
+	page, pageErr := businessInt(args, "--page", 1)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	pageSize, pageSizeErr := businessInt(args, "--page-size", 20)
+	if pageSizeErr != nil {
+		return nil, pageSizeErr
+	}
+	token, referer, openErr := a.undergraduateAdmissionOpen(ctx, config.pagePath, cookie)
+	if openErr != nil {
+		return nil, openErr
+	}
+	payload, requestErr := a.undergraduateAdmissionRequest(ctx, "/f/newsCenter/ajax_article_list", []pair{
+		{"pageNo", strconv.Itoa(page)}, {"pageSize", strconv.Itoa(pageSize)}, {"categoryId", config.categoryID},
+	}, token, referer, cookie)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	decoded, parseErr := businessJSONMap(payload)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if !undergraduateAdmissionState(decoded) {
+		return nil, undergraduateAdmissionRejected(decoded, "招生网 CMS 文章列表接口返回失败")
+	}
+	data, _ := decoded["data"].(map[string]any)
+	pageData, _ := data["page"].(map[string]any)
+	rows, _ := pageData["list"].([]any)
+	items := make([]map[string]any, 0, len(rows))
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		record := undergraduateAdmissionCMSRecord(row)
+		if year == "" || record["year"] == year {
+			items = append(items, record)
+		}
+	}
+	result := map[string]any{
+		"ok": true, "submitted": false, "confirmed": true, "evidence": "本科招生网 CMS 文章列表和详情 JSON API",
+		"service": undergraduateAdmissionsService, "operation": config.operation, "category": config.categoryName,
+		"category_id": config.categoryID, "year": year, "page": page, "page_size": pageSize,
+		"total_pages": pageData["totalPage"], "total_records": pageData["count"], "items": items,
+	}
+	if year != "" && len(items) == 1 && items[0]["external"] != true {
+		article, articleErr := a.undergraduateAdmissionCMSArticle(ctx, fmt.Sprint(items[0]["id"]), token, referer, cookie)
+		if articleErr != nil {
+			return nil, articleErr
+		}
+		result["article"] = article
+	}
+	return result, nil
+}
+
+func (a NativeSite) undergraduateAdmissionCMSArticle(ctx context.Context, id, token, referer, cookie string) (map[string]any, *siteError) {
+	result, requestErr := a.undergraduateAdmissionRequest(ctx, "/f/newsCenter/ajax_article_view", []pair{{"contentId", id}}, token, referer, cookie)
+	if requestErr != nil {
+		return nil, requestErr
+	}
+	payload, parseErr := businessJSONMap(result)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if !undergraduateAdmissionState(payload) {
+		return nil, undergraduateAdmissionRejected(payload, "招生网 CMS 文章详情接口返回失败")
+	}
+	data, _ := payload["data"].(map[string]any)
+	article, _ := data["article"].(map[string]any)
+	if article == nil {
+		return nil, &siteError{Code: "parse_error", Message: "招生网 CMS 文章详情缺少文章数据"}
+	}
+	record := undergraduateAdmissionCMSRecord(article)
+	articleData, _ := article["articleData"].(map[string]any)
+	contentHTML, _ := articleData["content"].(string)
+	if strings.TrimSpace(contentHTML) != "" {
+		page, pageErr := pageInspect(contentHTML, fmt.Sprint(record["url"]))
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		document, parsePageErr := parsePage(contentHTML)
+		if parsePageErr != nil {
+			return nil, &siteError{Code: "parse_error", Message: "招生网 CMS 文章正文解析失败: " + parsePageErr.Error()}
+		}
+		record["content"] = strings.TrimSpace(pageDisplayText(document))
+		record["tables"] = page["tables"]
+		record["links"] = page["links"]
+	}
+	return record, nil
+}
+
+func undergraduateAdmissionCMSRecord(row map[string]any) map[string]any {
+	urlValue := undergraduateValue(row, "url", "link", "linkSrc", "externalLinkUrl")
+	return map[string]any{
+		"id": row["id"], "title": row["title"], "year": row["subtitle"],
+		"published_at": undergraduateAdmissionDate(row["releaseDate"]), "view_count": row["hits"],
+		"description": row["description"], "url": urlValue, "external": row["isExternalLink"] == true, "raw": row,
+	}
+}
+
+func undergraduateAdmissionDate(value any) string {
+	if text, ok := value.(string); ok {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return ""
+		}
+		if milliseconds, err := strconv.ParseInt(text, 10, 64); err == nil {
+			return time.UnixMilli(milliseconds).Format("2006-01-02")
+		}
+		return text
+	}
+	if number, ok := value.(float64); ok && number > 0 {
+		return time.UnixMilli(int64(number)).Format("2006-01-02")
+	}
+	return ""
 }
 
 type undergraduateAdmissionSelection struct {

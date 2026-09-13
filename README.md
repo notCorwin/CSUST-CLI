@@ -6,6 +6,8 @@
 
 项目不是无头浏览器，也不是爬虫客户端。Playwright CLI 仅用于开发阶段的能力发现；正式命令由 adapter 直接调用服务协议，运行时不启动浏览器。
 
+设计意图、架构边界、结果判定和适配器维护流程见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+
 ## 能做什么
 
 - 教务：课表、成绩、个人信息、考试、空教室、选课结果、培养方案、第二课堂学分、学期信息、教材和教学评价。
@@ -20,7 +22,7 @@
 
 业务命令使用语义参数；传统页面解析和底层协议请求只在 adapter 内部使用。服务目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
 
-目标清单中当前不可达、默认页或拒绝访问的入口也会出现在 `services catalog`，并保留最新探测证据；这类入口只提供 `status`，不虚构不存在的业务 API。
+当前不可达、默认页或拒绝访问的入口也会出现在 `services catalog`，并保留最新探测证据；这类入口只提供 `status`，不虚构不存在的业务 API。
 
 ## 快速开始
 
@@ -175,7 +177,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `campus-card` | 校园卡入口状态；卡务 API 尚未取得可验证响应 |
 | `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
 | `finance-query` | 智慧财务收费、奖助、减免、退费、缓交、收入和贷款查询 |
-| `undergraduate-admissions` | 本科招生计划、历年分数、录取进程和考生录取结果查询 |
+| `undergraduate-admissions` | 本科招生计划、历年分数、艺术类/城南学院分数、录取进程和考生录取结果查询 |
 | `graduate-admissions` | 研究生招生系统登录、密码重置和会话退出；重置必须 `--yes` 并以服务端反馈确认 |
 | `union` | 智慧工会模块、公开分工会/协会目录与详情、角色登录、验证码和会话 |
 | `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
@@ -186,7 +188,7 @@ CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password
 | `onlinejudge` | OnlineJudge 账户、资料/TFA、找回密码、头像、题目/竞赛、问答、排行榜、提交和会话 |
 | `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |
 | `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
-| `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊检索和文章页面 |
+| `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊主页、卷期、检索、文章页面和新闻 |
 | `mooc` | 本校网络课程目录、课程详情、院系筛选和分页查询 |
 | `quality-system` | 教学质量保障系统配置、登录、听评课和教学质量汇总查询 |
 | `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
@@ -287,10 +289,16 @@ printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --meth
 ./csust ehall favorite remove --service-id SERVICE_ID --yes --json
 
 # 语义化业务服务
+./csust journal home --journal transport --json
+./csust journal issue --journal transport --volume 42 --issue 3 --json
 ./csust journal search --journal transport --query 软岩 --page-size 20 --json
 ./csust journal search --journal highway --query 长沙 --json
+./csust journal news-search --journal qk --query 交通 --page-size 20 --json
+./csust journal news --journal qk --id 20260625163342001 --json
 ./csust journal article --journal highway-legacy --volume 43 --issue 1 --article 88 --json
 ./csust undergraduate-admissions plans --province 湖南 --year 2026 --category 物理类 --type 普通类 --json
+./csust undergraduate-admissions arts-scores --year 2024 --json
+./csust undergraduate-admissions chengnan-scores --year 2023 --json
 ./csust union catalog --json
 ./csust research status --json
 ./csust transport-info status --json
@@ -400,8 +408,12 @@ printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --meth
 ./csust student-digital-archive grades --json
 ./csust student-digital-archive schedule --term 2025-2026-1 --json
 ./csust student-digital-archive notes --json
-# 学籍档案：公开查询档案去向/快递单号；预约与材料上传仍需按表单提交
+# 学籍档案：公开查询档案去向/快递单号；支持统招/继续教育预约、材料上传和会员会话
 ./csust student-record trace --name 姓名 --student-id 学号 --json
+./csust student-record form --record-type continuing --json
+./csust student-record request --record-type continuing --type personal --name 姓名 --id-card 身份证号 --phone 手机 --school csust --education-type correspondence --education 本科 --enroll 2020-09 --graduate 2022-06 --major 专业 --exam-site 湖南 --recipient-phone 收件手机 --recipient-email 收件邮箱 --purpose 求职 --content 成绩单 --captcha 验证码 --yes --json
+./csust student-record login --username 用户名 --password-stdin --captcha 验证码 --json
+./csust student-record logout --yes --json
 # 学生/综合档案：登录后读取个人档案目录、卷内附件并下载文件
 ./csust archive person-archive --system student --person-id PERSON_ID --json
 ./csust archive attachments --system student --volume-id VOLUME_ID --format pdf --json
