@@ -6,7 +6,7 @@
 
 项目直接使用学校服务的 HTTP、CAS、JSON 和传统表单协议。它不是无头浏览器，也不是爬虫客户端：浏览器只用于开发阶段发现能力，正式运行不启动浏览器。
 
-这份 README 只保留安装、入口和稳定约定。调用流程、认证续办、结果判定和重复提交边界见 [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md)；设计取舍和维护流程见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+这份 README 只保留安装、入口和稳定约定。完整文档索引见 [`docs/README.md`](docs/README.md)；调用流程、认证续办、结果判定和重复提交边界见 [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md)，设计取舍和维护流程见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ## 能做什么
 
@@ -107,7 +107,14 @@ password=密码
 
 项目的长期约定是：公共命令表达业务语义，协议差异留在 adapter；能通过协议完成的能力不退回浏览器自动化；写操作必须有明确、可验证的成功判定。新增能力前请先阅读：
 
+- [`docs/README.md`](docs/README.md)：文档索引和信息源边界
 - [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md)：调用者和智能体的使用边界
+- [`docs/DOMAIN_MODEL.md`](docs/DOMAIN_MODEL.md)：业务对象和统一字段边界
+- [`docs/SERVICE_MAP.md`](docs/SERVICE_MAP.md)：按业务意图选择服务
+- [`docs/RESULT_CONTRACT.md`](docs/RESULT_CONTRACT.md)：JSON 结果和错误处理
+- [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md)：认证、会话和人工续办
+- [`docs/DISCOVERY.md`](docs/DISCOVERY.md)：服务发现和证据管理
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)：贡献与验收
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：设计原因、适配边界和服务变化排查顺序
 - [`AGENTS.md`](AGENTS.md)：项目需求、探索优先级和完成标准
 
@@ -129,6 +136,7 @@ git diff --check
 
 - 运行 `./csust --help` 查看当前版本的命令语法。
 - 运行 `./csust services catalog --json` 查看当前服务入口及探测证据。
+- 从 [`docs/README.md`](docs/README.md) 选择适合当前任务的专题文档。
 - 阅读 [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md) 处理认证、待续状态和写操作。
 - 在 [GitHub Issues](https://github.com/notCorwin/csust-cli/issues) 报告问题或提出功能建议。
 - 在 [GitHub Actions](https://github.com/notCorwin/csust-cli/actions) 查看自动化检查。
