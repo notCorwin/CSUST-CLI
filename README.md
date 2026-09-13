@@ -2,42 +2,37 @@
 
 [![Tests](https://github.com/notCorwin/csust-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/notCorwin/csust-cli/actions/workflows/tests.yml)
 
-面向智能体的长沙理工大学服务 CLI。项目使用 Go 直接调用学校服务的 HTTP、CAS、JSON 和传统表单协议，把常用网页能力转换为语义化命令，并为脚本和智能体提供统一的 JSON 结果。
+面向智能体的长沙理工大学服务 CLI。它把分散的教务、认证、VPN、服务大厅、图书馆、招生和其他校内系统整理成可组合的业务命令，并为脚本和智能体提供统一的 JSON 结果。
 
-项目不是无头浏览器，也不是爬虫客户端。Playwright CLI 仅用于开发阶段的能力发现；正式命令由 adapter 直接调用服务协议，运行时不启动浏览器。
+项目直接使用学校服务的 HTTP、CAS、JSON 和传统表单协议。它不是无头浏览器，也不是爬虫客户端：浏览器只用于开发阶段发现能力，正式运行不启动浏览器。
 
-设计意图、架构边界、结果判定和适配器维护流程见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+这份 README 只保留安装、入口和稳定约定。调用流程、认证续办、结果判定和重复提交边界见 [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md)；设计取舍和维护流程见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ## 能做什么
 
-- 教务：课表、成绩、个人信息、考试、空教室、选课结果、培养方案、第二课堂学分、学期信息、教材和教学评价。
-- 学籍：学籍预警、学籍卡片及毕业相关页面的结构化入口。
-- 公告：已收公告列表及详情入口。
-- 考试报名：重修报名可报课程及资格状态。
-- VPN：登录、状态、退出、工作台应用/分组、消息、审批、设备和文件业务。
-- 网络教学与教学质量保障：课程、课程详情、课程顺序、公开密保问题、密码找回、教学评价和毕业设计入口。
-- eHall：当前账号可用服务目录、服务详情、权限、消息、企业邮箱状态、新闻和服务周期提醒。
-- 融合服务大厅：当前账号可用的办事服务目录、分类/部门字典、分页/筛选、服务指南、收藏和评价；服务跳转继续由对应业务 Adapter 负责。
-- 其他业务服务：录取通知书、期刊、云就业、企业邮箱登录、OnlineJudge、党校考试、学生/教工档案、教育阳光服务、实验室仪器、人才招聘、继续教育、虚拟实验中心、图书馆个人中心、研究生招生、旧邮件及后台入口。
+项目覆盖的重点是可验证的业务能力，而不是网页数量。当前能力大致包括：
 
-业务命令使用语义参数；传统页面解析和底层协议请求只在 adapter 内部使用。服务目录可通过 CLI 自身查看，不在 README 中复制易变的端点清单。
+- 教务和学生事务：课表、成绩、考试、选课、培养方案、学籍、申请、公告和消息。
+- 认证与校内入口：统一认证、VPN、eHall、融合服务大厅及其网关业务。
+- 校园服务：图书馆、校园网、校园地图、电子证明、实验预约、档案和财务查询。
+- 教学、科研与就业：网络教学、教学质量、网络课程、继续教育、OnlineJudge、科研和招聘。
+- 公开内容：官网、期刊、招生信息、培训资讯及其他已验证的公共目录。
 
-当前不可达、默认页或拒绝访问的入口也会出现在 `services catalog`，并保留最新探测证据；这类入口只提供 `status`，不虚构不存在的业务 API。
+服务列表会随上游页面、网络和权限变化。请用 `services catalog` 查看当前探测结果；目录中的不可达或未取得业务协议的入口会保留状态，但不会被当作已支持的业务能力。
 
 ## 快速开始
 
 ### 环境要求
 
 - Go 1.27 或更高版本
-- 能访问目标学校服务的网络环境；部分内部地址只能在校内网或相应 VPN 环境中访问
-- 需要登录的功能使用学校账号，部分业务服务使用独立账号或验证码
+- 能访问目标学校服务的网络环境；部分服务只能在校内网或相应 VPN 环境中访问
+- 对需要登录的服务拥有对应账号、角色和验证码/二次认证条件
 
 ### 构建
 
 ```bash
 git clone https://github.com/notCorwin/csust-cli.git
 cd csust-cli
-
 go build -o csust .
 ./csust --help
 ```
@@ -48,22 +43,27 @@ go build -o csust .
 go run . --help
 ```
 
-### 配置账号
+### 第一次调用
 
-最简单的方式是设置环境变量；密码优先使用标准输入，避免进入 shell 历史：
+先看当前版本的命令入口和服务证据：
+
+```bash
+./csust --help
+./csust services catalog --json
+```
+
+登录后从只读查询开始：
 
 ```bash
 export CSUST_USERNAME='学号'
 printf '%s\n' '密码' | ./csust login --auth sso --password-stdin --json
+./csust schedule --json
+./csust grades --term 2025-2026-1 --json
 ```
 
-统一认证找回密码按服务端验证步骤执行；首次缺验证码时会保存图片，短信/密保流程会返回可续办的状态文件：
+命令参数以业务概念为中心；服务端字段、隐藏令牌和内部路径不需要由调用者提供。具体参数以 `./csust <命令> --help` 为准，不以旧文档或网页按钮名称为准。
 
-```bash
-./csust login reset-password --username 学号 --json
-./csust login reset-password --username 学号 --captcha-id 验证码编号 --captcha 图形码 --method phone --phone 手机号 --send-code --yes --json
-./csust login reset-password --state-file ~/.config/csust-cli/password-reset.state.json --code 短信码 --new-password-stdin --password-confirm-stdin --yes --json <<< $'新密码\n新密码'
-```
+### 使用 `.env`
 
 也可以在当前目录使用未提交的 `.env`：
 
@@ -72,435 +72,19 @@ username=学号
 password=密码
 ```
 
-`.env` 默认要求权限为 `600`；只有确实需要兼容旧环境时才设置 `CSUST_ALLOW_INSECURE_ENV=1`。推荐把 `.env` 保持在 `.gitignore` 中，并优先使用 `--password-stdin`。
+`.env` 默认要求权限为 `600`，应保持在 `.gitignore` 中。只有确实需要兼容旧环境时才设置 `CSUST_ALLOW_INSECURE_ENV=1`；密码更推荐通过标准输入提供。
 
-登录后即可执行查询：
+## 认证与本地状态
 
-```bash
-./csust schedule --json
-./csust grades --term 2025-2026-1 --json
-./csust grades detail --term 2025-2026-1 --course-name 课程名称 --json
-./csust profile --json
-./csust personal-info --json
-./csust personal-info update --real-name 新姓名 --page-size 200 --yes --json
-CSUST_PASSWORD=旧密码 ./csust change-password --new-password-stdin --password-confirm 新密码 --yes --json <<< '新密码'
-./csust graduation-conclusion --json
-./csust graduation-info-check --json
-./csust exams --json
-./csust in-class-exams --term 2026-2027-1 --exam-type 平时考察 --json
-./csust course-selection --scope cross-major --json
-./csust preselection list --json
-./csust preselection courses --term 2026-2027-1 --json
-./csust special-course-query --term 2026-2027-1 --json
-./csust social-exam-registration --json
-./csust make-up-exam-registration --json
-./csust summer-remedial-registration --json
-./csust training-plan --keyword 专业核心 --json
-./csust training-progress --json
-./csust deferred-exam-applications --term 2025-2026-1 --status approved --json
-./csust enrollment-proof-applications --json
-./csust teaching-calendar --term 2026-2027-1 --json
-./csust exempt-exam-applications --term 2026-2027-1 --assessment-method exam --json
-./csust deferred-exam-registration --term 2026-2027-1 --exam-project 开学补考 --campus yuntang --json
-./csust graduate-exam-registration --term 2026-2027-1 --exam-project 开学补考 --campus yuntang --json
-./csust grade-recognition-applications --json
-./csust grade-confirmation --json
-./csust class-changes --term 2026-2027-1 --json
-./csust enrollment-status-changes --json
-./csust drop-course-applications --json
-./csust student-status-changes --json
-./csust second-class-credits --json
-./csust second-class-credit-applications --json
-./csust second-class-credit-application --id APPLICATION_ID --json
-./csust status-warnings --json
-./csust announcements --json
-./csust announcement --id ANNOUNCEMENT_ID --json
-./csust messages --json
-./csust message --id MESSAGE_ID --json
-./csust message reply --id MESSAGE_ID --content 回复内容 --yes --json
-./csust online-qa list --json
-./csust online-qa ask --content "关于课程安排的问题" --yes --json
-./csust retake-courses --json
-./csust graduate-admissions reset-password --document-number 证件号码 --name 姓名 --candidate-number 考生编号 --yes --json
-```
+不同业务系统的账号、角色、Cookie 和 Token 不保证相互兼容。登录成功不代表其他服务也已登录；网络教学和教学质量等业务还可能依赖已建立的 VPN 会话。
 
-## 常用命令
+验证码、短信、邮件、密保和 TFA 可能把一次登录拆成多步。命令返回 `captcha_required` 或 `pending` 时，按返回信息补充下一步，不要把待续状态当作失败或最终成功。CLI 不自动把 OCR 猜测当作认证结果。
 
-| 命令 | 用途 |
-| --- | --- |
-| `login` / `logout` | 教务统一认证或旧登录会话 |
-| `schedule`, `grades`, `profile`, `exams`, `in-class-exams` | 教务查询；个人资料保留原始字段并提供 `semantic` 字段，成绩包含学分/绩点汇总和成绩构成详情 |
-| `personal-info` | 查询或更新个人资料设置；更新返回服务端反馈或回读确认 |
-| `change-password` | 修改教务密码；遵循教务端复杂度规则，写入需要 `--yes`，并以服务端成功反馈确认 |
-| `graduation-conclusion` | 毕业结论、学位结论和学生基本信息 |
-| `graduation-info-check` | 毕业生核对信息和当前核对时间状态 |
-| `classrooms`, `selections`, `course-selection`, `preselection`, `special-course-query`, `social-exam-registration`, `make-up-exam-registration`, `summer-remedial-registration`, `terms`, `semester-start` | 教室、选课、预选课和考试报名信息；预选课支持阶段/课程查询及确认后的预选/退选，跨专业选修使用 `--scope cross-major`，特殊选课查询使用 `--term` 和可选 `--special-name`，暑期补修可用 `--batch` 查询具体批次 |
-| `lab-booking`, `open-lab-booking` | 实验预约课程、开放实验项目及已选开放实验查询；按学期和关键词筛选，返回真实预约/退选入口 |
-| `training-plan` | 培养方案执行计划课程 |
-| `training-progress` | 培养方案课程完成情况和学分汇总 |
-| `deferred-exam-applications` | 按学期、缓考活动、课程和审核状态查询缓考申请记录 |
-| `enrollment-proof-applications` | 查询学生在读证明申请记录 |
-| `teaching-calendar` | 查询指定学期的教学周历 |
-| `exempt-exam-applications` | 按学期、课程和考试方式查询免考申请记录 |
-| `deferred-exam-registration` | 查询缓考报名窗口、资格状态和已有记录 |
-| `graduate-exam-registration` | 查询毕业生插考项目、报名资格状态和已有记录 |
-| `grade-recognition-applications` | 查询成绩认定申请的课程、原成绩和审核状态 |
-| `grade-confirmation` | 查询成绩确认当前时间窗口和状态 |
-| `class-changes` | 查询调停课的调前/调后时间、地点、周次和状态 |
-| `enrollment-status-changes` | 查询原/新学籍、班级、在校状态和异动终审状态 |
-| `drop-course-applications` | 可退课程、课程属性和退课审核状态 |
-| `student-status-changes` | 个人信息修改历史、审核状态和修改说明 |
-| `online-qa` | 在线问答列表、提问和删除；写操作必须 `--yes`，并以服务端反馈及列表回读确认 |
-| `second-class-credits` | 第二课堂学分认定查询 |
-| `second-class-credit-applications` | 第二课堂学分申报及审核状态，包含 `application_id` 和流程详情路径 |
-| `second-class-credit-application --id` | 查看申报项目获得时间、审核历史和认定历史 |
-| `status-warnings` | 学籍预警及处理结果 |
-| `announcements` | 已收公告及详情路径 |
-| `announcement --id` | 查看单条公告正文 |
-| `messages` | 已收留言及详情路径 |
-| `message --id` | 查看单条留言正文 |
-| `message reply --id --content --yes` | 回复单条留言，并验证服务端成功反馈 |
-| `retake-courses` | 重修报名可报课程、资格和缴费状态 |
-| `textbooks` | 教材列表、账目和选订/退订 |
-| `staff-record` | 教职工人事档案预约（个人/单位）及介绍信上传 |
-| `sunshine` | 教育阳光服务诉求提交/查询、详情、部门、统计和短信验证 |
-| `visit-reservation` | 三全育人教育基地入馆预约渠道与说明；线上通过小程序/公众号，线下联系现场工作人员，未发现直接网页提交表单 |
-| `equipment` | 实验室仪器列表、筛选字典、列定义、详情、预约日历、个人资料、我的预约、收藏和取消预约 |
-| `highway-experiment` | 公路工程实验中心设备目录、设备详情和预约须知；未发现独立预约 API |
-| `virtual-lab` | 公路交通虚拟仿真实验中心资源目录、登录后预约入口、在线留言查询/发布、注册、密码找回和证照上传 |
-| `recruitment` | 人才招聘频道、公告、招聘单位、岗位列表和岗位详情 |
-| `professional-learning` | 专业技术人员继续教育课程、分类、通知和课程详情 |
-| `institutional-learning` | 事业单位工作人员继续教育课程、分类、通知和课程详情 |
-| `transport-mobile` | 交通运输工程综合信息登录、个人信息、权限路由、待办、公开字典、答辩、成果增改与提交/审核/驳回/撤回、财务、财务明细增删改、业绩与通知公告增改、留言新建/详情/回复/删除、请假单新建/修改与审批、工作室/房间/工位树、按日考勤和门禁同步、改密及学院业务查询 |
-| `electronic-documents` | 电子成绩单与在校证明登录、文件类型、申请记录和申请/下载 |
-| `campus-network` | 校园网自助服务资料、账单、详单、缴费、套餐和设备 |
-| `campus-card` | 校园卡入口状态；卡务 API 尚未取得可验证响应 |
-| `student-digital-archive` | 学生数字档案个人资料、学业、借阅、消费、上网、表单分类和随手记 |
-| `finance-query` | 智慧财务收费、奖助、减免、退费、缓交、收入和贷款查询 |
-| `undergraduate-admissions` | 本科招生计划、历年分数、艺术类/城南学院分数、录取进程和考生录取结果查询 |
-| `graduate-admissions` | 研究生招生系统登录、密码重置和会话退出；重置必须 `--yes` 并以服务端反馈确认 |
-| `union` | 智慧工会模块、公开分工会/协会目录与详情、角色登录、验证码和会话 |
-| `research` | 科研管理系统科研人员/管理人员登录、验证码和会话 |
-| `mail` | 企业邮箱登录节点、RSA 预登录、验证码和会话 |
-| `fcmg` | fcmg 基础 API 服务状态；业务 schema 需认证，当前未取得公开协议 |
-| `transport-info` | 交通学院综合信息登录、验证码和会话 |
-| `employment` | 云就业公开信息、学生会话、登录及邮箱二次验证（行为验证码需显式提供） |
-| `onlinejudge` | OnlineJudge 账户、资料/TFA、找回密码、头像、题目/竞赛、问答、排行榜、提交和会话 |
-| `transport-lab` | 实验室预约用户/教职工登录、注册、找回密码和会话 |
-| `continuing-platform` | 继续教育信息平台院内/学生/站点用户登录和会话 |
-| `journal` | 交通、社科、自然科学、期刊社、中外公路等期刊主页、卷期、检索、文章页面和新闻 |
-| `mooc` | 本校网络课程目录、课程详情、院系筛选和分页查询 |
-| `quality-system` | 教学质量保障系统配置、登录、听评课和教学质量汇总查询 |
-| `library-remote` | 图书馆远程数据库导航、关键词/学科筛选和资源详情 |
-| `library` | 图书馆馆藏检索、书目详情、馆藏状态、读者资料、借阅/预约/权限及规则查询 |
-| `library-center` | 图书馆个人资料、信用记录、联系方式/密码、空间/座位资源、可用状态、个人预约查询以及预约/取消 |
-| `library-services` | 图书馆服务大厅公开服务目录、关键词筛选和服务详情 |
-| `campus-map` | 校园地图校区、公共点分类/详情、地点搜索和航拍/全景资源 |
-| `evaluation` | 学生评价批次、课程和保存/提交 |
-| `vpn` | VPN 登录、状态、退出、工作台/分组、申请、设备、会话、消息和文件 |
-| `teaching` | 网络教学平台课程、公开通知、课程详情、课程顺序和密码找回 |
-| `quality` | 教学质量保障系统登录、状态、评价和毕业设计入口 |
-| `ehall` | eHall 当前可用服务、详情、身份、消息、邮箱状态、新闻、评价、服务项收藏和周期提醒 |
-| `service-hall` | 融合服务大厅当前服务目录、分类/部门字典、分页/语义筛选、服务指南、收藏、评价和网络报修表单结构 |
-| `services` | 已映射业务服务及依据 |
-| `official` | 官网公开全文检索、分页结果和文章详情 |
-| `training-platform` | 干部培训与社会培训公开资讯列表、分页和详情 |
-
-更多业务命令可先查看目录：
-
-```bash
-./csust services catalog --json
-./csust official search --keyword 人工智能 --page 1 --json
-./csust official article --id 1299/22951 --json
-./csust training-platform list --category news --page 1 --json
-./csust training-platform detail --id 8001 --json
-./csust teaching catalog --json
-./csust quality catalog --json
-```
-
-一些完整用法示例：
-
-```bash
-# 教材写操作必须显式确认，成功还会回读验证
-./csust textbooks list --json
-./csust textbooks subscribe --index 1 --yes --json
-./csust textbooks unsubscribe --index 1 --yes --json
-
-# 教职工人事档案预约；单位预约的介绍信可在提交前自动上传
-./csust staff-record form --kind personal --json
-./csust staff-record request --kind personal --subject-name 姓名 --birth-date 1980-01-02 --employee-id 工号 --subject-unit 单位 --applicant-name 姓名 --phone 手机 --usage 查阅 --reason 业务办理 --appointment-date 2026-09-15 --captcha 验证码 --yes --json
-
-# VPN 和网络教学
-./csust vpn login --auth cas --password-stdin --json
-./csust vpn login second-auth --method phone --login-number 13800138000 --send-code --yes --json
-./csust vpn login second-auth --method phone --login-number 13800138000 --code CODE --json
-# VPN 忘记密码：先发送验证码，再完成重置
-./csust vpn login reset-password --account 学号 --method phone --login-number 手机号 --send-code --yes --json
-./csust vpn login reset-password --code CODE --new-password-stdin --yes --json <<< '新密码'
-./csust vpn status --json
-./csust vpn apps --tab all --json
-./csust vpn groups --json
-./csust vpn groups create --name 常用 --yes --json
-./csust vpn messages --type approve --read-status unread --json
-./csust vpn approvals --view pending --json
-./csust vpn devices --json
-./csust vpn apply list --search 教务 --json
-./csust vpn apply request --service-id SERVICE_ID --service-name 服务名 --reason 申请原因 --start "2026-09-15 09:00" --end "2026-09-16 18:00" --yes --json
-./csust vpn apply cancel-account --reason 注销原因 --yes --json
-./csust vpn shares --view received --search 文件名 --json
-./csust vpn links --search 文件名 --json
-./csust vpn profile password --current-password-stdin --new-password "$CSUST_VPN_NEW_PASSWORD" --yes --json
-./csust teaching courses --json
-./csust teaching public-notices --keyword 教学 --match fuzzy --json
-./csust teaching public-notice --id NOTICE_ID --json
-./csust teaching password-questions --json
-# 邮箱方式：先发送邮件；邮件中的 code 只作为参数传入，不会被 CLI 输出
-./csust teaching password-reset --method email --username 用户名 --email user@example.com --captcha CODE --yes --json
-printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --method email --code MAIL_CODE --password-stdin --yes --json
-# 密保方式一次完成验证与重置；--password-stdin 读取两行新密码和确认密码
-printf '%s\n%s\n' 'Abc#1234' 'Abc#1234' | ./csust teaching password-reset --method question --username 用户名 --question-one '你高中班主任的名字' --answer-one 答案1 --question-two '你最喜欢的品牌名字' --answer-two 答案2 --question-three '你最喜欢的一门课程' --answer-three 答案3 --captcha CODE --password-stdin --yes --json
-./csust quality status --json
-
-./csust ehall services --json
-./csust ehall service --id SERVICE_ID --json
-./csust ehall health --id SERVICE_ID --json
-./csust service-hall categories --json
-./csust service-hall departments --category-id 117 --json
-./csust service-hall services --page 1 --page-size 12 --keyword 教务 --category 教务教学 --department 教务处 --json
-./csust service-hall guide --id GUIDE_ID --json
-./csust service-hall favorite --service-id APP_ID --yes --json
-./csust service-hall rating --service-id APP_ID --page 1 --page-size 5 --json
-./csust service-hall rate --service-id APP_ID --rating 5 --comment 满意 --yes --json
-./csust service-hall network-repair schema --json
-./csust service-hall login --auth sso --password-stdin --json
-
-./csust ehall me --json
-./csust ehall favorites --json
-./csust ehall service-item-favorites --json
-./csust ehall service-item-favorite add --item-id ITEM_ID --yes --json
-./csust ehall service-item-favorite remove --item-id ITEM_ID --yes --json
-./csust ehall message-count --json
-./csust ehall notifications --json
-./csust ehall service-cycles --json
-./csust ehall mail-status --json
-./csust ehall news --channel 教务 --page 1 --json
-./csust ehall rating --id SERVICE_ID --page 1 --page-size 10 --json
-./csust ehall favorite add --service-id SERVICE_ID --yes --json
-./csust ehall favorite remove --service-id SERVICE_ID --yes --json
-
-# 语义化业务服务
-./csust journal home --journal transport --json
-./csust journal issue --journal transport --volume 42 --issue 3 --json
-./csust journal search --journal transport --query 软岩 --page-size 20 --json
-./csust journal search --journal highway --query 长沙 --json
-./csust journal news-search --journal qk --query 交通 --page-size 20 --json
-./csust journal news --journal qk --id 20260625163342001 --json
-./csust journal article --journal highway-legacy --volume 43 --issue 1 --article 88 --json
-./csust undergraduate-admissions plans --province 湖南 --year 2026 --category 物理类 --type 普通类 --json
-./csust undergraduate-admissions arts-scores --year 2024 --json
-./csust undergraduate-admissions chengnan-scores --year 2023 --json
-./csust union catalog --json
-./csust research status --json
-./csust transport-info status --json
-./csust mail status --json
-./csust mail login --username 邮箱账号 --password-stdin --json
-./csust transport-lab catalog --json
-./csust transport-lab login --role user --phone 手机号 --password-stdin --captcha 验证码 --json
-./csust continuing-platform catalog --json
-./csust employment list --kind career --json
-./csust onlinejudge login --username 用户名 --password-stdin --insecure --json
-# 账号启用 TFA 时追加 --tfa-code-stdin，或设置 CSUST_ONLINEJUDGE_TFA_CODE
-./csust onlinejudge problems --limit 20 --json
-./csust onlinejudge contest-problems --contest-id CONTEST_ID --json
-./csust onlinejudge questions --problem-id PROBLEM_ID --json
-./csust onlinejudge rank --rule acm --page 1 --limit 30 --json
-./csust onlinejudge profile --json
-# TFA 二维码只保存到文件；启用/停用需要当前一次性验证码，并显式确认
-./csust onlinejudge tfa-setup --output ~/.cache/csust-onlinejudge-tfa.png --json
-./csust onlinejudge tfa-enable --code-stdin --yes --json <<< '一次性验证码'
-./csust onlinejudge captcha --output ~/.cache/csust-onlinejudge-captcha.png --json
-./csust onlinejudge password-reset-request --email user@example.com --captcha 验证码 --yes --json
-./csust onlinejudge password-reset --token 邮件令牌 --captcha 验证码 --new-password-stdin --password-confirm-stdin --yes --json <<< $'新密码\n新密码'
-./csust onlinejudge avatar-upload --file avatar.png --yes --json
-./csust onlinejudge submit --problem-id PROBLEM_ID --language C++ --code @main.cpp --yes --insecure --json
-./csust sunshine issues --status 受理中 --json
-./csust sunshine stats --json
-# 发送诉求短信验证码是远端写操作，需要显式确认
-./csust sunshine send-code --phone 手机号 --yes --json
-# 匿名提交建议/投诉：先发送验证码，再提交并回读详情确认
-./csust sunshine suggestion --title 操场分区建议 --department 信息化处 --content '请说明校区、具体事由和希望的处理方式，内容至少二十个字符。' --reporter 姓名 --phone 手机号 --email user@example.com --role student --code 验证码 --expected-date 2026-09-20 --yes --json
-# 可选附件：追加 --attachment ./说明.pdf；当前远端配置最多 1 个、10 MiB
-./csust equipment filters --json
-./csust equipment list --keyword 压力 --department-id 118 --page-size 20 --json
-./csust equipment detail --id 20180390SB --json
-./csust equipment availability --id 20180390SB --date 2026-09-14 --json
-./csust equipment profile --json
-./csust equipment reservations --status pending --json
-./csust equipment favorites --json
-./csust equipment favorite --id 20180390SB --yes --json
-./csust equipment cancel --id RESERVATION_ID --yes --json
-# 公路工程实验中心：公开设备目录、详情和预约须知（只读）
-./csust highway-experiment resources --category 土工类 --keyword 三轴 --json
-./csust highway-experiment resource --id 50 --json
-./csust highway-experiment booking-info --json
-# 人才招聘：频道、公告、单位筛选、岗位和岗位详情
-./csust recruitment home --json
-./csust recruitment notices --channel faculty --page 1 --json
-./csust recruitment filters --channel postdoc --json
-./csust recruitment positions --channel faculty --unit 交通学院 --keyword 教学科研 --json
-./csust recruitment position --channel faculty --id POSITION_ID --json
-# 继续教育：课程筛选、分类、详情和通知（默认只读）
-./csust professional-learning courses --kind professional --keyword 建筑 --page-size 20 --json
-./csust professional-learning categories --json
-./csust professional-learning course --code COURSE_CODE --json
-./csust professional-learning notices --json
-./csust professional-learning notice --id NOTICE_ID --json
-./csust institutional-learning courses --kind public --year 2026 --json
-# 交通运输工程综合信息：登录后保存令牌并验证身份，再查询待办、字典、答辩、财务项目和财务明细
-./csust transport-mobile login --username 工号 --password-stdin --json
-./csust transport-mobile change-password --current-password-stdin --new-password-stdin --password-confirm 新密码 --yes --json
-./csust transport-mobile profile --json
-./csust transport-mobile pending --json
-./csust transport-mobile routes --json
-./csust transport-mobile dictionaries --code Finance.Type --json
-./csust transport-mobile defenses --keyword 博士 --page-size 20 --json
-./csust transport-mobile finances --keyword 科研 --json
-./csust transport-mobile finance-items --keyword 差旅 --json
-./csust transport-mobile finance-item --id FINANCE_ITEM_ID --json
-./csust transport-mobile finance-item-create --project-id FINANCE_PROJECT_ID --money 100 --direction expense --type TYPE --remark 备注 --yes --json
-./csust transport-mobile finance-item-update --id FINANCE_ITEM_ID --money 100 --direction expense --remark 修改后的备注 --yes --json
-./csust transport-mobile finance-item-delete --id FINANCE_ITEM_ID --yes --json
-./csust transport-mobile finance-export --id FINANCE_PROJECT_ID --output ./finance-project.xlsx --json
-./csust transport-mobile defense-export --id DEFENSE_ID --output ./defense.xlsx --json
-./csust transport-mobile defense-batch-export --id DEFENSE_ID_1 --id DEFENSE_ID_2 --output ./defenses.xlsx --json
-./csust transport-mobile achievements --keyword 论文 --json
-./csust transport-mobile achievement --id ACHIEVEMENT_ID --json
-./csust transport-mobile achievement-create --type paper --name 论文题目 --student-no STUDENT_NO --student-name 学生姓名 --journal 期刊名称 --index SCI --completed-at 2026-09-12 --file-id FILE_ID --yes --json
-./csust transport-mobile achievement-update --id ACHIEVEMENT_ID --remark 修改后的备注 --yes --json
-./csust transport-mobile achievement-status --id ACHIEVEMENT_ID --action submit --yes --json
-./csust transport-mobile kpi-create --owner-id USER_ID --year 2026 --type 本科教学 --block J1 --name 课堂教学 --score 3.5 --yes --json
-./csust transport-mobile kpi-update --id KPI_ID --score 4 --remark 修改后的备注 --yes --json
-./csust transport-mobile notices --keyword 评审 --json
-./csust transport-mobile notice-create --title 学院通知 --type 学院通知 --content 通知正文 --public --yes --json
-./csust transport-mobile notice-update --id NOTICE_ID --title 修改后的标题 --content 修改后的正文 --yes --json
-./csust transport-mobile vacations --page-size 20 --json
-./csust transport-mobile vacation-create --from 2026-09-15 --to 2026-09-16 --type 出差 --reason 项目调研 --yes --json
-./csust transport-mobile vacation-update --id VACATION_ID --reason 修改后的事由 --yes --json
-./csust transport-mobile workflow-action --id WORKFLOW_ID --action approve --reason 同意 --yes --json
-./csust transport-mobile note --id NOTE_ID --json
-./csust transport-mobile note-create --recipient-id USER_ID --content 消息内容 --yes --json
-./csust transport-mobile note-reply --id NOTE_ID --content 回复内容 --yes --json
-./csust transport-mobile note-delete --id NOTE_ID --message-id MESSAGE_ID --yes --json
-# 电子成绩单与在校证明：CAS 登录后查询类型、申请记录，并申请下载或发送到邮箱
-./csust electronic-documents login --auth sso --password-stdin --json
-./csust electronic-documents types --json
-./csust electronic-documents applications --kind transcript --json
-./csust electronic-documents apply --type chinese-transcript --delivery download --output ./transcript.pdf --yes --json
-# 校园网自助服务：资料、账单、详单、在线设备和套餐选项
-./csust campus-network profile --json
-./csust campus-network bills --year 2026 --json
-./csust campus-network usage --from 2026-09-01 --to 2026-09-12 --json
-./csust campus-network online --json
-./csust campus-network package-options --json
-# 学生数字档案：CAS 登录后读取个人、学业、借阅、消费、上网和随手记
-./csust student-digital-archive profile --json
-./csust student-digital-archive overview --json
-./csust student-digital-archive grades --json
-./csust student-digital-archive schedule --term 2025-2026-1 --json
-./csust student-digital-archive notes --json
-# 学籍档案：公开查询档案去向/快递单号；支持统招/继续教育预约、材料上传和会员会话
-./csust student-record trace --name 姓名 --student-id 学号 --json
-./csust student-record form --record-type continuing --json
-./csust student-record request --record-type continuing --type personal --name 姓名 --id-card 身份证号 --phone 手机 --school csust --education-type correspondence --education 本科 --enroll 2020-09 --graduate 2022-06 --major 专业 --exam-site 湖南 --recipient-phone 收件手机 --recipient-email 收件邮箱 --purpose 求职 --content 成绩单 --captcha 验证码 --yes --json
-./csust student-record login --username 用户名 --password-stdin --captcha 验证码 --json
-./csust student-record logout --yes --json
-# 学生/综合档案：登录后读取个人档案目录、卷内附件并下载文件
-./csust archive person-archive --system student --person-id PERSON_ID --json
-./csust archive attachments --system student --volume-id VOLUME_ID --format pdf --json
-./csust archive download --system student --file-id FILE_ID --output ./archive.pdf --json
-# 智慧财务：收费、奖助、退费和工资/收入等查询
-./csust finance-query overview --json
-./csust finance-query fees --status unpaid --json
-./csust finance-query fee-details --page-size 100 --json
-./csust finance-query aid --json
-./csust finance-query income --year 2026 --json
-./csust finance-query unconfirmed-loans --json
-# 图书馆远程资源：公开数据库目录、关键词/学科筛选和详情
-./csust library-remote databases --keyword 知网 --sort visits --json
-./csust library-remote databases --subject 工学 --json
-./csust library-remote database --id 1 --json
-# 图书馆服务大厅：公开服务目录、关键词筛选和服务详情
-./csust library-services list --keyword 查新 --json
-./csust library-services service --id SERVICE_ID --json
-# 图书馆馆藏：检索、书目详情和馆藏/可借状态
-./csust library search --query 人工智能 --field title --in-library --json
-./csust library book --id 91103 --json
-./csust library holdings --id 91103 --json
-# 图书馆 OPAC 个人业务：CAS 登录后复用会话查询读者资料、借阅、预约、权限和规则
-./csust library-catalog login --auth sso --password-stdin --json
-./csust library-catalog profile --json
-./csust library-catalog loans --json
-./csust library-catalog loan-history --from 2026-01-01 --to 2026-09-12 --json
-./csust library-catalog reservations --json
-./csust library-catalog privileges --json
-./csust library-catalog loan-rule --id 15C150 --json
-# 图书馆空间/座位：先登录，再查资源、状态和个人预约；写操作显式确认并回读
-./csust library-center login --auth sso --password-stdin --json
-./csust library-center resources --json
-./csust library-center profile --json
-./csust library-center credit-history --status history --days 90 --json
-./csust library-center availability --resource 座位 --room 阅览室一B205 --date 2026-09-15 --from 09:00 --to 10:00 --json
-./csust library-center reservations --json
-./csust library-center update-contact --email user@example.com --notify false --yes --json
-CSUST_LIBRARY_CURRENT_PASSWORD=old CSUST_LIBRARY_NEW_PASSWORD=new ./csust library-center change-password --yes --json
-./csust library-center reserve --resource 座位 --room 阅览室一B205 --item B205-001 --date 2026-09-15 --from 09:00 --to 10:00 --yes --json
-./csust library-center cancel --id RESERVATION_ID --yes --json
-# MOOC：本校课程、院系筛选和排序
-./csust mooc courses --keyword 结构 --department 土木与环境工程学院 --sort views --json
-./csust mooc course --id COURSE_ID --json
-./csust mooc departments --json
-# 教学质量保障系统：读取公开配置、登录并回读当前用户
-./csust quality-system config --json
-CSUST_QUALITY_SYSTEM_PASSWORD='密码' ./csust quality-system login --username 工号 --json
-./csust quality-system profile --json
-./csust quality-system dashboard --json
-./csust quality-system semesters --json
-./csust quality-system tasks --semester 2026-2027-1 --page-size 20 --json
-./csust quality-system results --semester 2026-2027-1 --json
-./csust quality-system improvements --semester 2026-2027-1 --json
-# 校园地图：校区、公共点分类/详情、地点搜索和全景资源
-./csust campus-map zones --json
-./csust campus-map types --campus 云塘 --json
-./csust campus-map points --campus 云塘 --type 停车场 --json
-./csust campus-map search --campus 云塘 --keyword 图书馆 --json
-./csust campus-map point --id 1 --json
-./csust campus-map panoramas --campus 云塘 --kind panorama --json
-
-```
-
-## 认证与会话
-
-会话文件由 adapter 管理并尽量以 `600` 权限保存。默认位置如下：
-
-- 教务：`~/.config/csust-cli/cookies.txt`
-- 多数业务服务：`~/.config/csust-cli/sites/<host>.cookies.txt`
-- VPN：`~/.config/csust-cli/vpn-cookies.txt` 和 `~/.config/csust-cli/vpn-session.json`
-- `teaching` 和 `quality`：复用 VPN 的认证会话，并动态解析服务网关
-
-可用以下方式覆盖默认配置：
-
-- `CSUST_COOKIE_FILE`：教务 Cookie 文件
-- `CSUST_BASE_URL`：部分传统业务适配器的基地址，适合测试或受控环境
-- `CSUST_ENV_FILE`：替代默认 `.env` 文件
-- `CSUST_VPN_BASE_URL`、`CSUST_VPN_COOKIE_FILE`、`CSUST_VPN_SESSION_FILE`：VPN 会话配置
-- `CSUST_VPN_CURRENT_PASSWORD`、`CSUST_VPN_NEW_PASSWORD`：VPN 修改密码时的密码来源
-- 支持 `--cookie-file` 的业务命令可使用独立会话文件
-
-验证码不会自动依赖 Python 或 OCR。命令会保存验证码图片并返回 `captcha_required`，随后使用 `--captcha` 重试；可用 `--captcha-image` 指定图片位置。不同业务的密码环境变量也不同，命令缺少密码时会明确提示所需变量或 `--password-stdin`。
+会话和配置默认保存在 `~/.config/csust-cli/` 下；`CSUST_COOKIE_FILE`、`CSUST_ENV_FILE`、`CSUST_BASE_URL` 以及 `CSUST_VPN_*` 可用于受控环境、测试或独立会话。专用业务的其他凭据变量请以该命令的帮助为准。会话文件等同于凭据，不要提交、分享或放入问题报告。
 
 ## 输出与写操作
 
-使用 `--json` 获取机器可读结果；它可以放在命令的任意位置。成功结果和错误结果都遵循统一字段：
+使用 `--json` 获取机器可读结果。常用公共字段如下：
 
 ```json
 {
@@ -511,41 +95,40 @@ CSUST_QUALITY_SYSTEM_PASSWORD='密码' ./csust quality-system login --username �
 }
 ```
 
-- `submitted` 表示是否已经发送写请求，不等于服务端处理成功。
-- `confirmed` 表示是否取得了业务成功证据；只有得到响应信号或回读验证，写操作才会报告确认成功。
-- `evidence` 说明判定依据；低置信度页面会同时提供具体 `confidence_evidence`。
-- 可能修改远端状态的命令需要显式 `--yes`。无法确认的写请求不会自动重试，应先查询状态再决定是否重试。
-- 二进制响应使用 `--output FILE` 保存；输出文件采用临时文件加原子替换，失败时不会覆盖已有目标。
-- 成功退出码为 `0`；参数、认证、网络、业务或未确认写操作退出码为 `2`。
+- `ok` 表示本次 CLI 流程是否完成；待续流程还要查看 `pending` 和 `next`。
+- `submitted` 表示是否已经发出可能改变远端状态的请求，不表示写入成功。
+- `confirmed` 表示是否取得服务成功信号或回读证据；写操作不要只看 `ok`。
+- `evidence` 说明判定依据。出现 `mutation_unverified` 时先回读状态，不要自动重试。
+- 会修改远端数据的业务操作需要显式 `--yes`；文件响应使用 `--output FILE`。
+
+成功退出码为 `0`，参数、认证、网络、业务或未确认写操作通常以 `2` 退出。对于报名、预约、缴费、删除、撤回、审批和密码修改等操作，请按 [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md) 的状态规则处理。
 
 ## 开发与贡献
 
-代码按适配边界组织：
+项目的长期约定是：公共命令表达业务语义，协议差异留在 adapter；能通过协议完成的能力不退回浏览器自动化；写操作必须有明确、可验证的成功判定。新增能力前请先阅读：
 
-- [`main.go`](main.go)：Go CLI 入口、全局 JSON 处理和退出码
-- [`internal/adapter`](internal/adapter)：教务、VPN、网关、业务服务和底层协议适配器
-- [`internal/contract`](internal/contract)：统一结果模型和置信度/写操作判定
-- [`AGENTS.md`](AGENTS.md)：项目需求、架构边界和功能完成标准
-- [`.github/workflows/tests.yml`](.github/workflows/tests.yml)：持续集成检查
+- [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md)：调用者和智能体的使用边界
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：设计原因、适配边界和服务变化排查顺序
+- [`AGENTS.md`](AGENTS.md)：项目需求、探索优先级和完成标准
 
-提交修改前运行完整本地检查：
+提交修改前运行：
 
 ```bash
 go test ./...
 go vet ./...
 go build ./...
 go run . --help
+git diff --check
 ```
 
-测试使用本地 HTTP 测试服务和模拟响应，不需要提交学校账户数据。请在 Issue 中说明复现命令和服务范围；Pull Request 应保持 adapter 与业务命令边界清晰，并同步更新面向用户的命令说明。
+测试使用本地模拟服务，不需要真实账号或学校在线状态。问题反馈请附上脱敏后的命令、服务名、网络/登录前提、JSON 中的 `code` 与 `evidence`，不要附带密码、Token、Cookie、验证码原图或会话文件。
 
 维护者：[@notCorwin](https://github.com/notCorwin)。
 
 ## 获取帮助
 
-- 首先运行 `./csust --help`，再使用 `services catalog`、`teaching catalog` 或 `quality catalog` 查看当前能力目录。
-- 阅读 [`AGENTS.md`](AGENTS.md) 了解项目约束和验证要求。
-- 报告问题或提交功能建议：[GitHub Issues](https://github.com/notCorwin/csust-cli/issues)。
-- 查看自动化检查：[GitHub Actions](https://github.com/notCorwin/csust-cli/actions)。
-
-学校页面、接口和认证流程可能变化；目录表示已映射能力，不代表每个端点都在当前网络环境中完成线上验收。涉及账号写入的操作请始终检查 `confirmed` 和 `evidence`。
+- 运行 `./csust --help` 查看当前版本的命令语法。
+- 运行 `./csust services catalog --json` 查看当前服务入口及探测证据。
+- 阅读 [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md) 处理认证、待续状态和写操作。
+- 在 [GitHub Issues](https://github.com/notCorwin/csust-cli/issues) 报告问题或提出功能建议。
+- 在 [GitHub Actions](https://github.com/notCorwin/csust-cli/actions) 查看自动化检查。
